@@ -157,8 +157,9 @@ class ScriptRunner:
                     self.active -= 1
         except asyncio.CancelledError:
             raise
-        except Exception:
-            return _failure("internal", started)
+        except Exception as exc:
+            # The exception text goes to stderr so the monitor can report it (a `system` log event).
+            return _failure("internal", started, stderr=repr(exc))
 
     async def _run(
         self, path: Path, expected_sha256: str, timeout_sec: float, env: Mapping[str, str]
@@ -264,13 +265,13 @@ def _ms_since(started: float) -> int:
     return int((time.perf_counter() - started) * 1000)
 
 
-def _failure(error: str, started: float, actual_sha256: str | None = None) -> ScriptResult:
+def _failure(error: str, started: float, actual_sha256: str | None = None, stderr: str = "") -> ScriptResult:
     return ScriptResult(
         status="error",
         exit_code=None,
         duration_ms=_ms_since(started),
         stdout="",
-        stderr="",
+        stderr=stderr,
         stdout_truncated=False,
         stderr_truncated=False,
         killed=0,

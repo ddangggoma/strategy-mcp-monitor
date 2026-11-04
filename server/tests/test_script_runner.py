@@ -228,6 +228,7 @@ async def test_internal_error_before_spawn_is_result(tmp_path, monkeypatch):
     runner = ScriptRunner()
     r = await run(runner, p, sha)
     assert (r.status, r.error, r.exit_code) == ("error", "internal", None) and runner.active == 0
+    assert r.stderr == "RuntimeError('bug')"  # the detail the monitor logs as a system event
     monkeypatch.undo()
     assert (await run(runner, p, sha)).status == "ok"  # lock and slot were released
 

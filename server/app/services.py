@@ -10,6 +10,13 @@ from app.auth.sessions import SessionStore
 from app.clock import Clock, SystemClock
 from app.db import Database
 from app.logstore.writer import DailyJsonlWriter, LogWriter
+from app.monitor.bus import BoardBus
+from app.monitor.history import McpHistory
+from app.monitor.probes import Prober
+from app.monitor.runner import ScriptRunner
+from app.monitor.scripts import ScriptStore
+from app.monitor.store import McpStore
+from app.monitor.supervisor import Monitor, ProberLike, ScriptRunnerLike
 from app.paths import AppPaths
 from app.settings.store import SettingsStore
 from app.users.store import UserStore
@@ -28,6 +35,11 @@ class Services:
     sessions: SessionStore
     log: LogWriter
     audit: AuditLogger
+    mcps: McpStore
+    scripts: ScriptStore
+    history: McpHistory
+    bus: BoardBus
+    monitor: Monitor
 
 
 def _load_or_create_otp_secret(db: Database) -> bytes:
@@ -49,8 +61,10 @@ def build_services(
     clock: Clock | None = None,
     otp_provider: OtpProvider | None = None,
     dev_fixed_code: str | None = None,
+    runner: ScriptRunnerLike | None = None,
+    prober: ProberLike | None = None,
 ) -> Services:
-    """Wire all backend services. Does not start the log writer (serve() / fixtures do)."""
+    """Wire all backend services. Starts neither the log writer nor the monitor (serve() / fixtures do)."""
     paths = AppPaths(Path(root))
     paths.ensure()
     db = Database(paths.db_path)
@@ -62,14 +76,35 @@ def build_services(
         db, users, provider, clock, _load_or_create_otp_secret(db), dev_fixed_code=dev_fixed_code
     )
     log = LogWriter(DailyJsonlWriter(paths.logs_dir), clock)
+    settings = SettingsStore(db)
+    mcps = McpStore(db, clock, users)
+    scripts = ScriptStore(db, paths, clock, mcps)
+    history = McpHistory(db, clock)
+    bus = BoardBus()
+    monitor = Monitor(
+        mcps=mcps,
+        scripts=scripts,
+        history=history,
+        settings=settings,
+        runner=runner if runner is not None else ScriptRunner(),
+        prober=prober if prober is not None else Prober(clock),
+        log=log,
+        bus=bus,
+        clock=clock,
+    )
     return Services(
         paths=paths,
         db=db,
         clock=clock,
-        settings=SettingsStore(db),
+        settings=settings,
         users=users,
         otp=otp,
         sessions=SessionStore(db, clock),
         log=log,
         audit=AuditLogger(log),
+        mcps=mcps,
+        scripts=scripts,
+        history=history,
+        bus=bus,
+        monitor=monitor,
     )

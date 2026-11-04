@@ -70,15 +70,19 @@ async def serve(root: Path, local_port: int = 8700, external_port: int = 8701) -
     services = build_services(root)
     await services.log.start()
     try:
-        configs = server_configs(
-            create_app("local", services),
-            create_app("external", services),
-            local_port,
-            external_port,
-        )
-        servers = [_Server(cfg) for cfg in configs]
-        with _stop_on_signals(servers):
-            await asyncio.gather(*(s.serve() for s in servers))
+        await services.monitor.start()
+        try:
+            configs = server_configs(
+                create_app("local", services),
+                create_app("external", services),
+                local_port,
+                external_port,
+            )
+            servers = [_Server(cfg) for cfg in configs]
+            with _stop_on_signals(servers):
+                await asyncio.gather(*(s.serve() for s in servers))
+        finally:
+            await services.monitor.stop()
     finally:
         await services.log.stop()
         services.db.close()

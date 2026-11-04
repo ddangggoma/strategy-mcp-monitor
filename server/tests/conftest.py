@@ -8,7 +8,7 @@ from app.db import Database
 from app.paths import AppPaths
 from app.services import build_services
 from app.web.app_factory import create_app
-from tests.fakes import CapturingOtpProvider, FakeClock
+from tests.fakes import CapturingOtpProvider, FakeClock, FakeProber, FakeRunner
 
 
 @pytest.fixture
@@ -33,9 +33,13 @@ def db(paths):
 
 @pytest_asyncio.fixture
 async def services(tmp_path, clock):
-    svc = build_services(tmp_path, clock=clock, otp_provider=CapturingOtpProvider())
+    svc = build_services(
+        tmp_path, clock=clock, otp_provider=CapturingOtpProvider(),
+        runner=FakeRunner(), prober=FakeProber(clock),
+    )
     await svc.log.start()
     yield svc
+    await svc.monitor.stop()
     await svc.log.stop()
     svc.db.close()
 
