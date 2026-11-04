@@ -94,19 +94,25 @@ async def test_batch_dropped_after_second_failure(paths, clock, capsys):
     assert [r["n"] for r in read(paths, "2026-11-04")] == [2]
 
 
-async def wait_for_rows(paths, day, count, timeout=2.0):
-    """Poll (bounded) until the day's file holds at least `count` complete lines."""
+async def wait_for_rows(paths, day, count, timeout=2.0, until=None):
+    """Poll (bounded) until the day's file holds at least `count` complete lines.
+
+    Only "\\n"-terminated lines are parsed: a partially written last line is ignored.
+    If `until` is given, also wait until `until(rows)` is true.
+    """
     path = paths.logs_dir / f"{day}.jsonl"
     deadline = asyncio.get_running_loop().time() + timeout
     while asyncio.get_running_loop().time() < deadline:
         try:
-            rows = path.read_text("utf-8").splitlines()
+            lines = path.read_text("utf-8").split("\n")[:-1]  # drop the unterminated tail
         except OSError:
-            rows = []
-        if len(rows) >= count:
-            return [json.loads(l) for l in rows]
+            lines = []
+        if len(lines) >= count:
+            rows = [json.loads(l) for l in lines]
+            if until is None or until(rows):
+                return rows
         await asyncio.sleep(0.01)
-    raise AssertionError(f"{path.name}: fewer than {count} rows within {timeout}s")
+    raise AssertionError(f"{path.name}: condition not met within {timeout}s")
 
 
 async def test_periodic_flush_without_flush_call(paths, clock):
@@ -152,7 +158,9 @@ async def test_background_loop_survives_write_failure(paths, clock, capsys):
         logs.unlink()
         logs.mkdir()
         lw.emit("system", n=2)
-        rows = await wait_for_rows(paths, "2026-11-04", 1)
+        rows = await wait_for_rows(
+            paths, "2026-11-04", 1, until=lambda rows: 2 in [r["n"] for r in rows]
+        )
         assert 2 in [r["n"] for r in rows]
         assert not lw._task.done()
     finally:
