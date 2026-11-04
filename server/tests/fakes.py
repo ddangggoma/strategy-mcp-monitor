@@ -12,3 +12,13 @@ class FakeClock:
 
     def advance(self, seconds: float) -> None:
         self._now += timedelta(seconds=seconds)
+
+
+class CapturingOtpProvider:
+    """Test OTP provider that records (email, code) pairs instead of delivering."""
+
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, str]] = []
+
+    def send(self, email: str, code: str) -> None:
+        self.sent.append((email, code))
