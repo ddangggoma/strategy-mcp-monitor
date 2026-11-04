@@ -18,6 +18,8 @@ def test_update_persists(db):
     {"log_retention_days": 6}, {"log_retention_days": 3651},
     {"log_retention_days": 20, "log_compress_after_days": 21},
     {"service_start_type": "boot"}, {"unknown_key": 1},
+    {"ping_interval_sec": True}, {"ping_interval_sec": "5"},
+    {"ping_interval_sec": 5.0}, {"service_start_type": 1},
 ])
 def test_update_rejects(db, patch):
     with pytest.raises(ValidationError):

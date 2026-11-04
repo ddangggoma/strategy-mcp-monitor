@@ -11,7 +11,7 @@ _KEY = "global"
 
 
 class Settings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     ping_interval_sec: int = Field(default=5, ge=1, le=300)
     issue_check_interval_sec: int = Field(default=10, ge=5, le=60)
