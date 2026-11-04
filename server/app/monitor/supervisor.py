@@ -503,6 +503,10 @@ class Monitor:
             "running": snap.running.kind if snap.running else None,
         }
 
+    def board_snapshot(self) -> dict[str, Any]:
+        """The whole board as the API serves it (GET /api/board and the first SSE event)."""
+        return {"now": to_kst_iso(self._clock.now()), "mcps": self.board()}
+
     def board(self) -> list[dict[str, Any]]:
         order = sorted(self._config.values(), key=lambda m: (m.config.name.casefold(), m.id))
         return [item for m in order if (item := self.board_item(m.id)) is not None]

@@ -6,11 +6,16 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 MAX_STREAMS = 100
+MAX_STREAMS_PER_IP = 5
 MAX_PENDING_EVENTS = 100
 
 
 class StreamLimitError(Exception):
-    pass
+    """The global stream cap is reached."""
+
+
+class IpStreamLimitError(StreamLimitError):
+    """One client address already holds its maximum number of streams."""
 
 
 @dataclass(eq=False)
@@ -18,6 +23,7 @@ class Subscription:
     """One SSE consumer. ``authed`` is fixed at subscribe time and gates non-public events."""
 
     authed: bool = False
+    ip: str | None = None
     dirty: set[int] = field(default_factory=set)
     events: deque[tuple[str, dict]] = field(
         default_factory=lambda: deque(maxlen=MAX_PENDING_EVENTS)
@@ -33,18 +39,25 @@ class BoardBus:
     Call from the event-loop thread only.
     """
 
-    def __init__(self, max_streams: int = MAX_STREAMS) -> None:
+    def __init__(self, max_streams: int = MAX_STREAMS, max_per_ip: int = MAX_STREAMS_PER_IP) -> None:
         self._max_streams = max_streams
+        self._max_per_ip = max_per_ip
         self._subs: list[Subscription] = []
 
     @property
     def subscriber_count(self) -> int:
         return len(self._subs)
 
-    def subscribe(self, authed: bool = False) -> Subscription:
+    def check_capacity(self, ip: str | None = None) -> None:
+        """Raise if a subscription for ``ip`` would be refused now (a cheap pre-flight for routes)."""
         if len(self._subs) >= self._max_streams:
             raise StreamLimitError
-        sub = Subscription(authed=authed)
+        if ip is not None and sum(1 for s in self._subs if s.ip == ip) >= self._max_per_ip:
+            raise IpStreamLimitError
+
+    def subscribe(self, authed: bool = False, ip: str | None = None) -> Subscription:
+        self.check_capacity(ip)
+        sub = Subscription(authed=authed, ip=ip)
         self._subs.append(sub)
         return sub
 

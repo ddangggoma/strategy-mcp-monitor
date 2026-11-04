@@ -1,6 +1,6 @@
 import pytest
 
-from app.monitor.bus import BoardBus, StreamLimitError
+from app.monitor.bus import BoardBus, IpStreamLimitError, StreamLimitError
 
 
 def test_dirty_and_events():
@@ -83,3 +83,25 @@ def test_published_payload_is_copied():
     bus.publish("e", data)
     data["a"] = 2
     assert sub.events[0][1] == {"a": 1}
+
+
+def test_per_ip_cap_and_pre_flight_check():
+    bus = BoardBus(max_streams=10, max_per_ip=2)
+    a1, a2 = bus.subscribe(ip="1.1.1.1"), bus.subscribe(ip="1.1.1.1")
+    with pytest.raises(IpStreamLimitError):
+        bus.subscribe(ip="1.1.1.1")
+    with pytest.raises(IpStreamLimitError):
+        bus.check_capacity("1.1.1.1")  # the pre-flight check agrees and adds nothing
+    bus.check_capacity("2.2.2.2"); bus.subscribe(ip="2.2.2.2"); bus.subscribe()  # other addresses / unknown ip unaffected
+    assert bus.subscriber_count == 4
+    bus.unsubscribe(a1)
+    bus.subscribe(ip="1.1.1.1")  # a freed slot is reusable
+    assert issubclass(IpStreamLimitError, StreamLimitError) and a2 in bus._subs
+
+
+def test_global_cap_wins_over_ip_cap():
+    bus = BoardBus(max_streams=1, max_per_ip=5)
+    bus.subscribe(ip="1.1.1.1")
+    with pytest.raises(StreamLimitError) as e:
+        bus.subscribe(ip="2.2.2.2")
+    assert not isinstance(e.value, IpStreamLimitError)

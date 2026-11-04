@@ -11,7 +11,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.services import Services
-from app.web import local_api, shared_api
+from app.web import local_api, mcp_shared, shared_api
 from app.web.channels import Channel
 from app.web.deps import ApiError, api_error_handler
 
@@ -140,6 +140,7 @@ def create_app(channel: Channel, services: Services) -> FastAPI:
     app.add_exception_handler(RequestValidationError, _validation_handler)
     app.add_exception_handler(Exception, _unhandled_handler)
     app.include_router(shared_api.router)
+    app.include_router(mcp_shared.router)
     app.add_middleware(BodySizeLimit)
     if channel == "local":
         app.add_middleware(LocalHostGuard)
