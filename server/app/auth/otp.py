@@ -17,6 +17,8 @@ OTP_MAX_ATTEMPTS = 5
 OTP_RESEND_COOLDOWN_SEC = 60
 OTP_IP_LIMIT = 10
 OTP_IP_WINDOW_SEC = 600
+OTP_VERIFY_IP_LIMIT = 30
+OTP_VERIFY_IP_WINDOW_SEC = 600
 OTP_EMAIL_FAIL_LIMIT = 10
 OTP_EMAIL_FAIL_WINDOW_SEC = 3600
 
@@ -154,19 +156,39 @@ class OtpService:
         if code is not None:
             self.provider.send(email, code)
 
-    def verify(self, email: str, code: str) -> User | None:
+    def _consume_verify_ip_budget(self, ip: str, now: datetime) -> None:
+        """Record this verify attempt for the IP, or raise OtpRateLimitError if it is over budget."""
+        window = timedelta(seconds=OTP_VERIFY_IP_WINDOW_SEC)
+        with self._db.transaction() as conn:
+            conn.execute(
+                "DELETE FROM otp_verify_ip WHERE at <= ?", (to_kst_iso(now - window),)
+            )
+            rows = conn.execute(
+                "SELECT at FROM otp_verify_ip WHERE ip = ?", (ip,)
+            ).fetchall()
+            if len(rows) >= OTP_VERIFY_IP_LIMIT:
+                oldest = min(_parse(r["at"]) for r in rows)
+                raise OtpRateLimitError(_retry_after(oldest + window, now))
+            conn.execute(
+                "INSERT INTO otp_verify_ip (ip, at) VALUES (?, ?)", (ip, to_kst_iso(now))
+            )
+
+    def verify(self, email: str, code: str, ip: str) -> User | None:
         """Return the user on success (the code is consumed), else None.
 
+        Raises OtpRateLimitError, before any other work, when `ip` has used up its
+        verify budget; every other call (success or failure) counts against it.
         Every call against an existing row counts as an attempt, malformed
         codes included; after OTP_MAX_ATTEMPTS the code is invalidated.
         """
+        now = self._clock.now()
+        self._consume_verify_ip_budget(ip, now)
         try:
             email = normalize_email(email)
         except InvalidEmailError:
             return None
         if not code.isascii():
             code = ""  # can never match; still counts as an attempt (and avoids encode errors)
-        now = self._clock.now()
 
         with self._db.transaction() as conn:
             if self._lockout_retry_after(conn, email, now) is not None:

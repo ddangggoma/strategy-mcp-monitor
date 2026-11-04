@@ -23,8 +23,10 @@ router = APIRouter()
 
 
 class BootstrapBody(BaseModel):
-    email: str
-    name: str
+    model_config = ConfigDict(extra="forbid")
+
+    email: str = Field(max_length=320)
+    name: str = Field(max_length=100)
 
 
 @router.get("/api/bootstrap")

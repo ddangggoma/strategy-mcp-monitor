@@ -57,7 +57,32 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX idx_otp_failures_email ON otp_failures(email);
     """,
+    # 3
+    """
+    CREATE TABLE otp_verify_ip (
+        ip TEXT NOT NULL,
+        at TEXT NOT NULL
+    );
+    CREATE INDEX idx_otp_verify_ip_ip ON otp_verify_ip(ip);
+    """,
 ]
+
+
+def split_statements(script: str) -> list[str]:
+    """Split a migration script into complete SQL statements (safe for ';' inside literals/triggers)."""
+    statements: list[str] = []
+    buf = ""
+    for piece in script.split(";"):
+        buf += piece + ";"
+        if sqlite3.complete_statement(buf):  # false inside a literal or an unfinished trigger body
+            stmt = buf.strip()
+            if stmt != ";":  # whitespace after the final ';'
+                statements.append(stmt)
+            buf = ""
+    tail = buf[:-1].strip()  # incomplete remainder (the ';' appended above is not part of it)
+    if tail:
+        statements.append(tail)
+    return statements
 
 
 class Database:
@@ -80,7 +105,12 @@ class Database:
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
-        """BEGIN IMMEDIATE transaction; body must be synchronous (no await), the RLock is thread-owned."""
+        """BEGIN IMMEDIATE transaction on the shared connection.
+
+        Invariants: call only from the event-loop thread (the RLock is thread-owned and
+        the connection is shared), and never ``await`` inside the body - a suspended
+        transaction would stay open while other tasks run on the same connection.
+        """
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
@@ -97,9 +127,8 @@ class Database:
             for version, script in enumerate(MIGRATIONS[current:], start=current + 1):
                 self._conn.execute("BEGIN IMMEDIATE")
                 try:
-                    for stmt in script.split(";"):
-                        if stmt.strip():
-                            self._conn.execute(stmt)
+                    for stmt in split_statements(script):
+                        self._conn.execute(stmt)
                     self._conn.execute(f"PRAGMA user_version = {version}")
                     self._conn.execute("COMMIT")
                 except BaseException:

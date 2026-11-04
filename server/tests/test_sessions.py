@@ -111,3 +111,9 @@ def test_create_unknown_user_raises(db, clock):
     s, _ = setup(db, clock)
     with pytest.raises(sqlite3.IntegrityError):
         s.create(9999, "local", "ip", "ua")
+
+
+def test_csrf_token_not_in_repr(db, clock):
+    s, uid = setup(db, clock); sid, csrf = s.create(uid, "local", "ip", "ua")
+    session = s.get(sid, "local")
+    assert csrf not in repr(session) and "csrf" not in repr(session)

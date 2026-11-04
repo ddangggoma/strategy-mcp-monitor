@@ -82,7 +82,11 @@ class LogWriter:
         self._stopped = False
 
     def emit(self, cat: str, **fields: Any) -> None:
-        """Queue an event stamped with the current time. Never raises, never blocks."""
+        """Queue an event stamped with the current time. Never raises, never blocks.
+
+        Not thread-safe (asyncio.Queue/Event): call only on the event-loop thread. From
+        other threads use ``loop.call_soon_threadsafe(writer.emit, cat, ...)``.
+        """
         try:
             if self._stopped:
                 return

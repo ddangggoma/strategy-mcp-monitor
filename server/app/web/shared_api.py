@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.auth.otp import OtpRateLimitError
 from app.services import Services
@@ -22,12 +22,12 @@ _MAX_AUDIT_EMAIL = 320
 
 
 class OtpRequestBody(BaseModel):
-    email: str
+    email: str = Field(max_length=320)
 
 
 class OtpVerifyBody(BaseModel):
-    email: str
-    code: str
+    email: str = Field(max_length=320)
+    code: str = Field(max_length=16)
 
 
 def _audit_email(raw: str) -> str:
@@ -72,23 +72,37 @@ async def otp_request(
 ) -> dict[str, object]:
     ip = client_ip(request)
     email = _audit_email(body.email)
+    user_agent = request.headers.get("user-agent")
     ok = False
+    rate_limited: OtpRateLimitError | None = None
     try:
         services.otp.request(body.email, ip or "unknown")
         ok = True
     except InvalidEmailError:
         raise ApiError(422, "invalid_email") from None
     except OtpRateLimitError as exc:
-        raise ApiError(429, "rate_limited", {"Retry-After": str(exc.retry_after)}) from None
+        rate_limited = exc
     finally:
-        services.audit.auth(
-            event="otp_request",
-            email=email,
-            channel=channel,
-            ip=ip,
-            user_agent=request.headers.get("user-agent"),
-            ok=ok,
-        )
+        if rate_limited is not None:  # only the first 429 per (event, ip) per window is audited
+            services.audit.auth_rate_limited(
+                event="otp_request",
+                email=email,
+                channel=channel,
+                ip=ip,
+                user_agent=user_agent,
+                now=services.clock.now(),
+            )
+        else:
+            services.audit.auth(
+                event="otp_request",
+                email=email,
+                channel=channel,
+                ip=ip,
+                user_agent=user_agent,
+                ok=ok,
+            )
+    if rate_limited is not None:
+        raise ApiError(429, "rate_limited", {"Retry-After": str(rate_limited.retry_after)})
     return {}
 
 
@@ -109,7 +123,18 @@ async def otp_verify(
             event="login", email=email, channel=channel, ip=ip, user_agent=user_agent, ok=ok
         )
 
-    user = services.otp.verify(body.email, body.code)
+    try:
+        user = services.otp.verify(body.email, body.code, ip or "unknown")
+    except OtpRateLimitError as exc:
+        services.audit.auth_rate_limited(
+            event="login",
+            email=_audit_email(body.email),
+            channel=channel,
+            ip=ip,
+            user_agent=user_agent,
+            now=services.clock.now(),
+        )
+        raise ApiError(429, "rate_limited", {"Retry-After": str(exc.retry_after)}) from None
     if user is None:
         audit_login(_audit_email(body.email), False)
         raise ApiError(401, "login_required")
@@ -153,6 +178,14 @@ async def logout(
 
 @router.get("/api/auth/me")
 async def me(
-    user: User | None = Depends(current_user), channel: Channel = Depends(get_channel)
+    request: Request,
+    user: User | None = Depends(current_user),
+    channel: Channel = Depends(get_channel),
 ) -> dict[str, object]:
-    return {"user": user_json(user) if user is not None else None, "channel": channel}
+    session = getattr(request.state, "auth_session", None) if user is not None else None
+    return {
+        "user": user_json(user) if user is not None else None,
+        "channel": channel,
+        # lets the SPA recover its CSRF token after a page reload (same-origin, session-bound)
+        "csrf_token": session.csrf_token if session is not None else None,
+    }

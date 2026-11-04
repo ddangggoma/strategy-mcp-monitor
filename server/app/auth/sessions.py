@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from app.clock import Clock
@@ -17,7 +17,7 @@ SESSION_IDLE_SEC = 1800
 class AuthSession:
     user_id: int
     channel: Channel
-    csrf_token: str
+    csrf_token: str = field(repr=False)
     created_at: datetime
     last_seen_at: datetime
 

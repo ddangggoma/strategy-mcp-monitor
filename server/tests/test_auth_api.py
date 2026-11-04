@@ -186,7 +186,7 @@ async def test_bootstrap_audited(local_client, services):
 async def test_external_me_and_login(external_client, services):
     services.users.create_first_admin("admin@x.com", "관리자")
     me = (await external_client.get("/api/auth/me")).json()
-    assert me == {"user": None, "channel": "external"}
+    assert me == {"user": None, "channel": "external", "csrf_token": None}
     await login(external_client, services)
     me = (await external_client.get("/api/auth/me")).json()
     assert me["user"]["email"] == "admin@x.com" and me["channel"] == "external"
@@ -251,3 +251,120 @@ async def test_login_does_not_revoke_other_channel_session(local_client, service
     await login(local_client, services)
     assert local_client.cookies["mcpmon_sid"] != ext_sid
     assert services.sessions.get(ext_sid, "external") is not None
+
+
+# --- final review fixes ---
+
+def _auth_lines(services):
+    path = services.paths.logs_dir / "2026-11-04.jsonl"
+    if not path.exists():
+        return []
+    return [e for e in (json.loads(l) for l in path.read_text("utf-8").splitlines()) if e["cat"] == "auth"]
+
+
+async def test_otp_request_overlong_email_422_no_row_no_log(external_client, services):
+    r = await external_client.post("/api/auth/otp/request", json={"email": "a" * 390 + "@x.com"})
+    assert r.status_code == 422 and r.json() == {"error": "validation"}
+    await services.log.flush()
+    assert services.db.query("SELECT * FROM otp_codes") == []
+    assert services.db.query("SELECT * FROM otp_failures") == []
+    assert _auth_lines(services) == []
+
+
+async def test_otp_verify_overlong_inputs_422_no_row_no_log(external_client, services):
+    r = await external_client.post(
+        "/api/auth/otp/verify", json={"email": "a" * 390 + "@x.com", "code": "123456"}
+    )
+    assert r.status_code == 422 and r.json() == {"error": "validation"}
+    r = await external_client.post(
+        "/api/auth/otp/verify", json={"email": "a@x.com", "code": "1" * 17}
+    )
+    assert r.status_code == 422 and r.json() == {"error": "validation"}
+    await services.log.flush()
+    assert services.db.query("SELECT * FROM otp_failures") == []
+    assert _auth_lines(services) == []
+
+
+async def test_bootstrap_body_is_bounded_and_strict(local_client, services):
+    for body in (
+        {"email": "a" * 390 + "@x.com", "name": "n"},
+        {"email": "a@x.com", "name": "n" * 101},
+        {"email": "a@x.com", "name": "n", "role": "developer"},
+    ):
+        r = await local_client.post("/api/bootstrap", json=body)
+        assert r.status_code == 422 and r.json() == {"error": "validation"}
+    assert services.users.count() == 0
+
+
+async def test_verify_ip_limit_429_then_recovers(external_client, services, clock):
+    for _ in range(30):
+        r = await external_client.post(
+            "/api/auth/otp/verify", json={"email": "ghost@x.com", "code": "000000"}
+        )
+        assert r.status_code == 401
+    r = await external_client.post(
+        "/api/auth/otp/verify", json={"email": "ghost@x.com", "code": "000000"}
+    )
+    assert r.status_code == 429 and r.json() == {"error": "rate_limited"}
+    assert 1 <= int(r.headers["retry-after"]) <= 600
+    clock.advance(601)
+    r = await external_client.post(
+        "/api/auth/otp/verify", json={"email": "ghost@x.com", "code": "000000"}
+    )
+    assert r.status_code == 401
+
+
+async def test_rate_limited_verify_audited_once_per_window(external_client, services, clock):
+    for _ in range(30):
+        await external_client.post(
+            "/api/auth/otp/verify", json={"email": "ghost@x.com", "code": "000000"}
+        )
+    for _ in range(5):
+        r = await external_client.post(
+            "/api/auth/otp/verify", json={"email": "ghost@x.com", "code": "000000"}
+        )
+        assert r.status_code == 429
+    await services.log.flush()
+    assert len([e for e in _auth_lines(services) if e["event"] == "login"]) == 31  # 30 + one 429
+
+
+async def test_rate_limited_request_audited_once_per_window(external_client, services, clock):
+    for i in range(10):
+        r = await external_client.post("/api/auth/otp/request", json={"email": f"g{i}@x.com"})
+        assert r.status_code == 202
+    for i in range(5):
+        r = await external_client.post("/api/auth/otp/request", json={"email": f"h{i}@x.com"})
+        assert r.status_code == 429
+    await services.log.flush()
+    assert len([e for e in _auth_lines(services) if e["event"] == "otp_request"]) == 11
+    clock.advance(601)  # new window: the next rate-limited hit is audited again
+    for i in range(10):
+        await external_client.post("/api/auth/otp/request", json={"email": f"i{i}@x.com"})
+    r = await external_client.post("/api/auth/otp/request", json={"email": "j@x.com"})
+    assert r.status_code == 429
+    await services.log.flush()
+    assert len([e for e in _auth_lines(services) if e["event"] == "otp_request"]) == 22
+
+
+async def test_me_returns_csrf_token_for_live_session(local_client, services):
+    await bootstrap(local_client)
+    assert (await local_client.get("/api/auth/me")).json()["csrf_token"] is None
+    await login(local_client, services)
+    me = (await local_client.get("/api/auth/me")).json()
+    assert me["csrf_token"] == local_client.csrf
+    r = await local_client.post("/api/auth/logout", headers={"X-CSRF-Token": me["csrf_token"]})
+    assert r.status_code == 204
+    assert (await local_client.get("/api/auth/me")).json()["csrf_token"] is None
+
+
+async def test_me_anonymous_csrf_null(external_client):
+    me = (await external_client.get("/api/auth/me")).json()
+    assert me == {"user": None, "channel": "external", "csrf_token": None}
+
+
+async def test_bootstrap_requires_json_content_type(local_client, services):
+    raw = '{"email": "a@x.com", "name": "a"}'
+    r = await local_client.post("/api/bootstrap", content=raw)  # no Content-Type
+    assert r.status_code == 422 and services.users.count() == 0
+    r = await local_client.post("/api/bootstrap", content=raw, headers={"Content-Type": "text/plain"})
+    assert r.status_code == 422 and services.users.count() == 0

@@ -34,9 +34,12 @@ class BootstrapDoneError(Exception):
     """The first admin already exists (users table is not empty)."""
 
 
+MAX_EMAIL_LENGTH = 320
+
+
 def normalize_email(raw: str) -> str:
     email = raw.strip().lower()
-    if not _EMAIL_RE.match(email):
+    if len(email) > MAX_EMAIL_LENGTH or not _EMAIL_RE.match(email):
         raise InvalidEmailError(raw)
     try:
         email.encode("utf-8")  # lone surrogates cannot be stored or hashed

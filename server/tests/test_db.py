@@ -15,7 +15,7 @@ def test_migrate_creates_tables(db):
 
 def test_migrate_idempotent(db):
     db.migrate()
-    assert db.query("PRAGMA user_version")[0][0] == 2
+    assert db.query("PRAGMA user_version")[0][0] == 3
 
 def test_transaction_rollback(db):
     try:
@@ -92,3 +92,40 @@ def test_failed_commit_does_not_wedge(db):
         conn.execute("INSERT INTO secrets(name, value) VALUES ('after', 'ok')")
     assert db.query("SELECT * FROM child_t") == []
     assert len(db.query("SELECT * FROM secrets WHERE name='after'")) == 1
+
+
+def test_migration_3_creates_verify_ip_table(db):
+    names = {r["name"] for r in db.query("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "otp_verify_ip" in names
+    assert db.query("PRAGMA user_version")[0][0] == 3
+
+
+def test_split_statements_handles_semicolons_in_literals_and_triggers():
+    from app.db import split_statements
+
+    script = """
+    CREATE TABLE t (a TEXT DEFAULT 'x;y');
+    CREATE TRIGGER trg AFTER INSERT ON t BEGIN
+        UPDATE t SET a = 'q;r' WHERE rowid = NEW.rowid;
+        DELETE FROM t WHERE a = 'none';
+    END;
+    INSERT INTO t (a) VALUES ('a;b')
+    """
+    stmts = split_statements(script)
+    assert len(stmts) == 3
+    assert stmts[0].startswith("CREATE TABLE") and "'x;y'" in stmts[0]
+    assert stmts[1].startswith("CREATE TRIGGER") and stmts[1].rstrip().endswith("END;")
+    assert stmts[2].startswith("INSERT")
+
+
+def test_migrate_runs_trigger_migration_atomically(db, monkeypatch):
+    import app.db as dbmod
+
+    trigger = (
+        "CREATE TABLE tt (a TEXT);"
+        " CREATE TRIGGER tg AFTER INSERT ON tt BEGIN UPDATE tt SET a = 'z;z'; END;"
+    )
+    monkeypatch.setattr(dbmod, "MIGRATIONS", [*dbmod.MIGRATIONS, trigger, "CREATE TABLE tt (a TEXT);"])
+    with pytest.raises(Exception):
+        db.migrate()  # version 5 fails (tt exists) -> its own transaction rolls back
+    assert db.query("PRAGMA user_version")[0][0] == 4
