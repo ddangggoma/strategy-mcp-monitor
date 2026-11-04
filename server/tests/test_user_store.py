@@ -8,7 +8,7 @@ def test_email_normalized(db, clock):
     assert u.email == "hong@corp.com"
     assert s.get_by_email("HONG@corp.com ").id == u.id
 
-@pytest.mark.parametrize("bad", ["", "hong", "a@b", "a b@c.com", "a@@c.com"])
+@pytest.mark.parametrize("bad", ["", "hong", "a@b", "a b@c.com", "a@@c.com", "a\ud800@x.com"])
 def test_invalid_email(db, clock, bad):
     with pytest.raises(InvalidEmailError):
         UserStore(db, clock).create(bad, "x", "developer", None)
@@ -82,6 +82,7 @@ def test_get_by_email_invalid_returns_none(db, clock):
     s = UserStore(db, clock)
     assert s.get_by_email("not-an-email") is None
     assert s.get_by_email("") is None
+    assert s.get_by_email("a\ud800@x.com") is None
     assert s.get_by_email("nobody@x.com") is None
 
 

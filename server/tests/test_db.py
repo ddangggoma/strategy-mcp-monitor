@@ -15,7 +15,7 @@ def test_migrate_creates_tables(db):
 
 def test_migrate_idempotent(db):
     db.migrate()
-    assert db.query("PRAGMA user_version")[0][0] == 1
+    assert db.query("PRAGMA user_version")[0][0] == 2
 
 def test_transaction_rollback(db):
     try:

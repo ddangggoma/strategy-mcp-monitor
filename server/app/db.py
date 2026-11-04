@@ -49,6 +49,14 @@ MIGRATIONS: list[str] = [
         value TEXT NOT NULL
     );
     """,
+    # 2
+    """
+    CREATE TABLE otp_failures (
+        email TEXT NOT NULL,
+        at TEXT NOT NULL
+    );
+    CREATE INDEX idx_otp_failures_email ON otp_failures(email);
+    """,
 ]
 
 

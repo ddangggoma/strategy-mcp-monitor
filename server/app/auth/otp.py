@@ -17,6 +17,8 @@ OTP_MAX_ATTEMPTS = 5
 OTP_RESEND_COOLDOWN_SEC = 60
 OTP_IP_LIMIT = 10
 OTP_IP_WINDOW_SEC = 600
+OTP_EMAIL_FAIL_LIMIT = 10
+OTP_EMAIL_FAIL_WINDOW_SEC = 3600
 
 
 class OtpProvider(Protocol):
@@ -65,6 +67,8 @@ class OtpService:
         secret: bytes,
         dev_fixed_code: str | None = None,
     ) -> None:
+        if len(secret) < 32:
+            raise ValueError("OTP secret must be at least 32 bytes")
         self._db = db
         self._users = users
         self.provider = provider
@@ -74,6 +78,22 @@ class OtpService:
 
     def _hash(self, email: str, code: str) -> str:
         return hmac.new(self._secret, f"{email}:{code}".encode(), "sha256").hexdigest()
+
+    def _lockout_retry_after(self, conn, email: str, now: datetime) -> int | None:
+        """Prune old failures; return seconds until the email unlocks, or None."""
+        window = timedelta(seconds=OTP_EMAIL_FAIL_WINDOW_SEC)
+        conn.execute(
+            "DELETE FROM otp_failures WHERE at <= ?", (to_kst_iso(now - window),)
+        )
+        rows = conn.execute(
+            "SELECT at FROM otp_failures WHERE email = ?", (email,)
+        ).fetchall()
+        if len(rows) < OTP_EMAIL_FAIL_LIMIT:
+            return None
+        times = sorted(_parse(r["at"]) for r in rows)
+        # Unlocks once enough old failures expire to drop below the limit.
+        pivot = times[len(times) - OTP_EMAIL_FAIL_LIMIT]
+        return _retry_after(pivot + window, now)
 
     def request(self, email: str, ip: str) -> None:
         """Issue a code.
@@ -108,6 +128,9 @@ class OtpService:
                 raise OtpRateLimitError(
                     _retry_after(oldest + timedelta(seconds=OTP_IP_WINDOW_SEC), now)
                 )
+            locked = self._lockout_retry_after(conn, email, now)
+            if locked is not None:
+                raise OtpRateLimitError(locked)
             row = conn.execute(
                 "SELECT last_sent_at FROM otp_codes WHERE email = ?", (email,)
             ).fetchone()
@@ -144,10 +167,13 @@ class OtpService:
         if not code.isascii():
             code = ""  # can never match; still counts as an attempt (and avoids encode errors)
         now = self._clock.now()
-        user = self._users.get_by_email(email)
-        active_user = user if user is not None and user.active else None
 
         with self._db.transaction() as conn:
+            if self._lockout_retry_after(conn, email, now) is not None:
+                return None
+            # Re-check the user inside the transaction that consumes the code.
+            user = self._users.get_by_email(email)
+            active_user = user if user is not None and user.active else None
             row = conn.execute(
                 "SELECT code_hash, expires_at, attempts FROM otp_codes WHERE email = ?",
                 (email,),
@@ -155,18 +181,21 @@ class OtpService:
             if row is None:
                 # No code was ever requested; only the dev fixed code can pass.
                 return active_user if self._fixed_code_ok(code, active_user) else None
-            if row["attempts"] >= OTP_MAX_ATTEMPTS:
-                return None
-            attempts = row["attempts"] + 1
 
-            stored = row["code_hash"]
-            hash_ok = hmac.compare_digest(
-                self._hash(email, code), stored or ""
-            ) and stored is not None
-            fresh = row["expires_at"] is not None and now < _parse(row["expires_at"])
-            ok = active_user is not None and (
-                (hash_ok and fresh) or self._fixed_code_ok(code, active_user)
-            )
+            ok = False
+            attempts = row["attempts"]
+            if attempts < OTP_MAX_ATTEMPTS:
+                attempts += 1
+                stored = row["code_hash"]
+                hash_ok = stored is not None and hmac.compare_digest(
+                    self._hash(email, code), stored
+                )
+                fresh = row["expires_at"] is not None and now < _parse(
+                    row["expires_at"]
+                )
+                ok = active_user is not None and (
+                    (hash_ok and fresh) or self._fixed_code_ok(code, active_user)
+                )
             if ok:
                 conn.execute(
                     "UPDATE otp_codes SET code_hash = NULL, expires_at = NULL,"
@@ -178,6 +207,10 @@ class OtpService:
                 "UPDATE otp_codes SET attempts = ?,"
                 " code_hash = CASE WHEN ? THEN NULL ELSE code_hash END WHERE email = ?",
                 (attempts, attempts >= OTP_MAX_ATTEMPTS, email),
+            )
+            conn.execute(
+                "INSERT INTO otp_failures (email, at) VALUES (?, ?)",
+                (email, to_kst_iso(now)),
             )
             return None
 

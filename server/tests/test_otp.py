@@ -137,3 +137,64 @@ def test_dev_fixed_code_respects_attempt_limit(db, clock):
     svc.request("a@x.com", "ip")
     for _ in range(5): svc.verify("a@x.com", "999999")
     assert svc.verify("a@x.com", "000000") is None
+
+# --- fix round 1 ---
+
+@pytest.mark.parametrize("bad", ["a\ud800@x.com", "\ud800@x.com"])
+def test_surrogate_email_request_raises_invalid(env, bad):
+    svc, p, _, _ = env
+    with pytest.raises(InvalidEmailError): svc.request(bad, "ip")
+    assert p.sent == []
+
+@pytest.mark.parametrize("bad", ["a\ud800@x.com", "\ud800@x.com"])
+def test_surrogate_email_verify_returns_none(env, bad):
+    svc, _, _, _ = env
+    assert svc.verify(bad, "123456") is None
+
+def _fail_ten_across_two_codes(svc, p, clock):
+    svc.request("a@x.com", "ip")
+    for _ in range(5): svc.verify("a@x.com", "bad000")
+    clock.advance(60)
+    svc.request("a@x.com", "ip")
+    for _ in range(5): svc.verify("a@x.com", "bad000")
+    return p.sent[-1][1]
+
+def test_email_lockout_spans_codes(env):
+    svc, p, _, clock = env
+    code = _fail_ten_across_two_codes(svc, p, clock)
+    assert svc.verify("a@x.com", code) is None  # correct code rejected while locked out
+    clock.advance(60)
+    with pytest.raises(OtpRateLimitError) as e: svc.request("a@x.com", "ip")
+    assert isinstance(e.value.retry_after, int) and e.value.retry_after > 0
+    clock.advance(3600)
+    svc.request("a@x.com", "ip")
+    assert svc.verify("a@x.com", p.sent[-1][1]) is not None
+
+def test_lockout_blocks_request_without_send(env):
+    svc, p, _, clock = env
+    code = _fail_ten_across_two_codes(svc, p, clock)
+    sent = len(p.sent)
+    clock.advance(60)
+    with pytest.raises(OtpRateLimitError): svc.request("a@x.com", "ip2")
+    assert len(p.sent) == sent
+    assert svc.verify("a@x.com", code) is None
+
+def test_lockout_applies_to_unknown_email_too(env):
+    svc, p, _, clock = env
+    svc.request("ghost@x.com", "ip")
+    for _ in range(5): svc.verify("ghost@x.com", "000000")
+    clock.advance(60); svc.request("ghost@x.com", "ip")
+    for _ in range(5): svc.verify("ghost@x.com", "000000")
+    clock.advance(60)
+    with pytest.raises(OtpRateLimitError): svc.request("ghost@x.com", "ip")
+
+def test_lockout_retry_after_matches_oldest_failure(env):
+    svc, p, _, clock = env
+    _fail_ten_across_two_codes(svc, p, clock)  # failures at t=0 and t=60, now t=60
+    with pytest.raises(OtpRateLimitError) as e: svc.request("a@x.com", "ip")
+    assert e.value.retry_after == 3540
+
+def test_short_secret_rejected(db, clock):
+    users = UserStore(db, clock)
+    with pytest.raises(ValueError):
+        OtpService(db, users, CapturingOtpProvider(), clock, secret=b"k" * 31)

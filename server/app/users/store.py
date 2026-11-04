@@ -34,6 +34,10 @@ def normalize_email(raw: str) -> str:
     email = raw.strip().lower()
     if not _EMAIL_RE.match(email):
         raise InvalidEmailError(raw)
+    try:
+        email.encode("utf-8")  # lone surrogates cannot be stored or hashed
+    except UnicodeEncodeError:
+        raise InvalidEmailError(raw) from None
     return email
 
 
