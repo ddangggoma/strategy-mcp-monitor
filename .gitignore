@@ -1,1 +1,10 @@
 .superpowers/
+.venv/
+__pycache__/
+*.pyc
+server/.pytest_cache/
+/logs/
+/data/
+/scripts/
+node_modules/
+dist/
