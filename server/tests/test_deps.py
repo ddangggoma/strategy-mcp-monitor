@@ -35,7 +35,7 @@ def _make_app(channel, services):
 
     @r.post("/mcp/{owner}")
     async def edit(
-        owner: int,
+        owner: str,
         user=Depends(
             require(Action.EDIT_SCRIPTS, owner_id=lambda req: int(req.path_params["owner"]))
         ),
@@ -162,3 +162,31 @@ async def test_check_csrf_helper(services):
         r = await c.post("/t/logout", headers={"X-CSRF-Token": "nope"})
         assert r.status_code == 403 and r.json() == {"error": "csrf"}
         assert (await c.post("/t/logout", headers={"X-CSRF-Token": csrf})).status_code == 200
+
+
+async def test_csrf_rejection_is_audited(services):
+    async with _client(_make_app("local", services)) as c:
+        user, _ = _login(services, c, role="admin")
+        r = await c.post("/t/users", headers={"X-CSRF-Token": "wrong"})
+        assert r.status_code == 403 and r.json() == {"error": "csrf"}
+        r = await c.post("/t/logout")
+        assert r.status_code == 403
+    first, second = await _audit_lines(services)
+    assert first["action"] == "manage_users" and first["result"] == "denied"
+    assert first["actor_id"] == user.id and first["ip"] == "127.0.0.1"
+    assert first["target"] == {"path": "/t/users", "reason": "csrf"}
+    assert second["action"] == "csrf" and second["target"] == {"path": "/t/logout", "reason": "csrf"}
+
+
+async def test_owner_callable_not_evaluated_for_anonymous(services):
+    app = _make_app("local", services)
+    async with _client(app) as c:
+        r = await c.post("/t/mcp/not-a-number")
+    assert r.status_code == 401 and r.json() == {"error": "login_required"}
+
+
+async def test_owner_callable_value_error_is_422_validation(services):
+    async with _client(_make_app("local", services)) as c:
+        _, csrf = _login(services, c, role="developer")
+        r = await c.post("/t/mcp/not-a-number", headers={"X-CSRF-Token": csrf})
+    assert r.status_code == 422 and r.json() == {"error": "validation"}

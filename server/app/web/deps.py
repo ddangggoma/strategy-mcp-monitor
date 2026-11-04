@@ -74,15 +74,28 @@ async def current_user(request: Request) -> User | None:
     return _resolve(request)
 
 
-async def check_csrf(request: Request) -> None:
-    """For unsafe methods with a live session, require a matching X-CSRF-Token header."""
-    _resolve(request)
+def _verify_csrf(request: Request, action_name: str) -> None:
+    user = _resolve(request)
     session: AuthSession | None = request.state.auth_session
     if session is None or request.method not in _UNSAFE_METHODS:
         return
     supplied = request.headers.get(CSRF_HEADER, "")
-    if not hmac.compare_digest(supplied.encode("utf-8"), session.csrf_token.encode("utf-8")):
-        raise ApiError(403, "csrf")
+    if hmac.compare_digest(supplied.encode("utf-8"), session.csrf_token.encode("utf-8")):
+        return
+    get_services(request).audit.admin(
+        actor=user,
+        action=action_name,
+        channel=get_channel(request),
+        ip=client_ip(request),
+        target={"path": request.url.path, "reason": "csrf"},
+        result="denied",
+    )
+    raise ApiError(403, "csrf")
+
+
+async def check_csrf(request: Request) -> None:
+    """For unsafe methods with a live session, require a matching X-CSRF-Token header."""
+    _verify_csrf(request, "csrf")
 
 
 def require(
@@ -92,9 +105,14 @@ def require(
 
     async def dependency(request: Request) -> User | None:
         user = _resolve(request)
-        await check_csrf(request)
+        _verify_csrf(request, str(action))
         channel = get_channel(request)
-        owner = owner_id(request) if owner_id is not None else None
+        owner: int | None = None
+        if owner_id is not None and user is not None:  # anonymous is denied by can() anyway
+            try:
+                owner = owner_id(request)
+            except (ValueError, KeyError):
+                raise ApiError(422, "validation") from None
         if can(user, action, channel, owner):
             return user
         get_services(request).audit.admin(

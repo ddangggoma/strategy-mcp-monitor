@@ -20,9 +20,12 @@ def server_configs(
     local_port: int = 8700,
     external_port: int = 8701,
 ) -> list[uvicorn.Config]:
+    # proxy_headers=False: no reverse proxy by design, so X-Forwarded-For must never
+    # override request.client.host (audit ip, OTP per-IP limit).
+    common = {"log_level": "info", "proxy_headers": False, "timeout_graceful_shutdown": 10}
     return [
-        uvicorn.Config(local_app, host="127.0.0.1", port=local_port, log_level="info"),
-        uvicorn.Config(external_app, host="0.0.0.0", port=external_port, log_level="info"),
+        uvicorn.Config(local_app, host="127.0.0.1", port=local_port, **common),
+        uvicorn.Config(external_app, host="0.0.0.0", port=external_port, **common),
     ]
 
 
@@ -34,6 +37,15 @@ class _Server(uvicorn.Server):
         yield
 
 
+def request_exit(servers: list[uvicorn.Server]) -> None:
+    """First signal: graceful exit. A repeated signal: force exit (mirrors uvicorn's own handler)."""
+    for server in servers:
+        if server.should_exit:
+            server.force_exit = True
+        else:
+            server.should_exit = True
+
+
 @contextlib.contextmanager
 def _stop_on_signals(servers: list[uvicorn.Server]) -> Iterator[None]:
     """Ctrl+C / SIGTERM / SIGBREAK ask every server to exit gracefully."""
@@ -42,12 +54,8 @@ def _stop_on_signals(servers: list[uvicorn.Server]) -> Iterator[None]:
         return
     loop = asyncio.get_running_loop()
 
-    def _request_exit() -> None:
-        for server in servers:
-            server.should_exit = True
-
     def _handler(signum, frame) -> None:  # noqa: ARG001
-        loop.call_soon_threadsafe(_request_exit)
+        loop.call_soon_threadsafe(request_exit, servers)
 
     sigs = [s for s in (signal.SIGINT, signal.SIGTERM, getattr(signal, "SIGBREAK", None)) if s]
     original = {s: signal.signal(s, _handler) for s in sigs}
