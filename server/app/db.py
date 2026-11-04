@@ -72,15 +72,16 @@ class Database:
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
+        """BEGIN IMMEDIATE transaction; body must be synchronous (no await), the RLock is thread-owned."""
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
                 yield self._conn
-            except BaseException:
-                self._conn.execute("ROLLBACK")
-                raise
-            else:
                 self._conn.execute("COMMIT")
+            except BaseException:
+                if self._conn.in_transaction:
+                    self._conn.execute("ROLLBACK")
+                raise
 
     def migrate(self) -> None:
         with self._lock:
@@ -92,10 +93,11 @@ class Database:
                         if stmt.strip():
                             self._conn.execute(stmt)
                     self._conn.execute(f"PRAGMA user_version = {version}")
+                    self._conn.execute("COMMIT")
                 except BaseException:
-                    self._conn.execute("ROLLBACK")
+                    if self._conn.in_transaction:
+                        self._conn.execute("ROLLBACK")
                     raise
-                self._conn.execute("COMMIT")
 
     def close(self) -> None:
         with self._lock:
