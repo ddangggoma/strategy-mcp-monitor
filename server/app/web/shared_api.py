@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, Request, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth.otp import OtpRateLimitError
 from app.services import Services
@@ -22,10 +22,14 @@ _MAX_AUDIT_EMAIL = 320
 
 
 class OtpRequestBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     email: str = Field(max_length=320)
 
 
 class OtpVerifyBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     email: str = Field(max_length=320)
     code: str = Field(max_length=16)
 
@@ -91,6 +95,7 @@ async def otp_request(
                 ip=ip,
                 user_agent=user_agent,
                 now=services.clock.now(),
+                scope=rate_limited.scope,
             )
         else:
             services.audit.auth(
@@ -133,6 +138,7 @@ async def otp_verify(
             ip=ip,
             user_agent=user_agent,
             now=services.clock.now(),
+            scope=exc.scope,
         )
         raise ApiError(429, "rate_limited", {"Retry-After": str(exc.retry_after)}) from None
     if user is None:

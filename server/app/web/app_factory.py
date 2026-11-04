@@ -9,12 +9,15 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.services import Services
 from app.web import local_api, shared_api
 from app.web.channels import Channel
 from app.web.deps import ApiError, api_error_handler
+
+# 3 maximal scripts (65_536 B each, JSON-escaped) plus the rest of POST /api/mcps must fit.
+MAX_BODY_BYTES = 524_288
 
 _HTTP_CODES = {404: "not_found", 405: "method_not_allowed"}
 
@@ -74,6 +77,65 @@ class LocalHostGuard:
         await self.app(scope, receive, send)
 
 
+class BodySizeLimit:
+    """Pure ASGI middleware (both channels): refuse request bodies over MAX_BODY_BYTES with 413.
+
+    A declared Content-Length over the cap is refused at once; otherwise the bytes are
+    counted as the app reads them (chunked uploads included). The 413 is sent exactly
+    once and whatever the app sends afterwards is dropped.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        rejected = False
+        started = False
+
+        async def reject() -> None:
+            nonlocal rejected
+            rejected = True
+            await JSONResponse({"error": "body_too_large"}, status_code=413)(scope, receive, send)
+
+        declared = Headers(scope=scope).get("content-length")
+        if declared is not None and declared.isascii() and declared.isdigit():
+            if int(declared) > MAX_BODY_BYTES:
+                await reject()
+                return
+
+        received = 0
+
+        async def limited_receive() -> Message:
+            nonlocal received
+            if rejected:
+                return {"type": "http.disconnect"}
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > MAX_BODY_BYTES and not started:
+                    await reject()
+                    return {"type": "http.disconnect"}
+            return message
+
+        async def limited_send(message: Message) -> None:
+            nonlocal started
+            if rejected:
+                return
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        try:
+            await self.app(scope, limited_receive, limited_send)
+        except Exception:
+            if not rejected:  # the app only failed because we cut its body off
+                raise
+
+
 def create_app(channel: Channel, services: Services) -> FastAPI:
     app = FastAPI(title=f"MCP Monitor ({channel})", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.channel = channel
@@ -84,6 +146,7 @@ def create_app(channel: Channel, services: Services) -> FastAPI:
     app.add_exception_handler(ValidationError, _pydantic_validation_handler)
     app.add_exception_handler(Exception, _unhandled_handler)
     app.include_router(shared_api.router)
+    app.add_middleware(BodySizeLimit)
     if channel == "local":
         app.add_middleware(LocalHostGuard)
         app.include_router(local_api.router)

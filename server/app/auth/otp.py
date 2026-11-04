@@ -6,7 +6,7 @@ import secrets
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from app.clock import Clock, to_kst_iso
 from app.db import Database
@@ -43,9 +43,10 @@ class DummyOtpProvider:
 
 
 class OtpRateLimitError(Exception):
-    def __init__(self, retry_after: int) -> None:
+    def __init__(self, retry_after: int, scope: Literal["ip", "email"] = "ip") -> None:
         super().__init__(f"rate limited, retry after {retry_after}s")
         self.retry_after = retry_after
+        self.scope = scope
 
 
 def _parse(value: str) -> datetime:
@@ -128,11 +129,11 @@ class OtpService:
             if len(ip_rows) >= OTP_IP_LIMIT:
                 oldest = min(_parse(r["at"]) for r in ip_rows)
                 raise OtpRateLimitError(
-                    _retry_after(oldest + timedelta(seconds=OTP_IP_WINDOW_SEC), now)
+                    _retry_after(oldest + timedelta(seconds=OTP_IP_WINDOW_SEC), now), "ip"
                 )
             locked = self._lockout_retry_after(conn, email, now)
             if locked is not None:
-                raise OtpRateLimitError(locked)
+                raise OtpRateLimitError(locked, "email")
             row = conn.execute(
                 "SELECT last_sent_at FROM otp_codes WHERE email = ?", (email,)
             ).fetchone()
@@ -141,7 +142,7 @@ class OtpService:
                     seconds=OTP_RESEND_COOLDOWN_SEC
                 )
                 if ready > now:
-                    raise OtpRateLimitError(_retry_after(ready, now))
+                    raise OtpRateLimitError(_retry_after(ready, now), "email")
             conn.execute(
                 "INSERT INTO otp_ip_requests (ip, at) VALUES (?, ?)", (ip, now_iso)
             )
@@ -168,7 +169,7 @@ class OtpService:
             ).fetchall()
             if len(rows) >= OTP_VERIFY_IP_LIMIT:
                 oldest = min(_parse(r["at"]) for r in rows)
-                raise OtpRateLimitError(_retry_after(oldest + window, now))
+                raise OtpRateLimitError(_retry_after(oldest + window, now), "ip")
             conn.execute(
                 "INSERT INTO otp_verify_ip (ip, at) VALUES (?, ?)", (ip, to_kst_iso(now))
             )

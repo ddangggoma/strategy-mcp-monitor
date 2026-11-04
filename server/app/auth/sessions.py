@@ -5,6 +5,7 @@ import secrets
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from app.audit import cap_user_agent
 from app.clock import Clock
 from app.db import Database
 from app.web.channels import Channel
@@ -52,7 +53,7 @@ class SessionStore:
             "INSERT INTO auth_sessions"
             " (id_hash, user_id, channel, csrf_token, created_at, last_seen_at, ip, user_agent)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (_hash_id(session_id), user_id, channel, csrf_token, now, now, ip, user_agent),
+            (_hash_id(session_id), user_id, channel, csrf_token, now, now, ip, cap_user_agent(user_agent)),
         )
         return session_id, csrf_token
 

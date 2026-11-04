@@ -232,3 +232,13 @@ def test_normalize_email_length_cap():
     assert len(ok) == 320 and normalize_email(ok) == ok
     with pytest.raises(InvalidEmailError):
         normalize_email("a" + ok)
+
+
+def test_rate_limit_scope(env):
+    svc, _, _, _ = env
+    svc.request("a@x.com", "ip")
+    with pytest.raises(OtpRateLimitError) as e: svc.request("a@x.com", "ip")
+    assert e.value.scope == "email"
+    for i in range(9): svc.request(f"u{i}@x.com", "ip")
+    with pytest.raises(OtpRateLimitError) as e: svc.request("new@x.com", "ip")
+    assert e.value.scope == "ip"
