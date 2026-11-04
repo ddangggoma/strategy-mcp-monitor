@@ -33,6 +33,30 @@ def _exit_cleanly(signum: int, frame: object) -> None:
     sys.exit(0)
 
 
+class _PidFileServer(uvicorn.Server):
+    """Writes the pid file only once the listening socket is bound, and removes only a file it wrote.
+
+    A second instance that fails to bind (port busy) exits in `startup` before writing, so it can neither
+    overwrite nor delete the live instance's pid file.
+    """
+
+    def __init__(self, config: uvicorn.Config, pid_file: Path | None) -> None:
+        super().__init__(config)
+        self._pid_file = pid_file
+        self._wrote = False
+
+    async def startup(self, sockets=None) -> None:
+        await super().startup(sockets=sockets)  # sys.exit(1)s if the bind fails
+        if self._pid_file is not None and not self.should_exit:
+            self._pid_file.parent.mkdir(parents=True, exist_ok=True)
+            self._pid_file.write_text(str(os.getpid()))
+            self._wrote = True
+
+    def remove_pid_file(self) -> None:
+        if self._wrote and self._pid_file is not None:
+            self._pid_file.unlink(missing_ok=True)
+
+
 def build_parser(name: str, default_port: int) -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=name, description=f"Dummy MCP server: {name}")
     p.add_argument("--host", default="127.0.0.1")
@@ -64,10 +88,8 @@ def run(name: str, tools: ToolsArg, argv: Sequence[str] | None, default_port: in
     if args.chaos:
         app.router.routes.extend(chaos_routes(state))
 
-    server = uvicorn.Server(uvicorn.Config(SlowMiddleware(app, state), host=args.host, port=args.port,
-                                           log_level="warning"))
-    if args.pid_file:
-        args.pid_file.write_text(str(os.getpid()))
+    server = _PidFileServer(uvicorn.Config(SlowMiddleware(app, state), host=args.host, port=args.port,
+                                           log_level="warning"), args.pid_file)
     # uvicorn restores the previous handler and re-raises a captured signal after shutting down. The Windows
     # default for Ctrl+Break/SIGTERM kills the process on the spot (skipping `finally`), so give it a handler
     # that unwinds normally instead.
@@ -79,5 +101,4 @@ def run(name: str, tools: ToolsArg, argv: Sequence[str] | None, default_port: in
     except KeyboardInterrupt:
         pass
     finally:
-        if args.pid_file:
-            args.pid_file.unlink(missing_ok=True)
+        server.remove_pid_file()

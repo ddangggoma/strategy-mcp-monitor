@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import os
 import time
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -31,6 +33,42 @@ def _int_param(request: Request, name: str, default: int | None, lo: int, hi: in
     return value if lo <= value <= hi else None
 
 
+_LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "[::1]"})
+
+
+def _host_name(host_header: str) -> str:
+    """Hostname part of a Host header value (port stripped; bracketed IPv6 kept bracketed)."""
+    host = host_header.strip().lower()
+    if host.startswith("["):
+        return host[: host.find("]") + 1] if "]" in host else host
+    return host.partition(":")[0]
+
+
+def _is_local_request(request: Request) -> bool:
+    """False for a foreign Host (DNS rebinding) or any non-local Origin (cross-origin browser request)."""
+    if _host_name(request.headers.get("host", "")) not in _LOCAL_HOSTS:
+        return False
+    origin = request.headers.get("origin")
+    if origin is None:
+        return True
+    parts = urlsplit(origin)
+    try:
+        hostname = parts.hostname
+    except ValueError:
+        return False
+    host = f"[{hostname}]" if hostname and ":" in hostname else hostname
+    return parts.scheme in ("http", "https") and host in _LOCAL_HOSTS
+
+
+def _local_only(handler):
+    @functools.wraps(handler)
+    async def guarded(request: Request) -> JSONResponse:
+        if not _is_local_request(request):
+            return JSONResponse({"error": "forbidden"}, status_code=403)
+        return await handler(request)
+    return guarded
+
+
 def chaos_routes(state: ChaosState) -> list[Route]:
     async def crash(request: Request) -> JSONResponse:
         asyncio.get_running_loop().call_later(0.1, os._exit, 1)
@@ -52,9 +90,9 @@ def chaos_routes(state: ChaosState) -> list[Route]:
         return JSONResponse({"slow_ms": ms})
 
     return [
-        Route("/chaos/crash", crash, methods=["POST"]),
-        Route("/chaos/hang", hang, methods=["POST"]),
-        Route("/chaos/slow", slow, methods=["POST"]),
+        Route("/chaos/crash", _local_only(crash), methods=["POST"]),
+        Route("/chaos/hang", _local_only(hang), methods=["POST"]),
+        Route("/chaos/slow", _local_only(slow), methods=["POST"]),
     ]
 
 

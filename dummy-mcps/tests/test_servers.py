@@ -162,3 +162,47 @@ def test_pid_file_removed_on_clean_exit(tmp_path):
         assert not pid_file.exists()
     finally:
         stop(p, port)
+
+
+def test_pid_file_parent_dir_is_created(tmp_path):
+    port = free_port()
+    pid_file = tmp_path / "does" / "not" / "exist" / "p.pid"
+    p = start("calculator", port, "--pid-file", str(pid_file))
+    try:
+        wait_listening(port)
+        assert int(pid_file.read_text()) == listener_pid(port)
+    finally:
+        stop(p, port)
+
+
+def test_second_instance_on_busy_port_keeps_first_pid_file(tmp_path):
+    port, pid_file = free_port(), tmp_path / "p.pid"
+    first = start("calculator", port, "--pid-file", str(pid_file))
+    try:
+        wait_listening(port)
+        first_pid = pid_file.read_text()
+        second = start("calculator", port, "--pid-file", str(pid_file))
+        try:
+            assert second.wait(30) != 0
+        finally:
+            kill_tree(second)
+        assert pid_file.read_text() == first_pid == str(listener_pid(port))
+    finally:
+        stop(first, port)
+
+
+def test_chaos_guard_rejects_foreign_host_and_origin(server):
+    _, port, _, _ = server
+    url = f"http://127.0.0.1:{port}/chaos/slow?ms=0"
+    assert httpx.post(url).status_code == 200  # plain local client works
+    assert httpx.post(url, headers={"Host": "evil.example"}).status_code == 403  # DNS rebinding
+    assert httpx.post(url, headers={"Host": f"evil.example:{port}"}).status_code == 403
+    assert httpx.post(url, headers={"Origin": "http://evil.example"}).status_code == 403  # cross-origin browser
+    assert httpx.post(url, headers={"Origin": "null"}).status_code == 403
+    assert httpx.post(url, headers={"Origin": "http://localhost:3000"}).status_code == 200
+    assert httpx.post(url, headers={"Host": f"localhost:{port}"}).status_code == 200
+    assert httpx.post(url, headers={"Host": f"[::1]:{port}"}).status_code == 200
+    # a rejected crash must not crash the server
+    assert httpx.post(f"http://127.0.0.1:{port}/chaos/crash", headers={"Origin": "http://evil.example"}).status_code == 403
+    time.sleep(0.5)
+    assert rpc(port, "initialize", INIT)[0]["result"]
