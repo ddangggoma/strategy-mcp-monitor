@@ -1,4 +1,3 @@
-import socket
 import subprocess
 import sys
 import time
@@ -7,13 +6,9 @@ from pathlib import Path
 import httpx
 import pytest
 
+from tests.live import free_port
+
 SERVER_DIR = Path(__file__).resolve().parents[1]
-
-
-def free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
 
 
 def _answers(port: int) -> bool:
