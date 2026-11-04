@@ -1,0 +1,26 @@
+[project]
+name = "dummy-mcps"
+version = "0.1.0"
+description = "Dummy MCP servers (weather, calculator, clock) for exercising the MCP monitor"
+requires-python = ">=3.15,<3.16"
+dependencies = [
+    "mcp",
+    "uvicorn",
+    "starlette",
+    "httpx",
+    "tzdata",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "psutil",
+    "pip-audit",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

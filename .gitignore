@@ -8,3 +8,5 @@ server/.pytest_cache/
 /scripts/
 node_modules/
 dist/
+dummy-mcps/run/
+dummy-mcps/.pytest_cache/
