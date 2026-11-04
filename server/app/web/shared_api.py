@@ -38,6 +38,17 @@ def _audit_email(raw: str) -> str:
         return raw[:_MAX_AUDIT_EMAIL]
 
 
+def _live_sid(request: Request) -> str | None:
+    """The cookie's session id, only if it resolved to a live session on THIS channel.
+
+    Never revoke a raw cookie value: a session of the other channel must stay untouched.
+    Requires a prior current_user dependency (it fills request.state.auth_session).
+    """
+    if getattr(request.state, "auth_session", None) is None:
+        return None
+    return request.cookies.get(SESSION_COOKIE)
+
+
 def _cookie_args(request: Request) -> dict[str, object]:
     return {
         "httponly": True,
@@ -88,25 +99,30 @@ async def otp_verify(
     response: Response,
     services: Services = Depends(get_services),
     channel: Channel = Depends(get_channel),
+    _current: User | None = Depends(current_user),  # resolves this channel's session first
 ) -> dict[str, object]:
     ip = client_ip(request)
     user_agent = request.headers.get("user-agent")
+
+    def audit_login(email: str, ok: bool) -> None:
+        services.audit.auth(
+            event="login", email=email, channel=channel, ip=ip, user_agent=user_agent, ok=ok
+        )
+
     user = services.otp.verify(body.email, body.code)
-    services.audit.auth(
-        event="login",
-        email=user.email if user is not None else _audit_email(body.email),
-        channel=channel,
-        ip=ip,
-        user_agent=user_agent,
-        ok=user is not None,
-    )
     if user is None:
+        audit_login(_audit_email(body.email), False)
         raise ApiError(401, "login_required")
-    old_sid = request.cookies.get(SESSION_COOKIE)
-    if old_sid:  # session fixation: never reuse or leave alive a pre-login session
-        services.sessions.revoke(old_sid)
-    services.users.touch_login(user.id)
-    sid, csrf_token = services.sessions.create(user.id, channel, ip, user_agent)
+    try:
+        old_sid = _live_sid(request)
+        if old_sid:  # session fixation: never leave a pre-login session of this channel alive
+            services.sessions.revoke(old_sid)
+        services.users.touch_login(user.id)
+        sid, csrf_token = services.sessions.create(user.id, channel, ip, user_agent)
+    except Exception:
+        audit_login(user.email, False)
+        raise
+    audit_login(user.email, True)
     response.set_cookie(SESSION_COOKIE, sid, **_cookie_args(request))
     return {"user": user_json(user), "csrf_token": csrf_token}
 
@@ -118,7 +134,7 @@ async def logout(
     services: Services = Depends(get_services),
     channel: Channel = Depends(get_channel),
 ) -> Response:
-    sid = request.cookies.get(SESSION_COOKIE)
+    sid = _live_sid(request)
     if sid:
         services.sessions.revoke(sid)
     if user is not None:

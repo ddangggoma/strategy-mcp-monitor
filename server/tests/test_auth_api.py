@@ -213,3 +213,41 @@ async def test_cookie_not_secure_over_http(external_client, services):
     services.users.create_first_admin("admin@x.com", "관리자")
     r = await login(external_client, services)
     assert "secure" not in r.headers["set-cookie"].lower()
+
+
+async def test_login_audited_ok_false_when_session_create_fails(services, monkeypatch):
+    services.users.create_first_admin("admin@x.com", "관리자")
+    app = create_app("local", services)
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1:8700") as client:
+        await client.post("/api/auth/otp/request", json={"email": "admin@x.com"})
+        code = services.otp.provider.sent[-1][1]
+
+        def boom(*args, **kwargs):
+            raise RuntimeError("db down")
+
+        monkeypatch.setattr(services.sessions, "create", boom)
+        r = await client.post("/api/auth/otp/verify", json={"email": "admin@x.com", "code": code})
+    assert r.status_code == 500 and r.json() == {"error": "internal"}
+    assert "set-cookie" not in r.headers
+    events = [e for e in await audit_events(services, "auth") if e["event"] == "login"]
+    assert [(e["email"], e["ok"]) for e in events] == [("admin@x.com", False)]
+
+
+async def test_logout_does_not_revoke_other_channel_session(local_client, services):
+    user = services.users.create_first_admin("admin@x.com", "관리자")
+    ext_sid, _ = services.sessions.create(user.id, "external", "1.2.3.4", "ua")
+    local_client.cookies.set("mcpmon_sid", ext_sid, domain="127.0.0.1")
+    r = await local_client.post("/api/auth/logout")
+    assert r.status_code == 204
+    assert "mcpmon_sid" in r.headers["set-cookie"].lower()  # cookie still cleared
+    assert services.sessions.get(ext_sid, "external") is not None
+
+
+async def test_login_does_not_revoke_other_channel_session(local_client, services):
+    user = services.users.create_first_admin("admin@x.com", "관리자")
+    ext_sid, _ = services.sessions.create(user.id, "external", "1.2.3.4", "ua")
+    local_client.cookies.set("mcpmon_sid", ext_sid, domain="127.0.0.1")
+    await login(local_client, services)
+    assert local_client.cookies["mcpmon_sid"] != ext_sid
+    assert services.sessions.get(ext_sid, "external") is not None

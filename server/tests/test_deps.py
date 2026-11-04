@@ -51,7 +51,7 @@ def _make_app(channel, services):
 
 
 def _client(app):
-    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1:8700")
 
 
 def _login(services, client, role="developer", channel="local", email="u@example.com"):

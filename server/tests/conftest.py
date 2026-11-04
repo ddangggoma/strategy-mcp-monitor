@@ -43,7 +43,7 @@ async def services(tmp_path, clock):
 @pytest_asyncio.fixture
 async def local_client(services):
     transport = httpx.ASGITransport(app=create_app("local", services))
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+    async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1:8700") as client:
         yield client
 
 

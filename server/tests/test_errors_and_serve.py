@@ -47,7 +47,7 @@ async def test_unhandled_exception_is_500_internal(services, capsys):
 
     app.include_router(router)
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+    async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1:8700") as c:
         r = await c.get("/t/boom")
         assert r.status_code == 500 and r.json() == {"error": "internal"}
         assert "secret detail" not in r.text
