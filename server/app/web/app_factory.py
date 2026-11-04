@@ -11,7 +11,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.services import Services
-from app.web import local_api, mcp_shared, shared_api
+from app.web import local_api, mcp_local, mcp_shared, shared_api
 from app.web.channels import Channel
 from app.web.deps import ApiError, api_error_handler
 
@@ -22,6 +22,10 @@ _HTTP_CODES = {404: "not_found", 405: "method_not_allowed"}
 
 
 async def _http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    if exc.status_code == 405 and request.app.state.channel == "external":
+        # A wrong method on a path shared with a local-only route (POST /api/mcps, DELETE
+        # /api/mcps/{id}) must look exactly like a route that does not exist: no Allow header.
+        return JSONResponse({"error": "not_found"}, status_code=404)
     code = _HTTP_CODES.get(exc.status_code, f"http_{exc.status_code}")
     return JSONResponse({"error": code}, status_code=exc.status_code, headers=exc.headers)
 
@@ -145,4 +149,5 @@ def create_app(channel: Channel, services: Services) -> FastAPI:
     if channel == "local":
         app.add_middleware(LocalHostGuard)
         app.include_router(local_api.router)
+        app.include_router(mcp_local.router)
     return app

@@ -27,11 +27,15 @@ def test_server_configs_ignore_proxy_headers_and_bound_shutdown(services):
     assert all(c.timeout_graceful_shutdown == 10 for c in cfgs)
 
 
-async def test_framework_errors_use_error_code_bodies(external_client):
+async def test_framework_errors_use_error_code_bodies(local_client, external_client):
     r = await external_client.get("/api/bootstrap")
     assert r.status_code == 404 and r.json() == {"error": "not_found"}
+    # Local: a wrong method is a plain 405. External: it must not reveal that the path exists
+    # for another method (some paths are shared with local-only routes), so it is a 404.
+    r = await local_client.post("/api/channel")
+    assert r.status_code == 405 and r.json() == {"error": "method_not_allowed"} and "allow" in r.headers
     r = await external_client.post("/api/channel")
-    assert r.status_code == 405 and r.json() == {"error": "method_not_allowed"}
+    assert r.status_code == 404 and r.json() == {"error": "not_found"} and "allow" not in r.headers
 
 
 async def test_unhandled_exception_is_500_internal(services, capsys):

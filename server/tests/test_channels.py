@@ -1,8 +1,10 @@
+import re
+
 import pytest
 from starlette.routing import Match
 
 from app.main import server_configs
-from app.web import local_api
+from app.web import local_api, mcp_local
 from app.web.app_factory import create_app
 
 
@@ -14,18 +16,42 @@ async def test_channel_reported(local_client, external_client):
 def _serves(app, path: str, method: str) -> bool:
     # FastAPI >= 0.16x wraps include_router() output in _IncludedRouter objects that have
     # no `.path`, so ask the app's routes whether they would match instead of reading paths.
+    # Only a FULL match serves the request: a PARTIAL one (same path, other method) is a 405.
     scope = {"type": "http", "path": path, "method": method, "root_path": "", "headers": []}
-    return any(r.matches(scope)[0] != Match.NONE for r in app.routes)
+    return any(r.matches(scope)[0] == Match.FULL for r in app.routes)
+
+
+def _local_only_routes() -> list[tuple[str, str]]:
+    return [
+        (r.path, method)
+        for router in (local_api.router, mcp_local.router)
+        for r in router.routes
+        for method in sorted(r.methods)
+    ]
 
 
 def test_local_routes_absent_on_external(services):
-    local_only = [(r.path, sorted(r.methods)[0]) for r in local_api.router.routes]
+    local_only = _local_only_routes()
     assert local_only
     local_app = create_app("local", services)
     external_app = create_app("external", services)
     for path, method in local_only:
-        assert _serves(local_app, path, method)
-        assert not _serves(external_app, path, method)
+        assert _serves(local_app, path, method), (method, path)
+        assert not _serves(external_app, path, method), (method, path)
+
+
+async def test_local_only_routes_answer_404_on_external(external_client):
+    """Behavioral twin: paths shared with a served route (POST /api/mcps, DELETE /api/mcps/{id})
+    must answer 404 not_found, not 405, and never expose an Allow header."""
+    values = {"kind": "start"}
+    seen = set()
+    for path, method in _local_only_routes():
+        concrete = re.sub(r"\{(\w+)\}", lambda m: values.get(m.group(1), "1"), path)
+        seen.add((method, path))
+        r = await external_client.request(method, concrete, json={})
+        assert (r.status_code, r.json()) == (404, {"error": "not_found"}), (method, concrete)
+        assert "allow" not in r.headers, (method, concrete)
+    assert ("POST", "/api/mcps") in seen and ("DELETE", "/api/mcps/{mcp_id}") in seen
 
 
 def test_bind_hosts(services):
