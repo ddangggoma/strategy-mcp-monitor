@@ -1,11 +1,11 @@
 """Routes served only on the local channel. Never registered on the external app."""
-from typing import Literal
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Path, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError
 
-from app.auth.policy import Action
+from app.auth.policy import Action, can
 from app.clock import to_kst_iso
 from app.services import Services
 from app.users.store import (
@@ -63,15 +63,19 @@ async def bootstrap(
 
 
 class CreateUserBody(BaseModel):
-    email: str
-    name: str
+    model_config = ConfigDict(extra="forbid")
+
+    email: str = Field(max_length=320)
+    name: str = Field(max_length=100)
     role: Literal["developer", "admin"]
 
 
 class UpdateUserBody(BaseModel):
-    name: str | None = None
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, max_length=100)
     role: Literal["developer", "admin"] | None = None
-    active: bool | None = None
+    active: StrictBool | None = None
 
 
 def _admin_user_json(user: User) -> dict[str, object]:
@@ -135,7 +139,7 @@ async def create_user(
 
 @router.patch("/api/users/{user_id}")
 async def update_user(
-    user_id: int,
+    user_id: Annotated[int, Path(ge=1, le=2**63 - 1)],  # SQLite INTEGER range; larger overflows
     body: UpdateUserBody,
     request: Request,
     actor: User | None = Depends(require(Action.MANAGE_USERS)),
@@ -188,3 +192,59 @@ async def update_user(
         )
     assert user is not None
     return _admin_user_json(user)
+
+
+_RETENTION_KEYS = frozenset({"log_retention_days", "log_compress_after_days"})
+
+
+@router.get("/api/settings")
+async def get_settings(
+    _actor: User | None = Depends(require(Action.EDIT_GLOBAL_SETTINGS)),
+    services: Services = Depends(get_services),
+) -> dict[str, object]:
+    return services.settings.get().model_dump()
+
+
+@router.put("/api/settings")
+async def update_settings(
+    body: dict[str, Any],
+    request: Request,
+    actor: User | None = Depends(require(Action.EDIT_GLOBAL_SETTINGS)),
+    services: Services = Depends(get_services),
+    channel: Channel = Depends(get_channel),
+) -> dict[str, object]:
+    ip = client_ip(request)
+    if _RETENTION_KEYS & body.keys() and not can(actor, Action.EDIT_RETENTION, channel):
+        services.audit.admin(
+            actor=actor,
+            action=str(Action.EDIT_RETENTION),
+            channel=channel,
+            ip=ip,
+            target={"path": request.url.path},
+            result="denied",
+        )
+        raise ApiError(403, "forbidden")
+    before = services.settings.get().model_dump()
+    try:
+        after = services.settings.update(body).model_dump()
+    except ValidationError:
+        services.audit.admin(
+            actor=actor,
+            action="settings_update",
+            channel=channel,
+            ip=ip,
+            target={"error": "validation"},
+            result="error",
+        )
+        raise  # rendered as 422 {"error": "validation"} by the app-wide handler
+    changes = {k: [before[k], v] for k, v in after.items() if before[k] != v}
+    if changes:
+        services.audit.admin(
+            actor=actor,
+            action="settings_update",
+            channel=channel,
+            ip=ip,
+            target={"changes": changes},
+            result="ok",
+        )
+    return after

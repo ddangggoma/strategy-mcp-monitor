@@ -153,3 +153,36 @@ async def test_self_demotion_with_other_admin_revokes_own_session(local_client, 
     r = await c.patch(f"/api/users/{me}", json={"role": "developer"}, headers=h)
     assert r.status_code == 200 and r.json()["role"] == "developer"
     assert (await c.get("/api/auth/me")).json()["user"] is None
+
+
+# --- request hardening ---
+
+
+async def test_huge_user_id_422(local_client, services):
+    c = await admin_client(local_client, services); h = {"X-CSRF-Token": c.csrf}
+    for uid in (2**63, 10**30, 0, -1):
+        r = await c.patch(f"/api/users/{uid}", json={"name": "x"}, headers=h)
+        assert r.status_code == 422 and r.json() == {"error": "validation"}, uid
+    r = await c.patch(f"/api/users/{2**63 - 1}", json={"name": "x"}, headers=h)
+    assert r.status_code == 404
+
+
+async def test_user_bodies_strict_422(local_client, services):
+    c = await admin_client(local_client, services); h = {"X-CSRF-Token": c.csrf}
+    me = (await c.get("/api/auth/me")).json()["user"]["id"]
+    ok = {"email": "d@x.com", "name": "d", "role": "developer"}
+    bad_create = [
+        {**ok, "extra": 1},
+        {**ok, "name": "n" * 101},
+        {**ok, "email": "a" * 315 + "@x.com"},
+    ]
+    for body in bad_create:
+        r = await c.post("/api/users", json=body, headers=h)
+        assert r.status_code == 422 and r.json() == {"error": "validation"}, body
+    bad_patch = [{"active": "yes"}, {"active": 1}, {"nope": 1}, {"name": "n" * 101}]
+    for body in bad_patch:
+        r = await c.patch(f"/api/users/{me}", json=body, headers=h)
+        assert r.status_code == 422 and r.json() == {"error": "validation"}, body
+    # boundary values are accepted
+    r = await c.post("/api/users", json={**ok, "name": "n" * 100}, headers=h)
+    assert r.status_code == 201
