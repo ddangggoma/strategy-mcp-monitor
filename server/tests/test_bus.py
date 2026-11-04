@@ -1,0 +1,85 @@
+import pytest
+
+from app.monitor.bus import BoardBus, StreamLimitError
+
+
+def test_dirty_and_events():
+    bus = BoardBus()
+    sub = bus.subscribe()
+    bus.mark_dirty(3)
+    bus.mark_dirty(3)
+    bus.publish("action", {"run_id": "r"})
+    assert sub.dirty == {3} and list(sub.events) == [("action", {"run_id": "r"})] and sub.wake.is_set()
+
+
+def test_events_bounded_and_limit():
+    bus = BoardBus(max_streams=1)
+    sub = bus.subscribe()
+    for i in range(150):
+        bus.publish("action", {"i": i})
+    assert len(sub.events) == 100 and sub.events[0][1] == {"i": 50}
+    with pytest.raises(StreamLimitError):
+        bus.subscribe()
+    bus.unsubscribe(sub)
+    assert bus.subscriber_count == 0
+
+
+def test_default_max_streams_is_100():
+    bus = BoardBus()
+    subs = [bus.subscribe() for _ in range(100)]
+    with pytest.raises(StreamLimitError):
+        bus.subscribe()
+    bus.unsubscribe(subs[0])
+    bus.subscribe()  # a freed slot is reusable
+    assert bus.subscriber_count == 100
+
+
+def test_unsubscribe_is_idempotent_and_releases_in_finally():
+    bus = BoardBus(max_streams=1)
+    sub = bus.subscribe()
+    try:
+        raise RuntimeError("client aborted")
+    except RuntimeError:
+        pass
+    finally:
+        bus.unsubscribe(sub)
+        bus.unsubscribe(sub)  # second call is a no-op
+    assert bus.subscriber_count == 0
+    bus.subscribe()  # slot is free again
+
+
+def test_non_public_events_only_reach_authed_subscribers():
+    bus = BoardBus()
+    anon, authed = bus.subscribe(), bus.subscribe(authed=True)
+    bus.publish("action", {"run_id": "r", "exit_code": 1}, public=False)
+    bus.publish("board", {"x": 1})
+    assert [e for e, _ in anon.events] == ["board"]
+    assert [e for e, _ in authed.events] == ["action", "board"]
+
+
+def test_non_public_event_does_not_wake_anonymous():
+    bus = BoardBus()
+    anon = bus.subscribe()
+    bus.publish("action", {"run_id": "r"}, public=False)
+    assert not anon.wake.is_set() and not anon.events
+
+
+def test_slow_subscriber_does_not_block_others_or_publisher():
+    bus = BoardBus()
+    slow, fast = bus.subscribe(), bus.subscribe()
+    for i in range(1000):  # slow never drains; publish must still return immediately
+        bus.publish("action", {"i": i})
+        bus.mark_dirty(i % 5)
+        if i % 10 == 0:
+            fast.events.clear()
+    assert len(slow.events) == 100 and slow.events[-1][1] == {"i": 999}
+    assert slow.dirty == {0, 1, 2, 3, 4} and fast.events[-1][1] == {"i": 999}
+
+
+def test_published_payload_is_copied():
+    bus = BoardBus()
+    sub = bus.subscribe()
+    data = {"a": 1}
+    bus.publish("e", data)
+    data["a"] = 2
+    assert sub.events[0][1] == {"a": 1}
