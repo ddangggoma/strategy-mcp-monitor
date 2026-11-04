@@ -104,7 +104,7 @@ def test_ip_limited_request_does_not_send(env):
 def test_malformed_code_counts_as_attempt(env):
     svc, p, _, _ = env
     svc.request("a@x.com", "ip"); code = p.sent[-1][1]
-    for bad in ["", "abc", "12345", "１２３４５６", "é" * 6, "D800" * 6]:
+    for bad in ["", "abc", "12345", "１２３４５６", "é" * 6, "\ud800" * 6]:
         assert svc.verify("a@x.com", bad) is None
     assert svc.verify("a@x.com", code) is None  # 7 attempts used
 

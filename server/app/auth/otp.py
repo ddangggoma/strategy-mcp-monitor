@@ -141,6 +141,8 @@ class OtpService:
             email = normalize_email(email)
         except InvalidEmailError:
             return None
+        if not code.isascii():
+            code = ""  # can never match; still counts as an attempt (and avoids encode errors)
         now = self._clock.now()
         user = self._users.get_by_email(email)
         active_user = user if user is not None and user.active else None
