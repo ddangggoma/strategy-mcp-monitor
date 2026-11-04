@@ -65,6 +65,81 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX idx_otp_verify_ip_ip ON otp_verify_ip(ip);
     """,
+    # 4
+    """
+    CREATE TABLE mcps (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        host TEXT NOT NULL,
+        port INTEGER NOT NULL,
+        config TEXT NOT NULL,                       -- McpConfig JSON (name/host/port included, always equal to the columns above)
+        owner_id INTEGER REFERENCES users(id),
+        created_by INTEGER REFERENCES users(id),
+        created_at TEXT NOT NULL,
+        UNIQUE (host, port)
+    );
+    CREATE TABLE mcp_scripts (
+        mcp_id INTEGER NOT NULL REFERENCES mcps(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK (kind IN ('start','stop','restart')),
+        ext TEXT NOT NULL CHECK (ext IN ('.ps1','.bat','.cmd')),
+        sha256 TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        updated_at TEXT NOT NULL,
+        updated_by INTEGER,
+        PRIMARY KEY (mcp_id, kind)
+    );
+    CREATE TABLE mcp_script_versions (
+        mcp_id INTEGER NOT NULL REFERENCES mcps(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        ext TEXT,                                   -- ext/content/sha256 all NULL = deletion marker
+        content TEXT,
+        sha256 TEXT,
+        author_id INTEGER,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (mcp_id, kind, version)
+    );
+    CREATE TABLE mcp_minutes (
+        mcp_id INTEGER NOT NULL REFERENCES mcps(id) ON DELETE CASCADE,
+        minute TEXT NOT NULL,
+        ok INTEGER NOT NULL,
+        total INTEGER NOT NULL,
+        latency_sum REAL NOT NULL DEFAULT 0,
+        latency_n INTEGER NOT NULL DEFAULT 0,
+        latency_max REAL,
+        PRIMARY KEY (mcp_id, minute)
+    ) WITHOUT ROWID;
+    CREATE TABLE mcp_transitions (
+        id INTEGER PRIMARY KEY,
+        mcp_id INTEGER NOT NULL REFERENCES mcps(id) ON DELETE CASCADE,
+        at TEXT NOT NULL,
+        from_state TEXT NOT NULL,
+        to_state TEXT NOT NULL,
+        issue TEXT
+    );
+    CREATE INDEX idx_mcp_transitions ON mcp_transitions(mcp_id, at);
+    CREATE TABLE mcp_actions (
+        id INTEGER PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        mcp_id INTEGER NOT NULL REFERENCES mcps(id) ON DELETE CASCADE,
+        at TEXT NOT NULL,
+        requested TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        trigger TEXT NOT NULL CHECK (trigger IN ('auto','manual','boot')),
+        reason TEXT NOT NULL,
+        actor_id INTEGER,
+        status TEXT NOT NULL CHECK (status IN ('ok','failed','timeout','error')),
+        exit_code INTEGER,
+        duration_ms INTEGER NOT NULL,
+        killed INTEGER NOT NULL DEFAULT 0,
+        error TEXT,
+        stdout TEXT NOT NULL DEFAULT '',
+        stderr TEXT NOT NULL DEFAULT '',
+        stdout_truncated INTEGER NOT NULL DEFAULT 0,
+        stderr_truncated INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX idx_mcp_actions ON mcp_actions(mcp_id, at);
+    """,
 ]
 
 
