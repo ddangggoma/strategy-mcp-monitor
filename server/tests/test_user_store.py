@@ -99,3 +99,16 @@ def test_touch_login_count_and_utc_roundtrip(db, clock):
     assert got.last_login_at == clock.now()
     assert got.last_login_at.utcoffset() == timedelta(0)
     assert got.created_at.tzinfo is not None
+
+
+def test_create_first_admin_only_when_empty(db, clock):
+    from app.users.store import BootstrapDoneError
+
+    s = UserStore(db, clock)
+    user = s.create_first_admin(" Root@X.com ", " Root ")
+    assert (user.email, user.name, user.role, user.active, user.created_by) == (
+        "root@x.com", "Root", "admin", True, None
+    )
+    with pytest.raises(BootstrapDoneError):
+        s.create_first_admin("other@x.com", "o")
+    assert s.count() == 1

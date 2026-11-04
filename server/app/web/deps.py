@@ -42,6 +42,10 @@ def get_services(request: Request) -> Services:
     return request.app.state.services
 
 
+def user_json(user: User) -> dict[str, object]:
+    return {"id": user.id, "email": user.email, "name": user.name, "role": user.role}
+
+
 def client_ip(request: Request) -> str | None:
     return request.client.host if request.client else None
 

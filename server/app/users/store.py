@@ -30,6 +30,10 @@ class UserNotFoundError(Exception):
     pass
 
 
+class BootstrapDoneError(Exception):
+    """The first admin already exists (users table is not empty)."""
+
+
 def normalize_email(raw: str) -> str:
     email = raw.strip().lower()
     if not _EMAIL_RE.match(email):
@@ -106,6 +110,23 @@ class UserStore:
             )
         except sqlite3.IntegrityError as exc:
             raise UserExistsError(email) from exc
+        return self._require(user_id)
+
+    def create_first_admin(self, email: str, name: str) -> User:
+        """Create the initial admin iff no user exists; count and insert share one transaction.
+
+        Raises InvalidEmailError / ValueError for bad input, BootstrapDoneError if any user exists.
+        """
+        email = normalize_email(email)
+        name = _clean_name(name)
+        with self._db.transaction() as conn:
+            if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] > 0:
+                raise BootstrapDoneError()
+            user_id = conn.execute(
+                "INSERT INTO users (email, name, role, active, created_at, created_by)"
+                " VALUES (?, ?, 'admin', 1, ?, NULL)",
+                (email, name, self._clock.now().isoformat()),
+            ).lastrowid
         return self._require(user_id)
 
     def get(self, user_id: int) -> User | None:
