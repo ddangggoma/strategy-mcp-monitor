@@ -1,5 +1,6 @@
 import threading, pytest
-from app.users.store import UserStore, InvalidEmailError, UserExistsError, LastAdminError
+from datetime import timedelta
+from app.users.store import UserStore, InvalidEmailError, UserExistsError, LastAdminError, UserNotFoundError
 
 def test_email_normalized(db, clock):
     s = UserStore(db, clock)
@@ -41,3 +42,59 @@ def test_concurrent_demotion_keeps_one_admin(db, clock):
     [t.start() for t in ts]; [t.join() for t in ts]
     assert len(errors) == 1
     assert sum(u.role == "admin" and u.active for u in s.list()) == 1
+
+
+def test_developer_deactivate_and_reactivate_not_blocked(db, clock):
+    s = UserStore(db, clock); s.create("a@x.com", "a", "admin", None)
+    d = s.create("d@x.com", "d", "developer", None)
+    assert s.set_active(d.id, False).active is False
+    assert s.set_active(d.id, True).active is True
+
+
+def test_inactive_admin_demotion_and_repromotion(db, clock):
+    s = UserStore(db, clock); a = s.create("a@x.com", "a", "admin", None)
+    b = s.create("b@x.com", "b", "admin", a.id); s.set_active(b.id, False)
+    assert s.set_role(b.id, "developer").role == "developer"
+    assert s.set_role(b.id, "admin").role == "admin"
+    assert s.set_active(b.id, True).active is True
+    d = s.create("d@x.com", "d", "developer", a.id)
+    assert s.set_role(d.id, "admin").role == "admin"
+
+
+def test_missing_user_raises_not_found(db, clock):
+    s = UserStore(db, clock)
+    with pytest.raises(UserNotFoundError): s.set_role(999, "admin")
+    with pytest.raises(UserNotFoundError): s.set_active(999, False)
+    with pytest.raises(UserNotFoundError): s.set_name(999, "x")
+
+
+def test_invalid_role_and_empty_name(db, clock):
+    s = UserStore(db, clock); a = s.create("a@x.com", "a", "admin", None)
+    with pytest.raises(ValueError): s.create("b@x.com", "b", "root", None)
+    with pytest.raises(ValueError): s.set_role(a.id, "root")
+    with pytest.raises(ValueError): s.create("c@x.com", "   ", "developer", None)
+    with pytest.raises(ValueError): s.set_name(a.id, "   ")
+    assert s.set_name(a.id, "  new  ").name == "new"
+    assert s.count() == 1
+
+
+def test_get_by_email_invalid_returns_none(db, clock):
+    s = UserStore(db, clock)
+    assert s.get_by_email("not-an-email") is None
+    assert s.get_by_email("") is None
+    assert s.get_by_email("nobody@x.com") is None
+
+
+def test_touch_login_count_and_utc_roundtrip(db, clock):
+    s = UserStore(db, clock)
+    assert s.count() == 0
+    u = s.create("a@x.com", "a", "admin", None)
+    s.create("b@x.com", "b", "developer", u.id)
+    assert s.count() == 2
+    assert u.last_login_at is None
+    assert u.created_at == clock.now() and u.created_at.utcoffset() == timedelta(0)
+    s.touch_login(u.id)
+    got = s.get(u.id)
+    assert got.last_login_at == clock.now()
+    assert got.last_login_at.utcoffset() == timedelta(0)
+    assert got.created_at.tzinfo is not None
