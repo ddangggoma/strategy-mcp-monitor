@@ -12,13 +12,14 @@ dependencies = [
     "watchfiles",
     "python-dotenv",
     "pydantic",
+    "httpx",
+    "psutil",
 ]
 
 [dependency-groups]
 dev = [
     "pytest",
     "pytest-asyncio",
-    "httpx",
     "pip-audit",
 ]
 
