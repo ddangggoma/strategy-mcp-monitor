@@ -5,7 +5,7 @@ import dataclasses
 from collections import deque
 from collections.abc import Hashable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from app.monitor.models import CheckResult, Issue, Mcp, McpConfig
@@ -42,7 +42,7 @@ def make_mcp(id: int = 1, **config) -> Mcp:
         config=McpConfig.model_validate(fields),
         owner_id=None,
         created_by=None,
-        created_at=datetime(2026, 11, 4, 5, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 11, 4, 5, 0, 0, tzinfo=UTC),
     )
 
 

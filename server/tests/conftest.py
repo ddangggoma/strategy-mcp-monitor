@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 import pytest
@@ -13,7 +13,7 @@ from tests.fakes import CapturingOtpProvider, FakeClock, FakeProber, FakeRunner
 
 @pytest.fixture
 def clock():
-    return FakeClock(datetime(2026, 11, 4, 5, 0, 0, tzinfo=timezone.utc))
+    return FakeClock(datetime(2026, 11, 4, 5, 0, 0, tzinfo=UTC))
 
 
 @pytest.fixture

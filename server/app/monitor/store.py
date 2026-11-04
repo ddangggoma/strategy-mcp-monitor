@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from app.clock import Clock
@@ -26,8 +26,8 @@ class EndpointTakenError(Exception):
 def _parse_dt(value: str) -> datetime:
     dt = datetime.fromisoformat(value)
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
 
 
 def _to_mcp(row: sqlite3.Row) -> Mcp:
@@ -60,7 +60,7 @@ class McpStore:
     ) -> int:
         """Insert inside the caller's transaction; the caller owns commit and rollback."""
         try:
-            return conn.execute(
+            row_id = conn.execute(
                 "INSERT INTO mcps (name, host, port, config, owner_id, created_by, created_at)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
@@ -73,6 +73,8 @@ class McpStore:
                     self._clock.now().isoformat(),
                 ),
             ).lastrowid
+            assert row_id is not None  # an INSERT always sets lastrowid
+            return row_id
         except sqlite3.IntegrityError as exc:
             mapped = _map_integrity_error(exc, config)
             if mapped is exc:

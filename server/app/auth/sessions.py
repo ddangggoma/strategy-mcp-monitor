@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.audit import cap_user_agent
 from app.clock import Clock
@@ -34,8 +34,8 @@ def _hash_id(session_id: str) -> str | None:
 def _parse_dt(value: str) -> datetime:
     dt = datetime.fromisoformat(value)
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
 
 
 class SessionStore:
@@ -48,7 +48,7 @@ class SessionStore:
     ) -> tuple[str, str]:
         session_id = secrets.token_urlsafe(32)
         csrf_token = secrets.token_urlsafe(24)
-        now = self._clock.now().astimezone(timezone.utc).isoformat()
+        now = self._clock.now().astimezone(UTC).isoformat()
         self._db.execute(
             "INSERT INTO auth_sessions"
             " (id_hash, user_id, channel, csrf_token, created_at, last_seen_at, ip, user_agent)"
@@ -67,7 +67,7 @@ class SessionStore:
         id_hash = _hash_id(session_id)
         if id_hash is None:
             return None
-        now = self._clock.now().astimezone(timezone.utc)
+        now = self._clock.now().astimezone(UTC)
         with self._db.transaction() as conn:
             row = conn.execute(
                 "SELECT user_id, channel, csrf_token, created_at, last_seen_at"

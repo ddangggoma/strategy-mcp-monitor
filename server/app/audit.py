@@ -9,7 +9,6 @@ from app.logstore.writer import LogWriter
 from app.users.store import User
 from app.web.channels import Channel
 
-
 _THROTTLE_WINDOW_SEC = 600
 _THROTTLE_PURGE_AT = 1024
 _THROTTLE_MAX = 10000

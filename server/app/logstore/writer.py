@@ -4,9 +4,10 @@ import asyncio
 import json
 import sys
 from collections import defaultdict
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 from app.clock import KST, Clock, to_kst_iso
 
@@ -124,7 +125,7 @@ class LogWriter:
         while not self._stopping:
             try:
                 await asyncio.wait_for(self._wake.wait(), self._flush_interval)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
             self._wake.clear()
             try:

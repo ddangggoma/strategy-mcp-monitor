@@ -1,6 +1,16 @@
-import threading, pytest
+import threading
 from datetime import timedelta
-from app.users.store import UserStore, InvalidEmailError, UserExistsError, LastAdminError, UserNotFoundError
+
+import pytest
+
+from app.users.store import (
+    InvalidEmailError,
+    LastAdminError,
+    UserExistsError,
+    UserNotFoundError,
+    UserStore,
+)
+
 
 def test_email_normalized(db, clock):
     s = UserStore(db, clock)

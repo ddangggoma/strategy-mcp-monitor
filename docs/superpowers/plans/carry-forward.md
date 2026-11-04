@@ -5,36 +5,42 @@ Every later plan reads this file before it is written and checks off the items i
 ## From Plan 1 (core service & auth)
 
 ### Plan 2 (MCP monitoring backend)
-- [ ] **(Important, do in Plan 2 Task 1)** The External User-Agent header has no length limit. `AuditLogger.auth()`/`admin()` and `SessionStore.create` store the raw User-Agent. The httptools parser has no header-size limit, so an anonymous request can still fill the disk.
+- [x] **(Important, do in Plan 2 Task 1)** The External User-Agent header has no length limit. `AuditLogger.auth()`/`admin()` and `SessionStore.create` store the raw User-Agent. The httptools parser has no header-size limit, so an anonymous request can still fill the disk. (Plan 2 Task 1)
   - Cap `user_agent` at 512 characters in `AuditLogger` and `SessionStore.create`.
   - Add `extra="forbid"` to `OtpRequestBody`/`OtpVerifyBody`.
   - Consider a request body-size limit middleware (for example 64 KB).
-- [ ] The audit throttle key is (event, ip). After one per-email cooldown 429, later 429s for other emails from the same IP go unrecorded for 10 minutes. Consider keying by (event, ip, email-hash).
-- [ ] Remove the global `pydantic.ValidationError` → 422 handler (`app_factory.py`). Use `ApiError(422)` in the settings route instead, so server-side model bugs return 500, not a client 422. Also handle a corrupt stored settings row.
-- [ ] `Database.transaction()`: raise `RuntimeError` when a transaction is already open (`in_transaction`) to prevent re-entry within the same thread.
-- [ ] `can()` hardening:
+- [x] The audit throttle key is (event, ip). After one per-email cooldown 429, later 429s for other emails from the same IP go unrecorded for 10 minutes. Consider keying by (event, ip, email-hash). (Plan 2 Task 1)
+- [x] Remove the global `pydantic.ValidationError` → 422 handler (`app_factory.py`). Use `ApiError(422)` in the settings route instead, so server-side model bugs return 500, not a client 422. Also handle a corrupt stored settings row. (Plan 2 Task 2)
+- [x] `Database.transaction()`: raise `RuntimeError` when a transaction is already open (`in_transaction`) to prevent re-entry within the same thread. (Plan 2 Task 2)
+- [x] `can()` hardening: (Plan 2 Task 2)
   - normalize an inactive user to `None` up front;
   - type `Rule.min_role` as `Role | None`;
   - check the channel with `get_args(Channel)`;
   - freeze `RULES` with `MappingProxyType`.
   - Do this when DELETE_MCP and EDIT_SCRIPTS get wired to routes.
-- [ ] Align the spec text:
+- [x] Align the spec text: (Plan 2 Task 14, docs/PLAN.md v0.5)
   - §4.4 `can(user, action, resource, channel)` should read `can(user, action, channel, owner_id)`;
   - §8 `PUT /api/users` should read `PATCH /api/users/{id}`.
-- [ ] `Database.execute()` returns `lastrowid`, which is meaningless for non-INSERT statements. Document this, or add `rowcount`.
-- [ ] Run ruff and mypy once (install them as dev dependencies).
+- [x] `Database.execute()` returns `lastrowid`, which is meaningless for non-INSERT statements. Document this, or add `rowcount`. (Plan 2 Task 2: documented, `execute_rowcount` added)
+- [x] Run ruff and mypy once (install them as dev dependencies). (Plan 2 Task 14: both clean; config in `server/pyproject.toml`)
 
 ### Plan 3 (Web UI)
 - [ ] Lowering only the retention period below `log_compress_after_days` returns 422. The UI must explain that both values have to be lowered together.
 - [ ] Both ports use the same cookie name (`mcpmon_sid`), and browser cookies are scoped by host, not port. Logging in on one channel overwrites the other channel's cookie. Consider per-channel cookie names.
 - [ ] Show an OTP lockout message: up to 1 hour after 10 failures. Optionally clear the failure history after a successful login.
 - [ ] Read the CSRF token from `GET /api/auth/me` (added in the Plan 1 final fixes).
+- [ ] (From Plan 2) The board is `GET /api/board` plus the SSE events `board` / `mcp` / `mcp_removed` / `action` on `GET /api/stream`.
+- [ ] (From Plan 2) A manual action returns 202 + `run_id`; show the result toast from the `action` event (signed-in developer+ only; anonymous streams never get `action` events).
+- [ ] (From Plan 2) Compute script diffs in the client from the versions API content (`GET .../scripts/{kind}/versions[/{version}]`).
+- [ ] (From Plan 2) The anonymous board omits host:port, owner and config; those come from `GET /api/mcps[/{id}]` (developer+).
+- [ ] (From Plan 2) An SSE stream keeps the auth level it connected with: after logout, close and reopen `/api/stream`.
 
 ### Plan 4 (Windows collection)
 - [ ] `LogWriter.emit()` is loop-thread only. Collector threads must go through `loop.call_soon_threadsafe`.
 - [ ] Collectors need an event-time override for `ts`: `emit` currently ignores a caller-supplied `ts`.
 - [ ] Once a second process (agent or collector) opens `config.db`, cross-process contention can block the event loop for up to 5 s (`busy_timeout`). Move DB access off the loop or keep the second process off `config.db`.
 - [ ] Record the localhost login's Windows account (spec §4.1.5).
+- [ ] (From Plan 2) Add `sessions` to `GET /api/board` and to the SSE board events.
 
 ### Plan 5 (log viewer, retention, packaging)
 - [ ] Reader and indexer:
@@ -60,6 +66,14 @@ Every later plan reads this file before it is written and checks off the items i
   - add PyInstaller hiddenimports for httptools, websockets and watchfiles;
   - switch back to `uvicorn[standard]` once pyyaml has a cp315 wheel.
 - [ ] e2e test: assert `lp != ep`, assert the POST statuses, and set `stdin=DEVNULL`.
+- [ ] (From Plan 2) ACL on `scripts/` (SYSTEM + Administrators only; spec §5.8).
+- [ ] (From Plan 2) Retention purge for `mcp_actions` and `mcp_transitions` (`mcp_minutes` already has an hourly purge).
+- [ ] (From Plan 2) Apply the service start type (auto, delayed) from the global settings.
+- [ ] (From Plan 2) Service stop: `Monitor.stop()` abandons a still-running script after 10 s (the script process keeps running); decide whether the service host should wait longer or kill the tree.
+
+### Later
+- [ ] (From Plan 2) `Alert` effects (alert-only issues, FAILED) only write an `mcp.health` log line; a notification channel (spec §14) is needed.
+- [ ] (From Plan 2) `E501` is not enforced (about 80 app lines exceed the configured 100 columns); enforce it or run `ruff format` once.
 
 ### Later (real OTP provider)
 - [ ] A `provider.send` failure distinguishes registered emails (enumeration), and sending inline creates a timing difference. Move sending off the request path, and make failures behave the same either way.

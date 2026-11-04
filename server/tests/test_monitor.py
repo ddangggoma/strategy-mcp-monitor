@@ -6,7 +6,8 @@ import pytest
 
 from app.clock import to_kst_iso
 from app.monitor.engine import ActionInProgressError
-from app.monitor.models import Issue, Mcp, McpState as S
+from app.monitor.models import Issue, Mcp
+from app.monitor.models import McpState as S
 from app.monitor.probes import ProbeResult
 from app.monitor.scripts import ScriptUpload
 from app.monitor.store import McpNotFoundError

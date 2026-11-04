@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.audit import AuditLogger
 
@@ -18,7 +18,7 @@ def _hit(audit, ip, now, event="otp_request"):
 
 def test_rate_limited_audit_once_per_event_ip_window():
     log = _Log(); audit = AuditLogger(log)
-    t0 = datetime(2026, 11, 4, 5, 0, tzinfo=timezone.utc)
+    t0 = datetime(2026, 11, 4, 5, 0, tzinfo=UTC)
     for i in range(5):
         _hit(audit, "1.1.1.1", t0 + timedelta(seconds=i))
     assert len(log.events) == 1 and log.events[0][1]["ok"] is False
@@ -31,7 +31,7 @@ def test_rate_limited_audit_once_per_event_ip_window():
 
 def test_rate_limited_audit_memory_is_bounded():
     log = _Log(); audit = AuditLogger(log)
-    t0 = datetime(2026, 11, 4, 5, 0, tzinfo=timezone.utc)
+    t0 = datetime(2026, 11, 4, 5, 0, tzinfo=UTC)
     for i in range(30000):
         _hit(audit, f"ip{i}", t0)
     assert audit.throttle_size <= 10000
@@ -40,7 +40,7 @@ def test_rate_limited_audit_memory_is_bounded():
 
 
 def test_email_scope_throttles_per_email():
-    log = _Log(); audit = AuditLogger(log); t0 = datetime(2026, 11, 4, 5, 0, tzinfo=timezone.utc)
+    log = _Log(); audit = AuditLogger(log); t0 = datetime(2026, 11, 4, 5, 0, tzinfo=UTC)
     for email in ("a@x.com", "b@x.com", "a@x.com"):
         audit.auth_rate_limited(event="otp_request", email=email, channel="external", ip="1.1.1.1",
                                 user_agent=None, now=t0, scope="email")

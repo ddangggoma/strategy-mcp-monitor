@@ -1,14 +1,16 @@
+from datetime import UTC, datetime
 from types import MappingProxyType
 
 import pytest
-from datetime import datetime, timezone
+
 from app.auth import policy
-from app.auth.policy import RULES, Action as A, can
+from app.auth.policy import RULES, can
+from app.auth.policy import Action as A
 from app.users.store import User
 
 
 def mk(role, uid=1, active=True):
-    return User(uid, f"{uid}@x.com", "n", role, active, datetime.now(timezone.utc), None, None)
+    return User(uid, f"{uid}@x.com", "n", role, active, datetime.now(UTC), None, None)
 
 
 DEV, ADM = mk("developer", 1), mk("admin", 2)

@@ -4,8 +4,9 @@ import asyncio
 import contextlib
 import signal
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from pathlib import Path
+from typing import Any
 
 import uvicorn
 from fastapi import FastAPI
@@ -22,7 +23,7 @@ def server_configs(
 ) -> list[uvicorn.Config]:
     # proxy_headers=False: no reverse proxy by design, so X-Forwarded-For must never
     # override request.client.host (audit ip, OTP per-IP limit).
-    common = {"log_level": "info", "proxy_headers": False, "timeout_graceful_shutdown": 10}
+    common: dict[str, Any] = {"log_level": "info", "proxy_headers": False, "timeout_graceful_shutdown": 10}
     return [
         uvicorn.Config(local_app, host="127.0.0.1", port=local_port, **common),
         uvicorn.Config(external_app, host="0.0.0.0", port=external_port, **common),
@@ -37,7 +38,7 @@ class _Server(uvicorn.Server):
         yield
 
 
-def request_exit(servers: list[uvicorn.Server]) -> None:
+def request_exit(servers: Sequence[uvicorn.Server]) -> None:
     """First signal: graceful exit. A repeated signal: force exit (mirrors uvicorn's own handler)."""
     for server in servers:
         if server.should_exit:
@@ -47,7 +48,7 @@ def request_exit(servers: list[uvicorn.Server]) -> None:
 
 
 @contextlib.contextmanager
-def _stop_on_signals(servers: list[uvicorn.Server]) -> Iterator[None]:
+def _stop_on_signals(servers: Sequence[uvicorn.Server]) -> Iterator[None]:
     """Ctrl+C / SIGTERM / SIGBREAK ask every server to exit gracefully."""
     if threading.current_thread() is not threading.main_thread():
         yield

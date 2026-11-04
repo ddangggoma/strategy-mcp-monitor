@@ -259,7 +259,7 @@ def _auth_lines(services):
     path = services.paths.logs_dir / "2026-11-04.jsonl"
     if not path.exists():
         return []
-    return [e for e in (json.loads(l) for l in path.read_text("utf-8").splitlines()) if e["cat"] == "auth"]
+    return [e for e in (json.loads(line) for line in path.read_text("utf-8").splitlines()) if e["cat"] == "auth"]
 
 
 async def test_otp_request_overlong_email_422_no_row_no_log(external_client, services):

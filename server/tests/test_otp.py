@@ -1,7 +1,9 @@
 import pytest
-from app.auth.otp import OtpService, OtpRateLimitError, DummyOtpProvider
-from app.users.store import UserStore, InvalidEmailError
+
+from app.auth.otp import DummyOtpProvider, OtpRateLimitError, OtpService
+from app.users.store import InvalidEmailError, UserStore
 from tests.fakes import CapturingOtpProvider
+
 
 @pytest.fixture
 def env(db, clock):

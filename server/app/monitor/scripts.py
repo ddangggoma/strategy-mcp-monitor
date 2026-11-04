@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import contextlib
 import hashlib
 import os
@@ -143,7 +144,7 @@ class ScriptStore:
         )
         return rows[0]["content"] if rows else None
 
-    def versions(self, mcp_id: int, kind: str) -> list[ScriptVersion]:
+    def versions(self, mcp_id: int, kind: str) -> builtins.list[ScriptVersion]:  # `list` is this class's method
         rows = self._db.query(
             "SELECT * FROM mcp_script_versions WHERE mcp_id = ? AND kind = ? ORDER BY version DESC",
             (mcp_id, kind),

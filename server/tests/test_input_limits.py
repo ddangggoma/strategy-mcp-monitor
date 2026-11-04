@@ -1,4 +1,5 @@
 import pytest
+
 from tests.test_auth_api import audit_events, bootstrap
 
 # Ruling F20: the body cap is 524_288 (not 262_144) so a legitimate POST /api/mcps with

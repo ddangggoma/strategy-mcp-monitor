@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from collections import deque
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.clock import Clock
 from app.db import Database
@@ -18,22 +18,22 @@ _MINUTE_FORMAT = "%Y-%m-%dT%H:%MZ"
 
 def minute_key(at: datetime) -> str:
     """UTC minute bucket key, ``YYYY-MM-DDTHH:MMZ`` (sorts lexicographically by time)."""
-    return at.astimezone(timezone.utc).strftime(_MINUTE_FORMAT)
+    return at.astimezone(UTC).strftime(_MINUTE_FORMAT)
 
 
 def _parse_minute(key: str) -> datetime:
-    return datetime.strptime(key, _MINUTE_FORMAT).replace(tzinfo=timezone.utc)
+    return datetime.strptime(key, _MINUTE_FORMAT).replace(tzinfo=UTC)
 
 
 def _parse_dt(value: str) -> datetime:
     dt = datetime.fromisoformat(value)
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
 
 
 def _db_dt(at: datetime) -> str:
-    return at.astimezone(timezone.utc).isoformat()
+    return at.astimezone(UTC).isoformat()
 
 
 @dataclass(frozen=True)

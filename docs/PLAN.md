@@ -1,7 +1,7 @@
 # Strategy MCP Monitor — 하이레벨 개발 계획서
 
-- 버전: **v0.4** (2026-11-04)
-- 상태: 요구사항 확정. 구현 착수 전입니다.
+- 버전: **v0.5** (2026-11-05)
+- 상태: 요구사항 확정. 구현 중입니다 (P0–P2 완료: 기반, 인증·권한, MCP 모니터 엔진). 이 문서가 기준이며, 구현에서 달라진 점은 변경 이력에 적습니다.
 - 대상: **Windows 11 Pro**에서 실행되는 MCP 관리 + RDP 접속·행동 감사 웹 애플리케이션
 
 ### 변경 이력
@@ -11,6 +11,7 @@
 | v0.2 | Win 11 Pro 확정, 이메일 + OTP 로그인(Dummy), 역할·소유자 기반 권한, 사전 고지 다이얼로그, 부팅 자동 실행, 로그 필터, 성능 설계, 버전 정책, 디자인 스킬 |
 | v0.3 | **역할 명칭 변경**: Admin → **MCP 개발자**, Super Admin → **Admin**. **User 역할 삭제**(로그인은 MCP 개발자·Admin만). Admin이 다른 Admin을 지정할 수 있음. 로그인 가능 이메일은 Admin이 등록. **cmd 내부 명령 수집(Clink) 제외**. 고지 다이얼로그는 **연결될 때마다** 표시. 로그 보존 기간 설정 UI 추가 |
 | v0.4 | 스크립트 예외 격리 추가: 별도 프로세스 실행, **120초 타임아웃**, 결과 분류(ok/failed/timeout/error), 출력·동시 실행 제한 (R20) |
+| v0.5 | **구현 정합 (P1–P2):** §4.3 스크립트 **조회**(읽기 전용) 행 추가(MCP 개발자 이상, Local), §4.4 `can(user, action, channel, owner_id)`, §5.8 조회/편집 권한 구분, §8 `PATCH /api/users/{id}`와 MCP·스크립트·스트림 엔드포인트 보강(수동 조치는 202 + `run_id`, 외부 채널에서 Local 전용 경로는 405가 아니라 404) |
 
 ---
 
@@ -142,6 +143,7 @@
 | **MCP 시작 / 재실행 / 종료 (모든 MCP)** | ✗ | ✓ | ✓ |
 | MCP 신규 등록 (start·stop 스크립트를 함께 작성해야 하므로) | ✗ | (L) | (L) |
 | MCP 삭제 | ✗ | (L) 소유자만 | (L) |
+| 스크립트 조회 (내용·버전 이력, 읽기 전용) | ✗ | (L) | (L) |
 | **스크립트 추가·수정·삭제** | ✗ | **(L) 소유자만** | **(L) 소유자만** |
 | **소유권 이전** | ✗ | ✗ | **(L)** |
 | **사용자 관리** (로그인 이메일 등록, 역할 지정, Admin 지정, 비활성화) | ✗ | ✗ | **(L)** |
@@ -150,6 +152,7 @@
 | 사전 고지 메시지 편집 | ✗ | ✗ | **(L)** |
 | 관리자 감사 로그 조회 | ✗ | ✓ | ✓ |
 
+- **스크립트 조회**는 소유자가 아니어도 MCP 개발자 이상이면 localhost에서 읽기 전용으로 할 수 있습니다(§6.4). 외부 채널에서는 스크립트 내용을 보여주지 않습니다.
 - **스크립트 권한은 Admin도 예외가 아닙니다.** 다른 사람의 MCP 스크립트를 고쳐야 하면, Admin이 localhost에서 소유권을 이전한 다음 수정합니다.
 - 소유자 계정이 비활성화되면 그 MCP는 "소유자 없음"으로 표시됩니다. 스크립트는 계속 동작하지만, 소유권을 이전하기 전에는 수정할 수 없습니다.
 - 스크립트를 **실행**하는 것(자동 조치, 수동 시작·재실행·종료)에는 소유자 제한이 없습니다. 제한은 스크립트 **내용을 바꾸는 행위**에만 적용됩니다.
@@ -158,7 +161,7 @@
 - **서버 2개:** 8700은 `127.0.0.1`에만 바인딩합니다. 스크립트, 전역 설정, 사용자 관리, 소유권 이전, 고지 편집 라우트는 **8700 라우터에만 등록**합니다.
 - 같은 PC에서 8701로 들어온 요청도 **외부 채널로 취급**합니다. 채널은 들어온 포트로만 판별합니다.
 - 8700 앞에 같은 PC의 리버스 프록시를 두지 않습니다. 이 제약은 운영 문서에 명시합니다.
-- **권한 검사 단일화:** 모든 판단은 정책 함수 하나 `can(user, action, resource, channel)`에서 합니다. 매트릭스(§4.3) 전체를 자동 테스트로 만듭니다.
+- **권한 검사 단일화:** 모든 판단은 정책 함수 하나 `can(user, action, channel, owner_id)`에서 합니다. `owner_id`는 대상 MCP의 (활성) 소유자 id이고, 소유자 규칙이 없는 동작에서는 쓰지 않습니다. 매트릭스(§4.3) 전체를 자동 테스트로 만듭니다.
 - **UI 표시:** 권한이 없는 기능도 숨기지 않고, 비활성 상태로 두면서 이유를 함께 보여줍니다.
 
 ---
@@ -247,7 +250,7 @@
 ### 5.8 스크립트 실행기와 스크립트 관리
 - **종류:** `start`(필수), `stop`(필수), `restart`(선택). 형식은 `.ps1`, `.bat`, `.cmd`입니다.
 - **저장:** `scripts/<mcp-id>/`에 둡니다. SYSTEM과 Administrators만 쓸 수 있도록 ACL을 겁니다.
-- **편집:** localhost 채널에서 MCP 소유자만 할 수 있고, CodeMirror 편집기를 씁니다. 저장할 때마다 버전 이력(작성자, 시각, diff)이 남고 되돌릴 수 있습니다.
+- **조회·편집:** 조회(내용, 버전 목록)는 localhost 채널에서 MCP 개발자 이상이 읽기 전용으로 할 수 있습니다. 편집은 localhost 채널에서 MCP 소유자만 할 수 있고, CodeMirror 편집기를 씁니다. 저장할 때마다 버전 이력(작성자, 시각, diff)이 남고 되돌릴 수 있습니다.
 - **무결성 검사:** 실행 직전에 파일 해시를 DB와 비교합니다. 앱 밖에서 바뀐 파일이면 실행을 막고 `tamper` 이벤트를 남깁니다.
 - **실행:**
   - 환경변수: `MCP_ID`, `MCP_NAME`, `MCP_HOST`, `MCP_PORT`, `MCP_PID`, `MCP_REASON`, `MCP_TRIGGER`, `MCP_ACTOR`
@@ -361,17 +364,21 @@
 
 | 엔드포인트 (예) | 익명 | MCP 개발자 | Admin | 채널 |
 |---|:-:|:-:|:-:|---|
-| `GET /api/board`, `GET /api/stream` | ✓ | ✓ | ✓ | 둘 다 |
+| `GET /api/board`, `GET /api/stream` (SSE: `board`·`mcp`·`mcp_removed` 이벤트. `action` 이벤트는 로그인한 MCP 개발자 이상에게만) | ✓ | ✓ | ✓ | 둘 다 |
 | `POST /api/auth/otp/request`, `POST /api/auth/otp/verify`, `POST /api/auth/logout` | ✓ | ✓ | ✓ | 둘 다 |
-| `GET /api/mcps/{id}/history`, `GET /api/sessions/history` | ✗ | ✓ | ✓ | 둘 다 |
+| `GET /api/mcps`, `GET /api/mcps/{id}` (설정 포함), `GET /api/mcps/{id}/history`, `GET /api/mcps/{id}/actions/{action_id}` (출력 포함), `GET /api/sessions/history` | ✗ | ✓ | ✓ | 둘 다 |
 | `GET /api/logs?from&to&users&cat&q&cursor`, `GET /api/logs/histogram`, `GET /api/logs/export` | ✗ | ✓ | ✓ | 둘 다 |
-| `PUT /api/mcps/{id}`, `POST /api/mcps/{id}/actions/{start\|restart\|stop}` | ✗ | ✓ | ✓ | 둘 다 |
-| `POST /api/mcps`, `DELETE /api/mcps/{id}`, `GET/PUT/DELETE /api/mcps/{id}/scripts/{kind}` | ✗ | 소유자 | 소유자 | **Local만** |
+| `PUT /api/mcps/{id}`, `POST /api/mcps/{id}/actions/{start\|restart\|stop}` (**202 + `run_id`**: 결과는 `action` 이벤트와 이력으로 확인) | ✗ | ✓ | ✓ | 둘 다 |
+| `POST /api/mcps`, `DELETE /api/mcps/{id}` | ✗ | 등록: ✓ / 삭제: 소유자 | ✓ | **Local만** |
+| `GET /api/mcps/{id}/scripts`, `GET /api/mcps/{id}/scripts/{kind}`, `GET /api/mcps/{id}/scripts/{kind}/versions[/{version}]` (읽기 전용, §6.4) | ✗ | ✓ | ✓ | **Local만** |
+| `PUT/DELETE /api/mcps/{id}/scripts/{kind}`, `POST /api/mcps/{id}/scripts/{kind}/versions/{version}/revert` | ✗ | 소유자 | 소유자 | **Local만** |
 | `POST /api/mcps/{id}/owner` | ✗ | ✗ | ✓ | **Local만** |
-| `GET/POST/PUT /api/users` | ✗ | ✗ | ✓ | **Local만** |
+| `GET/POST /api/users`, `PATCH /api/users/{id}` | ✗ | ✗ | ✓ | **Local만** |
 | `GET/PUT /api/settings` (보존 기간 포함), `GET /api/settings/retention/preview`, `GET/PUT /api/notice` | ✗ | ✗ | ✓ | **Local만** |
 
-`DELETE /api/mcps/{id}`는 MCP 개발자는 소유자일 때만, Admin은 모든 MCP에 대해 허용합니다. 스크립트 라우트는 역할과 관계없이 소유자만 허용합니다.
+`DELETE /api/mcps/{id}`는 MCP 개발자는 소유자일 때만, Admin은 모든 MCP에 대해 허용합니다. 스크립트를 **바꾸는** 라우트(`PUT`/`DELETE`/`revert`)는 역할과 관계없이 소유자만 허용하고, `GET` 라우트는 MCP 개발자 이상이면 소유자가 아니어도 읽을 수 있습니다.
+
+**외부 채널(8701):** Local 전용 경로(위 표의 "Local만" 행)는 라우터에 등록하지 않으므로 어떤 메서드로 불러도 **404** `not_found`입니다(405가 아닙니다). 두 채널이 같은 경로를 공유하는 경우(`GET/PUT /api/mcps/{id}` 등)에도 Local 전용 메서드(`POST /api/mcps`, `DELETE /api/mcps/{id}`)는 외부에서 404입니다.
 
 ---
 

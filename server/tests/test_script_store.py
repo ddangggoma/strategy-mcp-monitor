@@ -40,7 +40,7 @@ def _tree(root):
 
 def test_prepare_ps1_bom_crlf():
     p = prepare_script("start", U(".ps1", "Write-Output '시작'\nexit 0"))
-    assert p.data == b"\xef\xbb\xbf" + "Write-Output '시작'\r\nexit 0\r\n".encode("utf-8")
+    assert p.data == b"\xef\xbb\xbf" + "Write-Output '시작'\r\nexit 0\r\n".encode()
     assert p.sha256 == hashlib.sha256(p.data).hexdigest()
     assert p.text == "Write-Output '시작'\r\nexit 0\r\n"
 

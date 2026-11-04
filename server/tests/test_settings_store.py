@@ -1,6 +1,8 @@
 import pytest
 from pydantic import ValidationError
+
 from app.settings.store import Settings, SettingsStore
+
 
 def test_defaults(db):
     s = SettingsStore(db).get()

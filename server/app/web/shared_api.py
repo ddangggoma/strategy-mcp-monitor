@@ -1,3 +1,5 @@
+from typing import Any
+
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -53,7 +55,7 @@ def _live_sid(request: Request) -> str | None:
     return request.cookies.get(SESSION_COOKIE)
 
 
-def _cookie_args(request: Request) -> dict[str, object]:
+def _cookie_args(request: Request) -> dict[str, Any]:
     return {
         "httponly": True,
         "samesite": "strict",

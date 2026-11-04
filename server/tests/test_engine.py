@@ -1,3 +1,4 @@
+from dataclasses import FrozenInstanceError
 from datetime import timedelta
 
 import pytest
@@ -663,7 +664,7 @@ def test_snapshot_is_a_frozen_value(clock):
     snap = e.snapshot()
     e.on_check(bad(clock))
     assert snap.state is S.HEALTHY and e.snapshot().state is S.SUSPECT
-    with pytest.raises(Exception):
+    with pytest.raises(FrozenInstanceError):
         snap.state = S.FAILED  # type: ignore[misc]
 
 

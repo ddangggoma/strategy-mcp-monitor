@@ -2,8 +2,9 @@ from datetime import timedelta
 
 import pytest
 
-from app.monitor.history import McpHistory, ActionRecord, TransitionRecord
-from app.monitor.models import McpState as S, Issue
+from app.monitor.history import ActionRecord, McpHistory, TransitionRecord
+from app.monitor.models import Issue
+from app.monitor.models import McpState as S
 from app.monitor.runner import ScriptResult
 from app.monitor.store import McpStore
 from app.users.store import UserStore

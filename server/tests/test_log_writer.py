@@ -5,7 +5,7 @@ from app.logstore.writer import DailyJsonlWriter, LogWriter
 
 
 def read(paths, day):
-    return [json.loads(l) for l in (paths.logs_dir / f"{day}.jsonl").read_text("utf-8").splitlines()]
+    return [json.loads(line) for line in (paths.logs_dir / f"{day}.jsonl").read_text("utf-8").splitlines()]
 
 
 def test_batch_split_across_midnight(paths):
@@ -108,7 +108,7 @@ async def wait_for_rows(paths, day, count, timeout=2.0, until=None):
         except OSError:
             lines = []
         if len(lines) >= count:
-            rows = [json.loads(l) for l in lines]
+            rows = [json.loads(line) for line in lines]
             if until is None or until(rows):
                 return rows
         await asyncio.sleep(0.01)

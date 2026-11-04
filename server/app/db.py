@@ -181,7 +181,8 @@ class Database:
         learn how many rows an UPDATE or DELETE touched.
         """
         with self._lock:
-            return self._conn.execute(sql, params).lastrowid
+            # 0 when no row was inserted (sqlite3 reports None for some statements)
+            return self._conn.execute(sql, params).lastrowid or 0
 
     def execute_rowcount(self, sql: str, params: Sequence = ()) -> int:
         """Run one statement and return the number of rows it changed."""

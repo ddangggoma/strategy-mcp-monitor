@@ -279,7 +279,7 @@ def test_effective_timeout_and_argv():
 
 def test_decode_output():
     assert decode_output(b"\xef\xbb\xbfok") == "ok"
-    assert decode_output("한글".encode("utf-8")) == "한글"
+    assert decode_output("한글".encode()) == "한글"
 
 
 def test_decode_output_oem_fallback():

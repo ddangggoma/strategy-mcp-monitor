@@ -1,12 +1,14 @@
-from datetime import datetime, timezone
+import sqlite3
+from datetime import UTC, datetime
 
 import pytest
 
 from app.clock import to_kst_iso
 from app.db import MIGRATIONS
 
+
 def test_kst_iso():
-    dt = datetime(2026, 11, 4, 15, 0, 0, 5000, tzinfo=timezone.utc)
+    dt = datetime(2026, 11, 4, 15, 0, 0, 5000, tzinfo=UTC)
     assert to_kst_iso(dt) == "2026-11-05T00:00:00.005+09:00"
 
 def test_migrate_creates_tables(db):
@@ -40,9 +42,8 @@ def test_transaction_is_immediate(db, paths):
 
     other = sqlite3.connect(str(paths.db_path), timeout=0, isolation_level=None)
     try:
-        with db.transaction():
-            with pytest.raises(sqlite3.OperationalError):
-                other.execute("BEGIN IMMEDIATE")
+        with db.transaction(), pytest.raises(sqlite3.OperationalError):
+            other.execute("BEGIN IMMEDIATE")
     finally:
         other.close()
 
@@ -87,9 +88,8 @@ def test_failed_commit_does_not_wedge(db):
         "CREATE TABLE child_t(id INTEGER PRIMARY KEY, "
         "pid INTEGER REFERENCES parent_t(id) DEFERRABLE INITIALLY DEFERRED)"
     )
-    with pytest.raises(sqlite3.IntegrityError):
-        with db.transaction() as conn:
-            conn.execute("INSERT INTO child_t(pid) VALUES (999)")
+    with pytest.raises(sqlite3.IntegrityError), db.transaction() as conn:
+        conn.execute("INSERT INTO child_t(pid) VALUES (999)")
     with db.transaction() as conn:
         conn.execute("INSERT INTO secrets(name, value) VALUES ('after', 'ok')")
     assert db.query("SELECT * FROM child_t") == []
@@ -129,16 +129,14 @@ def test_migrate_runs_trigger_migration_atomically(db, monkeypatch):
     )
     orig = list(dbmod.MIGRATIONS)
     monkeypatch.setattr(dbmod, "MIGRATIONS", [*orig, trigger, "CREATE TABLE tt (a TEXT);"])
-    with pytest.raises(Exception):
+    with pytest.raises(sqlite3.OperationalError):
         db.migrate()  # the last one fails (tt exists) -> its own transaction rolls back
     assert db.query("PRAGMA user_version")[0][0] == len(orig) + 1
 
 
 def test_transaction_reentry_raises(db):
-    with db.transaction():
-        with pytest.raises(RuntimeError, match="already open"):
-            with db.transaction():
-                pass
+    with db.transaction(), pytest.raises(RuntimeError, match="already open"), db.transaction():
+        pass
     db.execute("INSERT INTO secrets(name, value) VALUES ('ok', '1')")
     assert len(db.query("SELECT * FROM secrets WHERE name='ok'")) == 1
 
@@ -146,9 +144,8 @@ def test_transaction_reentry_raises(db):
 def test_transaction_reentry_does_not_roll_back_outer(db):
     with db.transaction() as conn:
         conn.execute("INSERT INTO secrets(name, value) VALUES ('outer', '1')")
-        with pytest.raises(RuntimeError):
-            with db.transaction():
-                pass
+        with pytest.raises(RuntimeError), db.transaction():
+            pass
     assert len(db.query("SELECT * FROM secrets WHERE name='outer'")) == 1
 
 

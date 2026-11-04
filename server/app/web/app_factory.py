@@ -139,9 +139,11 @@ def create_app(channel: Channel, services: Services) -> FastAPI:
     app = FastAPI(title=f"MCP Monitor ({channel})", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.channel = channel
     app.state.services = services
-    app.add_exception_handler(ApiError, api_error_handler)
-    app.add_exception_handler(StarletteHTTPException, _http_exception_handler)
-    app.add_exception_handler(RequestValidationError, _validation_handler)
+    # Starlette types a handler as taking `Exception`; it dispatches by exception class, so the narrower
+    # parameter types below are safe (hence the arg-type ignores).
+    app.add_exception_handler(ApiError, api_error_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(StarletteHTTPException, _http_exception_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(RequestValidationError, _validation_handler)  # type: ignore[arg-type]
     app.add_exception_handler(Exception, _unhandled_handler)
     app.include_router(shared_api.router)
     app.include_router(mcp_shared.router)

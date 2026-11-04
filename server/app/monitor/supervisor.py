@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import uuid
 from collections.abc import Awaitable, Callable, Hashable, Mapping
 from datetime import datetime, timedelta
@@ -244,7 +245,7 @@ class Monitor:
         for mcp_id in list(self._engines):
             if mcp_id not in self._pinging:
                 self._pinging.add(mcp_id)
-                self._spawn_probe(self._ping(mcp_id), lambda i=mcp_id: self._pinging.discard(i))
+                self._spawn_probe(self._ping(mcp_id), functools.partial(self._pinging.discard, mcp_id))
 
     async def issue_round(self) -> None:
         for mcp_id, engine in list(self._engines.items()):
@@ -342,7 +343,7 @@ class Monitor:
                 rid = run_id or uuid.uuid4().hex
                 task = asyncio.ensure_future(self._execute(mcp_id, effect, actor, rid))
                 self._scripts[mcp_id] = task
-                task.add_done_callback(lambda t, i=mcp_id: self._script_done(i, t))
+                task.add_done_callback(functools.partial(self._script_done, mcp_id))
 
     def _script_done(self, mcp_id: int, task: asyncio.Task[None]) -> None:
         if self._scripts.get(mcp_id) is task:

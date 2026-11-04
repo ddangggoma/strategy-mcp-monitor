@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from datetime import timedelta
 from typing import Annotated, Any, Literal
 
@@ -99,7 +99,7 @@ async def board_stream(
     *,
     coalesce_sec: float = COALESCE_SEC,
     heartbeat_sec: float = HEARTBEAT_SEC,
-) -> AsyncIterator[str]:
+) -> AsyncGenerator[str]:
     """SSE text for one subscriber: the whole board first, then changes coalesced per ``coalesce_sec``."""
     loop = asyncio.get_running_loop()
     try:

@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
@@ -29,7 +29,7 @@ def test_enums():
     assert [s.value for s in McpState] == [s.name for s in McpState]
     assert [i.value for i in Issue] == [i.name for i in Issue]
     assert ALERT_ONLY_ISSUES == frozenset({Issue.NETWORK_DOWN, Issue.WRONG_PROCESS})
-    c = CheckResult(datetime(2026, 1, 1, tzinfo=timezone.utc), None, None, None, None, None)
+    c = CheckResult(datetime(2026, 1, 1, tzinfo=UTC), None, None, None, None, None)
     assert c.issue is None
 
 
@@ -90,7 +90,7 @@ def test_host_normalized():
 
 
 def _mcp(host, port=9102, path="/mcp"):
-    return Mcp(1, cfg(host=host, port=port, path=path), None, None, datetime(2026, 1, 1, tzinfo=timezone.utc))
+    return Mcp(1, cfg(host=host, port=port, path=path), None, None, datetime(2026, 1, 1, tzinfo=UTC))
 
 
 def test_mcp_url():
@@ -171,10 +171,9 @@ def test_unknown_owner_is_not_mapped_to_a_conflict(env):
 
 def test_insert_joins_callers_transaction(env, db):
     s, _, owner = env
-    with pytest.raises(RuntimeError):
-        with db.transaction() as conn:
-            s.insert(conn, cfg(), owner.id, owner.id)
-            raise RuntimeError
+    with pytest.raises(RuntimeError), db.transaction() as conn:
+        s.insert(conn, cfg(), owner.id, owner.id)
+        raise RuntimeError
     assert s.list() == []
     with db.transaction() as conn:
         mcp_id = s.insert(conn, cfg(), owner.id, owner.id)

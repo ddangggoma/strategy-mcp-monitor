@@ -4,7 +4,7 @@ import hmac
 import math
 import secrets
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -35,7 +35,7 @@ class DummyOtpProvider:
         self._echo = echo
 
     def send(self, email: str, code: str) -> None:
-        line = f"{to_kst_iso(datetime.now(timezone.utc))} {email} {code}"
+        line = f"{to_kst_iso(datetime.now(UTC))} {email} {code}"
         self._outbox.parent.mkdir(parents=True, exist_ok=True)
         with self._outbox.open("a", encoding="utf-8") as f:
             f.write(line + "\n")
@@ -52,8 +52,8 @@ class OtpRateLimitError(Exception):
 def _parse(value: str) -> datetime:
     dt = datetime.fromisoformat(value)
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
 
 
 def _retry_after(until: datetime, now: datetime) -> int:

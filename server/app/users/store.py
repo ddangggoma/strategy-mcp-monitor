@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal, get_args
 
 from app.clock import Clock
@@ -65,8 +65,8 @@ def _parse_dt(value: str | None) -> datetime | None:
         return None
     dt = datetime.fromisoformat(value)
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
 
 
 @dataclass(frozen=True)
@@ -82,13 +82,15 @@ class User:
 
 
 def _to_user(row: sqlite3.Row) -> User:
+    created_at = _parse_dt(row["created_at"])
+    assert created_at is not None  # NOT NULL column
     return User(
         id=row["id"],
         email=row["email"],
         name=row["name"],
         role=row["role"],
         active=bool(row["active"]),
-        created_at=_parse_dt(row["created_at"]),
+        created_at=created_at,
         created_by=row["created_by"],
         last_login_at=_parse_dt(row["last_login_at"]),
     )
@@ -130,6 +132,7 @@ class UserStore:
                 " VALUES (?, ?, 'admin', 1, ?, NULL)",
                 (email, name, self._clock.now().isoformat()),
             ).lastrowid
+        assert user_id is not None  # an INSERT always sets lastrowid
         return self._require(user_id)
 
     def get(self, user_id: int) -> User | None:
