@@ -1,5 +1,8 @@
+from types import MappingProxyType
+
 import pytest
 from datetime import datetime, timezone
+from app.auth import policy
 from app.auth.policy import RULES, Action as A, can
 from app.users.store import User
 
@@ -20,6 +23,7 @@ MATRIX = [
     (A.EDIT_MCP_SETTINGS,    0, 1, 1, False, False),
     (A.MCP_MANUAL_ACTION,    0, 1, 1, False, False),
     (A.CREATE_MCP,           0, 1, 1, True,  False),
+    (A.VIEW_SCRIPTS,         0, 1, 1, True,  False),
     (A.EDIT_SCRIPTS,         0, 1, 1, True,  True),
     (A.TRANSFER_OWNERSHIP,   0, 0, 1, True,  False),
     (A.MANAGE_USERS,         0, 0, 1, True,  False),
@@ -67,7 +71,7 @@ def test_every_action_has_a_rule():
 
 
 def test_unlisted_action_is_denied(monkeypatch):
-    monkeypatch.delitem(RULES, A.VIEW_BOARD)
+    monkeypatch.setattr(policy, "RULES", MappingProxyType({a: r for a, r in RULES.items() if a is not A.VIEW_BOARD}))
     assert can(ADM, A.VIEW_BOARD, "local") is False
     assert can(None, A.VIEW_BOARD, "local") is False
 
@@ -96,3 +100,21 @@ def test_unknown_role_is_denied():
     odd = mk("superuser", 5)  # type: ignore[arg-type]
     for action in A:
         assert can(odd, action, "local", owner_id=5) is False
+
+
+def test_rules_frozen():
+    with pytest.raises(TypeError):
+        RULES[A.VIEW_BOARD] = RULES[A.VIEW_LOGS]  # type: ignore[index]
+
+
+def test_unknown_channel_case_is_denied():
+    assert can(ADM, A.VIEW_BOARD, "LOCAL") is False  # type: ignore[arg-type]
+
+
+def test_inactive_owner_is_not_owner():
+    assert can(mk("developer", 5, active=False), A.EDIT_SCRIPTS, "local", owner_id=5) is False
+
+
+def test_view_scripts_ignores_owner():
+    assert can(DEV, A.VIEW_SCRIPTS, "local", owner_id=99) is True
+    assert can(DEV, A.VIEW_SCRIPTS, "local") is True

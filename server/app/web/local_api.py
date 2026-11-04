@@ -238,7 +238,7 @@ async def update_settings(
             target={"error": "validation"},
             result="error",
         )
-        raise  # rendered as 422 {"error": "validation"} by the app-wide handler
+        raise ApiError(422, "validation") from None
     changes = {k: [before[k], v] for k, v in after.items() if before[k] != v}
     if changes:
         services.audit.admin(

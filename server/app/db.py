@@ -100,8 +100,18 @@ class Database:
             return self._conn.execute(sql, params).fetchall()
 
     def execute(self, sql: str, params: Sequence = ()) -> int:
+        """Run one statement and return ``lastrowid``.
+
+        The returned value is only meaningful for INSERT; use ``execute_rowcount`` to
+        learn how many rows an UPDATE or DELETE touched.
+        """
         with self._lock:
             return self._conn.execute(sql, params).lastrowid
+
+    def execute_rowcount(self, sql: str, params: Sequence = ()) -> int:
+        """Run one statement and return the number of rows it changed."""
+        with self._lock:
+            return self._conn.execute(sql, params).rowcount
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
@@ -112,6 +122,8 @@ class Database:
         transaction would stay open while other tasks run on the same connection.
         """
         with self._lock:
+            if self._conn.in_transaction:  # raise before the try: it must not roll back the outer one
+                raise RuntimeError("transaction already open")
             self._conn.execute("BEGIN IMMEDIATE")
             try:
                 yield self._conn

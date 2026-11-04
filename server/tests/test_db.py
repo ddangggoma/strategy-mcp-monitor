@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app.clock import to_kst_iso
+from app.db import MIGRATIONS
 
 def test_kst_iso():
     dt = datetime(2026, 11, 4, 15, 0, 0, 5000, tzinfo=timezone.utc)
@@ -15,7 +16,7 @@ def test_migrate_creates_tables(db):
 
 def test_migrate_idempotent(db):
     db.migrate()
-    assert db.query("PRAGMA user_version")[0][0] == 3
+    assert db.query("PRAGMA user_version")[0][0] == len(MIGRATIONS)
 
 def test_transaction_rollback(db):
     try:
@@ -97,7 +98,7 @@ def test_failed_commit_does_not_wedge(db):
 def test_migration_3_creates_verify_ip_table(db):
     names = {r["name"] for r in db.query("SELECT name FROM sqlite_master WHERE type='table'")}
     assert "otp_verify_ip" in names
-    assert db.query("PRAGMA user_version")[0][0] == 3
+    assert db.query("PRAGMA user_version")[0][0] >= 3
 
 
 def test_split_statements_handles_semicolons_in_literals_and_triggers():
@@ -125,7 +126,33 @@ def test_migrate_runs_trigger_migration_atomically(db, monkeypatch):
         "CREATE TABLE tt (a TEXT);"
         " CREATE TRIGGER tg AFTER INSERT ON tt BEGIN UPDATE tt SET a = 'z;z'; END;"
     )
-    monkeypatch.setattr(dbmod, "MIGRATIONS", [*dbmod.MIGRATIONS, trigger, "CREATE TABLE tt (a TEXT);"])
+    orig = list(dbmod.MIGRATIONS)
+    monkeypatch.setattr(dbmod, "MIGRATIONS", [*orig, trigger, "CREATE TABLE tt (a TEXT);"])
     with pytest.raises(Exception):
-        db.migrate()  # version 5 fails (tt exists) -> its own transaction rolls back
-    assert db.query("PRAGMA user_version")[0][0] == 4
+        db.migrate()  # the last one fails (tt exists) -> its own transaction rolls back
+    assert db.query("PRAGMA user_version")[0][0] == len(orig) + 1
+
+
+def test_transaction_reentry_raises(db):
+    with db.transaction():
+        with pytest.raises(RuntimeError, match="already open"):
+            with db.transaction():
+                pass
+    db.execute("INSERT INTO secrets(name, value) VALUES ('ok', '1')")
+    assert len(db.query("SELECT * FROM secrets WHERE name='ok'")) == 1
+
+
+def test_transaction_reentry_does_not_roll_back_outer(db):
+    with db.transaction() as conn:
+        conn.execute("INSERT INTO secrets(name, value) VALUES ('outer', '1')")
+        with pytest.raises(RuntimeError):
+            with db.transaction():
+                pass
+    assert len(db.query("SELECT * FROM secrets WHERE name='outer'")) == 1
+
+
+def test_execute_rowcount(db):
+    db.execute("INSERT INTO secrets(name, value) VALUES ('a','1')")
+    db.execute("INSERT INTO secrets(name, value) VALUES ('b','1')")
+    assert db.execute_rowcount("UPDATE secrets SET value='2'") == 2
+    assert db.execute_rowcount("DELETE FROM secrets WHERE name='zz'") == 0

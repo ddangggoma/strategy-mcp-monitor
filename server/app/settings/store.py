@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import sys
 from collections.abc import Mapping
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from app.db import Database
 
@@ -31,12 +32,23 @@ class Settings(BaseModel):
 class SettingsStore:
     def __init__(self, db: Database) -> None:
         self._db = db
+        self._warned: str | None = None  # last corrupt stored value already reported
+
+    def _parse(self, raw: str) -> Settings:
+        """Stored JSON -> Settings; a corrupt row yields defaults (reported once per value)."""
+        try:
+            return Settings.model_validate_json(raw)
+        except (ValidationError, ValueError):
+            if raw != self._warned:
+                self._warned = raw
+                print("settings: corrupt stored row, using defaults", file=sys.stderr)
+            return Settings()
 
     def get(self) -> Settings:
         rows = self._db.query("SELECT value FROM settings WHERE key = ?", (_KEY,))
         if not rows:
             return Settings()
-        return Settings.model_validate_json(rows[0]["value"])
+        return self._parse(rows[0]["value"])
 
     def update(self, patch: Mapping[str, Any]) -> Settings:
         # Read-merge-validate-write in one transaction so concurrent updates
@@ -45,7 +57,7 @@ class SettingsStore:
             row = conn.execute(
                 "SELECT value FROM settings WHERE key = ?", (_KEY,)
             ).fetchone()
-            current = Settings.model_validate_json(row["value"]) if row else Settings()
+            current = self._parse(row["value"]) if row else Settings()
             merged = Settings.model_validate({**current.model_dump(), **patch})
             conn.execute(
                 "INSERT INTO settings (key, value) VALUES (?, ?) "

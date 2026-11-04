@@ -1,6 +1,6 @@
 import pytest
 from pydantic import ValidationError
-from app.settings.store import SettingsStore
+from app.settings.store import Settings, SettingsStore
 
 def test_defaults(db):
     s = SettingsStore(db).get()
@@ -25,3 +25,22 @@ def test_update_rejects(db, patch):
     with pytest.raises(ValidationError):
         SettingsStore(db).update(patch)
     assert SettingsStore(db).get().ping_interval_sec == 5
+
+
+def test_corrupt_row_falls_back(db):
+    db.execute("INSERT INTO settings(key, value) VALUES ('global', '{not json')")
+    s = SettingsStore(db)
+    assert s.get() == Settings()
+    assert s.update({"ping_interval_sec": 7}).ping_interval_sec == 7
+    assert s.get().ping_interval_sec == 7
+
+
+def test_corrupt_row_warns_once_per_distinct_value(db, capsys):
+    db.execute("INSERT INTO settings(key, value) VALUES ('global', '{not json')")
+    s = SettingsStore(db)
+    for _ in range(3):
+        assert s.get() == Settings()
+    assert capsys.readouterr().err.count("corrupt") == 1
+    db.execute("UPDATE settings SET value = '{\"ping_interval_sec\": 0}' WHERE key = 'global'")
+    assert s.get() == Settings()
+    assert capsys.readouterr().err.count("corrupt") == 1

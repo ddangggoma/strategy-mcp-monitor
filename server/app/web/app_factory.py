@@ -6,7 +6,6 @@ import traceback
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import ValidationError
 from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -28,10 +27,6 @@ async def _http_exception_handler(request: Request, exc: StarletteHTTPException)
 
 
 async def _validation_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
-    return JSONResponse({"error": "validation"}, status_code=422)
-
-
-async def _pydantic_validation_handler(request: Request, exc: ValidationError) -> JSONResponse:
     return JSONResponse({"error": "validation"}, status_code=422)
 
 
@@ -143,7 +138,6 @@ def create_app(channel: Channel, services: Services) -> FastAPI:
     app.add_exception_handler(ApiError, api_error_handler)
     app.add_exception_handler(StarletteHTTPException, _http_exception_handler)
     app.add_exception_handler(RequestValidationError, _validation_handler)
-    app.add_exception_handler(ValidationError, _pydantic_validation_handler)
     app.add_exception_handler(Exception, _unhandled_handler)
     app.include_router(shared_api.router)
     app.add_middleware(BodySizeLimit)

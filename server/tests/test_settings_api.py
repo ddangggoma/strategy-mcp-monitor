@@ -1,3 +1,5 @@
+from types import MappingProxyType
+
 import pytest
 
 from app.auth import policy
@@ -87,10 +89,15 @@ async def test_retention_keys_require_edit_retention(local_client, services, mon
     c = await admin_client(local_client, services); h = {"X-CSRF-Token": c.csrf}
     # Today EDIT_RETENTION == EDIT_GLOBAL_SETTINGS; make it unsatisfiable (owner required, none
     # given) to prove the extra check runs.
-    monkeypatch.setitem(
-        policy.RULES,
-        policy.Action.EDIT_RETENTION,
-        policy.Rule("admin", local_only=True, owner=policy.OwnerRule.ALWAYS),
+    monkeypatch.setattr(
+        policy,
+        "RULES",
+        MappingProxyType({
+            **policy.RULES,
+            policy.Action.EDIT_RETENTION: policy.Rule(
+                "admin", local_only=True, owner=policy.OwnerRule.ALWAYS
+            ),
+        }),
     )
     r = await c.put("/api/settings", json={"log_retention_days": 90}, headers=h)
     assert r.status_code == 403 and r.json() == {"error": "forbidden"}

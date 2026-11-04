@@ -3,6 +3,7 @@ from fastapi import APIRouter
 
 from app.main import request_exit, server_configs
 from app.services import build_services
+from app.settings.store import Settings
 from app.web.app_factory import create_app
 
 
@@ -54,6 +55,21 @@ async def test_unhandled_exception_is_500_internal(services, capsys):
         r = await c.get("/t/num/abc")
         assert r.status_code == 422 and r.json() == {"error": "validation"}
     assert "secret detail" in capsys.readouterr().err
+
+
+async def test_model_bug_in_route_is_500(services):
+    app = create_app("local", services)
+    router = APIRouter()
+
+    @router.get("/t/model")
+    async def model():
+        Settings.model_validate({"ping_interval_sec": 0})
+
+    app.include_router(router)
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1:8700") as c:
+        r = await c.get("/t/model")
+    assert r.status_code == 500 and r.json() == {"error": "internal"}
 
 
 def test_build_services_reuses_stored_otp_secret(tmp_path):
