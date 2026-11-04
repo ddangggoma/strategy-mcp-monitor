@@ -51,10 +51,10 @@ def _is_local_request(request: Request) -> bool:
     origin = request.headers.get("origin")
     if origin is None:
         return True
-    parts = urlsplit(origin)
     try:
+        parts = urlsplit(origin)
         hostname = parts.hostname
-    except ValueError:
+    except ValueError:  # malformed Origin (e.g. "http://[::1"): fail closed
         return False
     host = f"[{hostname}]" if hostname and ":" in hostname else hostname
     return parts.scheme in ("http", "https") and host in _LOCAL_HOSTS

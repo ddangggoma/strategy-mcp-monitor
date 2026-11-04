@@ -199,6 +199,9 @@ def test_chaos_guard_rejects_foreign_host_and_origin(server):
     assert httpx.post(url, headers={"Host": f"evil.example:{port}"}).status_code == 403
     assert httpx.post(url, headers={"Origin": "http://evil.example"}).status_code == 403  # cross-origin browser
     assert httpx.post(url, headers={"Origin": "null"}).status_code == 403
+    # malformed Origins fail closed (403), never a 500
+    for bad in ("http://[::1", "http://[evil"):
+        assert httpx.post(url, headers={"Origin": bad}).status_code == 403, bad
     assert httpx.post(url, headers={"Origin": "http://localhost:3000"}).status_code == 200
     assert httpx.post(url, headers={"Host": f"localhost:{port}"}).status_code == 200
     assert httpx.post(url, headers={"Host": f"[::1]:{port}"}).status_code == 200
