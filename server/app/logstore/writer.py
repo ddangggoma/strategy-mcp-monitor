@@ -11,6 +11,23 @@ from typing import Any, Mapping, Sequence
 from app.clock import KST, Clock, to_kst_iso
 
 
+def _dumps(event: Mapping[str, Any]) -> str:
+    """Serialize one event; on failure emit a fallback line so the event is still represented."""
+    try:
+        return json.dumps(event, ensure_ascii=False, default=str)
+    except Exception as exc:
+        try:
+            detail = repr(event)
+        except Exception:
+            detail = f"<unrepresentable {type(event).__name__}>"
+        _warn(f"unserializable log event ({exc!r}); writing fallback line")
+        return json.dumps(
+            {"ts": event["ts"], "cat": event["cat"], "_unserializable": detail, "_error": repr(exc)},
+            ensure_ascii=False,
+            default=str,
+        )
+
+
 def _warn(msg: str) -> None:
     try:
         print(f"[logstore] warning: {msg}", file=sys.stderr)
@@ -30,12 +47,15 @@ class DailyJsonlWriter:
             day = datetime.fromisoformat(event["ts"]).astimezone(KST).strftime("%Y-%m-%d")
             if "cat" not in event:
                 raise KeyError("cat")
-            by_day[day].append(json.dumps(event, ensure_ascii=False, default=str))
+            by_day[day].append(_dumps(event))
         if not by_day:
             return
         self._dir.mkdir(parents=True, exist_ok=True)
         for day, lines in by_day.items():
-            with open(self._dir / f"{day}.jsonl", "a", encoding="utf-8", newline="\n") as f:
+            # backslashreplace: a lone surrogate in a string must not fail the whole write
+            with open(
+                self._dir / f"{day}.jsonl", "a", encoding="utf-8", errors="backslashreplace", newline="\n"
+            ) as f:
                 f.write("\n".join(lines) + "\n")
 
 
