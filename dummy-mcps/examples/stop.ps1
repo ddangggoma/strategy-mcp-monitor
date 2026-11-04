@@ -1,13 +1,13 @@
-﻿# stop.ps1 - stop a dummy MCP: kill the python process named in the pid file and any python listening on MCP_PORT.
-# Exit 0 once the port is free (also when it was already stopped); 1 if it is still listening after 10 s.
+﻿# stop.ps1 - stop a dummy MCP: kill this MCP's own python process(es): the pid-file pid and the listener on MCP_PORT, each only if its command line has -m <module> or this MCP's --pid-file.
+# Exit 0 once the port is free (also when it was already stopped); 1 if it is still listening after 10 s (e.g. a foreign process owns the port, which is left alone).
 
 # Input environment variables:
 #   MCP_ID             numeric id; names the files <run>\<MCP_ID>.pid / .out.log / .err.log  (required)
 #   MCP_NAME           seoul-weather | calculator | seoul-clock                               (required)
 #   MCP_HOST           bind / dial host                                                       (required)
 #   MCP_PORT           TCP port 1-65535                                                       (required)
-#   DUMMY_MCPS_DIR     dummy-mcps checkout; must contain .venv\Scripts\python.exe             (required)
-#   DUMMY_MCP_RUN_DIR  directory for the pid and log files          (default: $env:DUMMY_MCPS_DIR\run)
+#   DUMMY_MCPS_DIR     dummy-mcps checkout; must contain .venv\Scripts\python.exe             (required; a relative path is resolved against the cwd)
+#   DUMMY_MCP_RUN_DIR  directory for the pid and log files (relative: against the cwd)  (default: <DUMMY_MCPS_DIR>\run)
 #   DUMMY_MCP_CHAOS    "1" adds --chaos (registers the /chaos/* endpoints)
 # The other MCP_* variables the monitor sets (MCP_PID, MCP_REASON, ...) are ignored.
 # Exit codes: 0 success, 1 failure, 2 environment error (bad or missing variable, unknown MCP_NAME, no venv python).
@@ -23,17 +23,24 @@ function Exit-Env([string]$Message) {
     exit 2
 }
 
-if ($env:MCP_ID -notmatch '^\d{1,9}\z') { Exit-Env 'MCP_ID must be a number' }
+if ($env:MCP_ID -notmatch '^[0-9]{1,9}\z') { Exit-Env 'MCP_ID must be a number' }
 if (-not $env:MCP_NAME -or -not $Modules.ContainsKey($env:MCP_NAME)) { Exit-Env "unknown MCP_NAME '$($env:MCP_NAME)'" }
-if (-not $env:MCP_HOST -or $env:MCP_HOST -match '\s' -or $env:MCP_HOST.StartsWith('-')) { Exit-Env 'MCP_HOST is missing or invalid' }
+if (-not $env:MCP_HOST -or $env:MCP_HOST -match '[\s"]' -or $env:MCP_HOST.StartsWith('-')) { Exit-Env 'MCP_HOST is missing or invalid' }
 $Port = 0
 if (-not [int]::TryParse("$($env:MCP_PORT)", [ref]$Port) -or $Port -lt 1 -or $Port -gt 65535) { Exit-Env 'MCP_PORT must be 1-65535' }
 if (-not $env:DUMMY_MCPS_DIR) { Exit-Env 'DUMMY_MCPS_DIR is not set' }
-$Python = Join-Path $env:DUMMY_MCPS_DIR '.venv\Scripts\python.exe'
+
+# Every path is made absolute against the caller's cwd: the server runs with WorkingDirectory=DUMMY_MCPS_DIR, so a
+# relative --pid-file or log path would point somewhere other than where this script looks.
+function Resolve-Abs([string]$Path) {
+    [IO.Path]::GetFullPath([IO.Path]::Combine((Get-Location).ProviderPath, $Path))
+}
+$DummyDir = Resolve-Abs $env:DUMMY_MCPS_DIR
+$Python = Join-Path $DummyDir '.venv\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) { Exit-Env "python not found: $Python" }
 
 $Module = $Modules[$env:MCP_NAME]
-$RunDir = if ($env:DUMMY_MCP_RUN_DIR) { $env:DUMMY_MCP_RUN_DIR } else { Join-Path $env:DUMMY_MCPS_DIR 'run' }
+$RunDir = if ($env:DUMMY_MCP_RUN_DIR) { Resolve-Abs $env:DUMMY_MCP_RUN_DIR } else { Join-Path $DummyDir 'run' }
 $PidFile = Join-Path $RunDir "$($env:MCP_ID).pid"
 $OutLog = Join-Path $RunDir "$($env:MCP_ID).out.log"
 $ErrLog = Join-Path $RunDir "$($env:MCP_ID).err.log"
@@ -61,23 +68,25 @@ function Test-IsPython([int]$ProcessId) {
 # <<< SHARED prelude
 
 # >>> SHARED stop-logic
-# A pid file can outlive its process (crash, hard kill) and the pid can be recycled, so it is only a hint: its pid is
-# killed only when that process is a python whose command line carries this MCP's own --pid-file path.
-function Test-PidFileOwner([int]$ProcessId) {
+# Only this MCP's own processes are killed. A pid file can outlive its process (crash, hard kill) and the pid can be
+# recycled, and another python may hold the port, so a process (the pid-file pid or a listener) must be a python whose
+# command line carries `-m <this module>` or this MCP's own --pid-file path.
+function Test-OwnedProcess([int]$ProcessId) {
     $cim = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction SilentlyContinue
-    return ($null -ne $cim -and $null -ne $cim.CommandLine -and
-        $cim.CommandLine.IndexOf($PidFile, [StringComparison]::OrdinalIgnoreCase) -ge 0)
+    if ($null -eq $cim -or $null -eq $cim.CommandLine) { return $false }
+    return ($cim.CommandLine.IndexOf($PidFile, [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+        $cim.CommandLine -match "(?i)(^|\s)-m\s+$([regex]::Escape($Module))(\s|$)")
 }
 
 function Stop-Mcp {
     $targets = New-Object System.Collections.Generic.HashSet[int]
     foreach ($id in (Get-ListenerPids)) {
-        if (Test-IsPython $id) { [void]$targets.Add([int]$id) }
+        if ((Test-IsPython $id) -and (Test-OwnedProcess $id)) { [void]$targets.Add([int]$id) }
     }
     if (Test-Path -LiteralPath $PidFile) {
         $text = "$(Get-Content -LiteralPath $PidFile -Raw -ErrorAction SilentlyContinue)".Trim()
         $hinted = 0
-        if ([int]::TryParse($text, [ref]$hinted) -and $hinted -gt 0 -and (Test-IsPython $hinted) -and (Test-PidFileOwner $hinted)) {
+        if ([int]::TryParse($text, [ref]$hinted) -and $hinted -gt 0 -and (Test-IsPython $hinted) -and (Test-OwnedProcess $hinted)) {
             [void]$targets.Add($hinted)
         }
     }
@@ -88,7 +97,7 @@ function Stop-Mcp {
     $deadline = (Get-Date).AddSeconds(10)
     while (@(Get-ListenerPids).Count -gt 0) {
         if ((Get-Date) -ge $deadline) {
-            Write-Host "port $Port is still listening after 10 s (is the owner a python process?)"
+            Write-Host "port $Port is owned by unexpected process pid $((Get-ListenerPids) -join ', '); not stopping it"
             return 1
         }
         Start-Sleep -Milliseconds 200

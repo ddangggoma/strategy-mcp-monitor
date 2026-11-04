@@ -1,3 +1,4 @@
+import contextlib
 import os
 import re
 import subprocess
@@ -8,7 +9,7 @@ import httpx
 import psutil
 import pytest
 
-from tests.helpers import ROOT, free_port, listener_pid, rpc
+from tests.helpers import ROOT, free_port, kill_tree, listener_pid, rpc, wait_listening
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
 PS = [os.path.expandvars(r"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"),
@@ -26,10 +27,10 @@ def env(tmp_path):
     run_script("stop", e, tmp_path)
 
 
-def run_script(kind, env, tmp_path):
+def run_script(kind, env, tmp_path, cwd=None):
     # Output goes to a file: with capture_output the background MCP inherits the pipe and EOF never arrives.
     with open(tmp_path / f"{kind}.txt", "wb") as out:
-        return subprocess.run(PS + [str(SCRIPTS[kind])], env={**os.environ, **env},
+        return subprocess.run(PS + [str(SCRIPTS[kind])], env={**os.environ, **env}, cwd=cwd,
                               stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, timeout=60)
 
 
@@ -56,7 +57,8 @@ def test_restart_recovers_hung(env, tmp_path):
 
 @pytest.mark.parametrize("kind", ["start", "stop", "restart"])
 @pytest.mark.parametrize("override", [{"MCP_NAME": "nope"}, {"DUMMY_MCPS_DIR": r"C:\does-not-exist"},
-                                      {"MCP_PORT": "abc"}, {"MCP_ID": "../x"}])
+                                      {"MCP_PORT": "abc"}, {"MCP_ID": "../x"}, {"MCP_ID": "٣"},
+                                      {"DUMMY_MCPS_DIR": ""}, {"MCP_HOST": '127.0.0.1" --evil'}])
 def test_bad_environment_exit_2(env, tmp_path, kind, override):
     assert run_script(kind, {**env, **override}, tmp_path).returncode == 2
 
@@ -85,8 +87,47 @@ def test_stop_does_not_kill_unrelated_process_named_in_stale_pid_file(env, tmp_p
         assert bystander.poll() is None and psutil.pid_exists(bystander.pid)
         assert not (tmp_path / "901.pid").exists()  # stale file cleaned up
     finally:
-        bystander.kill()
-        bystander.wait(10)
+        kill_tree(bystander)
+
+
+def test_stop_leaves_foreign_python_listener_alone(env, tmp_path):
+    """A python that merely owns the port (not this MCP) is never killed; stop reports failure."""
+    port = int(env["MCP_PORT"])
+    foreign = subprocess.Popen([sys.executable, "-m", "http.server", str(port), "--bind", "127.0.0.1"],
+                               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        wait_listening(port)
+        assert run_script("stop", env, tmp_path).returncode == 1
+        assert foreign.poll() is None and listener_pid(port) is not None
+        assert run_script("start", env, tmp_path).returncode == 0  # "already listening" no-op, still leaves it alone
+        assert foreign.poll() is None
+    finally:
+        kill_tree(foreign)
+
+
+def test_relative_run_dir_resolved_against_cwd(env, tmp_path):
+    e = {**env, "DUMMY_MCP_RUN_DIR": r"rel\run"}
+    assert run_script("start", e, tmp_path, cwd=tmp_path).returncode == 0
+    pid_file = tmp_path / "rel" / "run" / "901.pid"
+    assert int(pid_file.read_text()) == listener_pid(int(e["MCP_PORT"]))
+    assert (tmp_path / "rel" / "run" / "901.out.log").exists()
+    assert not (ROOT / "rel").exists()  # nothing resolved against DUMMY_MCPS_DIR
+    assert run_script("stop", e, tmp_path, cwd=tmp_path).returncode == 0
+    assert listener_pid(int(e["MCP_PORT"])) is None and not pid_file.exists()
+
+
+def test_relative_dummy_mcps_dir_and_default_run_dir(env, tmp_path):
+    e = {**env, "DUMMY_MCPS_DIR": ROOT.name, "MCP_ID": "903", "DUMMY_MCP_RUN_DIR": ""}
+    run_dir = ROOT / "run"
+    try:
+        assert run_script("start", e, tmp_path, cwd=ROOT.parent).returncode == 0
+        assert int((run_dir / "903.pid").read_text()) == listener_pid(int(e["MCP_PORT"]))
+        assert run_script("stop", e, tmp_path, cwd=ROOT.parent).returncode == 0
+        assert listener_pid(int(e["MCP_PORT"])) is None and not (run_dir / "903.pid").exists()
+    finally:
+        for f in run_dir.glob("903.*"):
+            with contextlib.suppress(OSError):  # still locked only if the test already failed
+                f.unlink()
 
 
 def test_run_dir_with_spaces(env, tmp_path):
