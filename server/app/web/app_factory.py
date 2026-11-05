@@ -12,7 +12,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.services import Services
-from app.web import local_api, mcp_local, mcp_shared, shared_api
+from app.web import local_api, mcp_local, mcp_shared, notice_api, shared_api
 from app.web.channels import Channel
 from app.web.deps import ApiError, api_error_handler
 from app.web.static import HTML_PAGES, static_router
@@ -154,6 +154,7 @@ def create_app(channel: Channel, services: Services, static_dir: Path | None = N
         app.add_middleware(LocalHostGuard)
         app.include_router(local_api.router)
         app.include_router(mcp_local.router)
+        app.include_router(notice_api.router)
     if static_dir is not None and (static_dir / HTML_PAGES["board"]).is_file():
         # After the API routers, so an API path can never be shadowed by a page. /notice is a
         # Local-channel page only.

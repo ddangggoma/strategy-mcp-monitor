@@ -140,6 +140,18 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX idx_mcp_actions ON mcp_actions(mcp_id, at);
     """,
+    # 5
+    """
+    CREATE TABLE notice_versions (
+        version INTEGER PRIMARY KEY CHECK (version >= 1),   -- version 0 is the built-in text, never stored
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        button_text TEXT NOT NULL,
+        author_id INTEGER,
+        created_at TEXT NOT NULL,
+        reverted_from INTEGER                               -- source version of a revert (0 = built-in text)
+    );
+    """,
 ]
 
 

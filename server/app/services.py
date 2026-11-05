@@ -17,6 +17,7 @@ from app.monitor.runner import ScriptRunner
 from app.monitor.scripts import ScriptStore
 from app.monitor.store import McpStore
 from app.monitor.supervisor import Monitor, ProberLike, ScriptRunnerLike
+from app.notice.store import NoticeStore
 from app.paths import AppPaths
 from app.settings.store import SettingsStore
 from app.users.store import UserStore
@@ -40,6 +41,7 @@ class Services:
     history: McpHistory
     bus: BoardBus
     monitor: Monitor
+    notice: NoticeStore
 
 
 def _load_or_create_otp_secret(db: Database) -> bytes:
@@ -107,4 +109,5 @@ def build_services(
         history=history,
         bus=bus,
         monitor=monitor,
+        notice=NoticeStore(db, clock),
     )

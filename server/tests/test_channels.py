@@ -4,7 +4,7 @@ import pytest
 from starlette.routing import Match
 
 from app.main import server_configs
-from app.web import local_api, mcp_local
+from app.web import local_api, mcp_local, notice_api
 from app.web.app_factory import create_app
 
 
@@ -24,7 +24,7 @@ def _serves(app, path: str, method: str) -> bool:
 def _local_only_routes() -> list[tuple[str, str]]:
     return [
         (r.path, method)
-        for router in (local_api.router, mcp_local.router)
+        for router in (local_api.router, mcp_local.router, notice_api.router)
         for r in router.routes
         for method in sorted(r.methods)
     ]
