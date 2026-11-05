@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
 import { copy } from "@/copy/ko";
 import { ActionTracker } from "@/lib/action-tracker";
+import { clearAllDrafts } from "@/lib/draft";
 import { logout, mcpHistory } from "@/lib/endpoints";
 import { clearSession, refreshSession, session, useSession } from "@/lib/session";
 import { LiveProvider, useLive, useStreamStatus } from "../live";
@@ -92,6 +93,7 @@ export function AppShell() {
     }
     leaving.current = true;
     clearSession();
+    clearAllDrafts(); // a deliberate logout: the next person on this tab must not find these edits
     stream.restart();
     await router.navigate({ to: "/admin/login" });
     qc.clear(); // the next person to log in on this tab sees nothing of this one

@@ -53,3 +53,8 @@ export function entryModules(dist: string, entry: Entry): string[] {
       return ids;
     });
 }
+
+/** Every emitted JS chunk with its module ids (dist/.vite/modules.json). */
+export function chunkModules(dist: string): Record<string, string[]> {
+  return JSON.parse(readFileSync(join(dist, ".vite", "modules.json"), "utf8")) as Record<string, string[]>;
+}

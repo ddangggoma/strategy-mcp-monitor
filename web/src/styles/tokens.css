@@ -108,6 +108,10 @@
     --color-state-maintenance-fg: light-dark(var(--slate-800), var(--slate-200));
     --color-state-maintenance-soft: color-mix(in oklch, var(--color-state-maintenance) 18%, transparent);
 
+    /* Text diff rows (TextDiff): a tint of the healthy/failed hues under ordinary text; the +/− sign carries the meaning too */
+    --color-diff-add: color-mix(in oklch, var(--color-state-healthy) 14%, transparent);
+    --color-diff-del: color-mix(in oklch, var(--color-state-failed) 14%, transparent);
+
     /* ── Type ─────────────────────────────────────────────────────────── */
     --font-sans: "Pretendard Variable", Pretendard, "Segoe UI Variable Text", "Segoe UI", "Malgun Gothic",
       "Apple SD Gothic Neo", system-ui, sans-serif;

@@ -84,3 +84,11 @@ it.each(THEMES)("text and state strokes stay readable on a soft problem card in 
     expect(contrastPairs(theme, `state-${s}`, soft, "surface"), `state-${s} on ${soft}`).toBeGreaterThanOrEqual(3);
   }
 });
+
+// TextDiff paints diff-add/diff-del rows on a surface panel (not sunken: muted line numbers would drop below 4.5:1); line text is fg, line numbers fg-muted.
+it.each(THEMES)("diff rows keep code and line numbers readable in %s", (theme) => {
+  for (const row of ["diff-add", "diff-del"]) {
+    expect(contrastPairs(theme, "fg", row, "surface"), `fg on ${row}`).toBeGreaterThanOrEqual(4.5);
+    expect(contrastPairs(theme, "fg-muted", row, "surface"), `fg-muted on ${row}`).toBeGreaterThanOrEqual(4.5);
+  }
+});

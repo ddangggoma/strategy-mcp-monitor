@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { copy, type DisabledReason } from "@/copy/ko";
 import type { Me } from "@/lib/api-types";
+import { loadDraft, saveDraft } from "@/lib/draft";
 import { mcps } from "@/lib/endpoints";
 import { session } from "@/lib/session";
 import { mcpDetailFixture, meFixture } from "../../../tests/msw/fixtures";
@@ -13,7 +14,8 @@ import { PlannedFeature } from "./PlannedFeature";
 /** The admin app at `route` with `me` logged in; waits until the shell's navigation is there. */
 async function renderShell(me: Me, route = "/admin") {
   const r = renderWithProviders(null, { route, me });
-  await screen.findByRole("navigation", { name: copy.nav.label });
+  // the first test of a run pays for compiling the shell and route chunks under the parallel suite
+  await screen.findByRole("navigation", { name: copy.nav.label }, { timeout: 5000 });
   return r;
 }
 
@@ -123,6 +125,17 @@ it("logs out to the login page and restarts the stream", async () => {
   await waitFor(() => expect(router.state.location.pathname).toBe("/admin/login"));
   expect(stream.restart).toHaveBeenCalledTimes(1);
   expect(session.me?.user).toBeNull();
+});
+
+it("logging out drops this tab's unsaved drafts (a 401 keeps them: scripts.test)", async () => {
+  saveDraft("script:1:start", { ext: ".ps1", content: "x", baseVersion: 1 });
+  saveDraft("mcp-create", { name: "files" });
+  const { router } = await renderShell(meFixture("admin", "local"));
+  await userEvent.click(screen.getByRole("button", { name: copy.common.accountMenu("user1") }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: copy.common.logout }));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/admin/login"));
+  expect(loadDraft("script:1:start")).toBeNull();
+  expect(loadDraft("mcp-create")).toBeNull();
 });
 
 it("opens the command palette with Ctrl+K and navigates to an MCP", async () => {

@@ -138,7 +138,7 @@ Tailwind 기본 전환(`transition-colors` 등)도 `--motion-fast` + `--ease-hov
 | `admin/mcps/McpActions` | **10(완료)** | md = 아이콘 + 글자 버튼, sm(표 행) = 28px 아이콘 버튼 + `aria-label`·툴팁. 비활성 순서 권한 → running → config_error. 종료는 AlertDialog. docs/design/screens/mcp.md |
 | `admin/mcps/McpListPage` 표, `dashboard/DashboardPage` | **10(완료)** | TanStack Table v9, `aria-sort`, 이름 칸 `th scope=row`, 조치 열 sticky, 포인터가 본문에 있으면 행 순서 고정. 표에는 애니메이션 없음 |
 | `admin/mcps/McpDetailPage`, `SettingsTab`, `HistoryTab`, `LatencyChart`, `ActionOutputDialog`, `OwnerTransferDialog`, `DeleteMcpDialog`, `ConfigErrorBadge`, `shell/LeaveGuard` | **11(완료)** | 폼 = shadcn Form + zod(`mcp-schema.ts`), 숫자 칸은 숫자 또는 빈 문자열. 차트 = 두 플롯(지연 ms / 가동률 %) + 공유 시간축, 중립 선 + 상태 색 전이선, 애니메이션 없음, 별도 청크. 대화상자는 자기 트리거를 가짐(Radix가 포커스 복귀). docs/design/screens/mcp.md §6·§10 |
-| `scripts/ScriptEditor`, `TextDiff` | 12 | CodeMirror 지연 로드, 읽기 전용은 `<pre>`(sunken) |
+| `scripts/ScriptsTab`, `ScriptEditor`(+`ScriptField`), `ScriptViewer`, `VersionList`, `app/TextDiff`, `mcps/McpCreatePage`, `McpConfigFields` | **12(완료)** | CodeMirror 6 = 지연 청크 하나(스크립트 탭과 등록 폼이 공유), 테마는 토큰 변수, 문법 강조에 hue 없음, Tab 미바인딩. 읽기 전용은 `<pre>`(sunken) + 복사. diff = 표, +/− 기호 + `diff-add`/`diff-del` 틴트(surface 위), 애니메이션 없음. 초안 `lib/draft.ts`(sessionStorage, 로그아웃 때 모두 지움). docs/design/screens/mcp.md §6·§11 |
 | `notice/NoticeDialog` | 14 | `@starting-style` 진입(360ms), standalone/preview 같은 클래스 |
 
 ## 3. 문구 (`web/src/copy/ko.ts`, `design:ux-copy`)

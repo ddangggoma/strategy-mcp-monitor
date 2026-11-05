@@ -64,6 +64,8 @@
   --color-state-maintenance: var(--color-state-maintenance);
   --color-state-maintenance-fg: var(--color-state-maintenance-fg);
   --color-state-maintenance-soft: var(--color-state-maintenance-soft);
+  --color-diff-add: var(--color-diff-add);
+  --color-diff-del: var(--color-diff-del);
 
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);

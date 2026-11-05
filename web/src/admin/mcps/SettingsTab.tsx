@@ -1,25 +1,18 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useEffect, useMemo, type ReactNode } from "react";
-import { useForm, type Control, type FieldPath } from "react-hook-form";
+import { useEffect, useMemo } from "react";
+import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { WithReason } from "@/components/app/WithReason";
 import { Button } from "@/components/ui/button";
-import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
+import { Form } from "@/components/ui/form";
 import { copy, messageForError } from "@/copy/ko";
 import { ApiError } from "@/lib/api";
 import type { McpConfig, McpDetail } from "@/lib/api-types";
 import { denyReason } from "@/lib/permissions";
 import { useSession } from "@/lib/session";
 import { useUpdateMcp } from "../queries";
-import { RANGES, dirtyPatch, mcpConfigSchema, type McpFormValues } from "./mcp-schema";
-
-type NumberKey = keyof typeof RANGES;
-type SwitchKey = "auto_recovery" | "autostart_on_boot" | "maintenance";
-
-const PROBES = ["mcp_ping", "tcp", "icmp"] as const;
+import { McpConfigFields } from "./McpConfigFields";
+import { dirtyPatch, mcpConfigSchema, type McpFormValues } from "./mcp-schema";
 
 /** The server's config as form values (an absent process name is an empty input). */
 function toValues(m: McpDetail): McpFormValues {
@@ -116,53 +109,7 @@ export function SettingsTab({ mcp, onDirtyChange }: { mcp: McpDetail; onDirtyCha
       >
         <p className="text-sm text-fg-muted">{copy.mcp.liveNote}</p>
 
-        <Group legend={copy.mcp.groups.connection}>
-          <TextField control={form.control} name="name" label={copy.mcp.fields.name} readOnly={readOnly}
-            hint={errors.name ? undefined : copy.mcp.nameRule} />
-          <TextField control={form.control} name="host" label={copy.mcp.fields.host} readOnly={readOnly} mono />
-          <NumberField control={form.control} name="port" readOnly={readOnly} />
-          <TextField control={form.control} name="path" label={copy.mcp.fields.path} readOnly={readOnly} mono />
-          <FormField
-            control={form.control}
-            name="probe"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>{copy.mcp.fields.probe}</FormLabel>
-                <Select value={field.value} onValueChange={field.onChange} disabled={readOnly}>
-                  <FormControl>
-                    <SelectTrigger className="w-full" onBlur={field.onBlur}>
-                      <SelectValue />
-                    </SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    {PROBES.map((p) => (
-                      <SelectItem key={p} value={p}>
-                        {copy.mcp.probes[p]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          <TextField control={form.control} name="expected_process_name" label={copy.mcp.fields.expected_process_name}
-            readOnly={readOnly} mono hint={copy.mcp.processNameHint} />
-        </Group>
-
-        <Group legend={copy.mcp.groups.recovery}>
-          <SwitchField control={form.control} name="auto_recovery" readOnly={readOnly} className="@lg:col-span-2" />
-          <NumberField control={form.control} name="action_delay_sec" readOnly={readOnly} />
-          <NumberField control={form.control} name="startup_grace_sec" readOnly={readOnly} />
-          <NumberField control={form.control} name="max_auto_actions" readOnly={readOnly} hint={copy.mcp.hints.max_auto_actions} />
-          <NumberField control={form.control} name="window_sec" readOnly={readOnly} />
-          <NumberField control={form.control} name="script_timeout_sec" readOnly={readOnly} />
-        </Group>
-
-        <Group legend={copy.mcp.groups.operation}>
-          <SwitchField control={form.control} name="maintenance" readOnly={readOnly} className="@lg:col-span-2" />
-          <SwitchField control={form.control} name="autostart_on_boot" readOnly={readOnly} className="@lg:col-span-2" />
-        </Group>
+        <McpConfigFields control={form.control} readOnly={readOnly} nameError={errors.name !== undefined} />
 
         {serverError ? (
           <p role="alert" className="text-sm text-danger">
@@ -188,113 +135,5 @@ export function SettingsTab({ mcp, onDirtyChange }: { mcp: McpDetail; onDirtyCha
         </div>
       </form>
     </Form>
-  );
-}
-
-function Group({ legend, children }: { legend: string; children: ReactNode }) {
-  return (
-    <fieldset className="@container flex flex-col gap-3 border-t border-border pt-4">
-      <legend className="pr-2 text-sm font-semibold text-fg">{legend}</legend>
-      <div className="grid gap-4 @lg:grid-cols-2">{children}</div>
-    </fieldset>
-  );
-}
-
-interface FieldProps<K extends FieldPath<McpFormValues>> {
-  control: Control<McpFormValues, unknown, McpConfig>;
-  name: K;
-  readOnly: boolean;
-  hint?: string;
-  className?: string;
-}
-
-function TextField({ control, name, label, readOnly, hint, mono }: FieldProps<"name" | "host" | "path" | "expected_process_name"> & {
-  label: string;
-  mono?: boolean;
-}) {
-  return (
-    <FormField
-      control={control}
-      name={name}
-      render={({ field }) => (
-        <FormItem>
-          <FormLabel>{label}</FormLabel>
-          <FormControl>
-            <Input
-              {...field}
-              value={field.value ?? ""}
-              readOnly={readOnly}
-              autoComplete="off"
-              spellCheck={false}
-              className={mono ? "font-mono" : undefined}
-            />
-          </FormControl>
-          {hint ? <FormDescription>{hint}</FormDescription> : null}
-          <FormMessage />
-        </FormItem>
-      )}
-    />
-  );
-}
-
-/** An integer input: the form keeps a number, or "" for an empty box (the schema reports it). */
-function NumberField({ control, name, readOnly, hint }: FieldProps<NumberKey>) {
-  const [min, max] = RANGES[name];
-  return (
-    <FormField
-      control={control}
-      name={name}
-      render={({ field }) => (
-        <FormItem>
-          <FormLabel>{copy.mcp.fields[name]}</FormLabel>
-          <FormControl>
-            <Input
-              type="number"
-              inputMode="numeric"
-              min={min}
-              max={max}
-              step={1}
-              name={field.name}
-              ref={field.ref}
-              onBlur={field.onBlur}
-              value={field.value}
-              onChange={(e) => field.onChange(e.target.value === "" ? "" : Number(e.target.value))}
-              readOnly={readOnly}
-              className="tabular-nums"
-            />
-          </FormControl>
-          <FormDescription>{hint ? `${hint} ${copy.mcp.rangeHint(min, max)}` : copy.mcp.rangeHint(min, max)}</FormDescription>
-          <FormMessage />
-        </FormItem>
-      )}
-    />
-  );
-}
-
-function SwitchField({ control, name, readOnly, className }: FieldProps<SwitchKey>) {
-  return (
-    <FormField
-      control={control}
-      name={name}
-      render={({ field }) => (
-        <FormItem className={className}>
-          <div className="flex items-center gap-3">
-            <FormControl>
-              <Switch
-                checked={field.value}
-                onCheckedChange={(on) => {
-                  if (!readOnly) field.onChange(on);
-                }}
-                onBlur={field.onBlur}
-                ref={field.ref}
-                aria-disabled={readOnly || undefined}
-              />
-            </FormControl>
-            <FormLabel>{copy.mcp.fields[name]}</FormLabel>
-          </div>
-          {name in copy.mcp.hints ? <FormDescription>{copy.mcp.hints[name as keyof typeof copy.mcp.hints]}</FormDescription> : null}
-        </FormItem>
-      )}
-    />
   );
 }

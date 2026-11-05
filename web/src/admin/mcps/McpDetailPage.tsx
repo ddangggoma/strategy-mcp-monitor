@@ -9,13 +9,13 @@ import { ApiError } from "@/lib/api";
 import type { McpDetail } from "@/lib/api-types";
 import { useMcp } from "../queries";
 import type { McpTab } from "../router";
+import { ScriptsTab } from "../scripts/ScriptsTab";
 import { LeaveGuard } from "../shell/LeaveGuard";
 import { ConfigErrorBadge } from "./ConfigErrorBadge";
 import { DeleteMcpDialog } from "./DeleteMcpDialog";
 import { HistoryTab } from "./HistoryTab";
 import { McpActions } from "./McpActions";
 import { OwnerTransferDialog } from "./OwnerTransferDialog";
-import { ScriptsTab } from "./ScriptsTab";
 import { SettingsTab } from "./SettingsTab";
 
 const route = getRouteApi("/authed/admin/mcps/$mcpId");
@@ -72,6 +72,7 @@ function Detail({ mcp }: { mcp: McpDetail }) {
   const { tab = "settings" } = route.useSearch();
   const navigate = route.useNavigate();
   const [settingsDirty, setSettingsDirty] = useState(false);
+  const [scriptsDirty, setScriptsDirty] = useState(false);
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
@@ -124,13 +125,13 @@ function Detail({ mcp }: { mcp: McpDetail }) {
           <SettingsTab mcp={mcp} onDirtyChange={setSettingsDirty} />
         </TabsContent>
         <TabsContent value="scripts" className="pt-4">
-          <ScriptsTab mcp={mcp} />
+          <ScriptsTab mcp={mcp} onDirtyChange={setScriptsDirty} />
         </TabsContent>
         <TabsContent value="history" className="pt-4">
           <HistoryTab mcpId={mcp.id} />
         </TabsContent>
       </Tabs>
-      <LeaveGuard when={settingsDirty} />
+      <LeaveGuard when={settingsDirty || scriptsDirty} />
     </div>
   );
 }
