@@ -1,7 +1,7 @@
 // One hook per GET (plan Appendix B) plus the shared mutations. Local-only reads run only when the
 // policy mirror allows them (`can(me, action)`): on the external channel they are never requested,
 // so a 404 there is never mistaken for "nothing here" (Global Constraints).
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { McpConfig, McpDetail, ScriptKind } from "@/lib/api-types";
 import * as ep from "@/lib/endpoints";
 import { can, type Action } from "@/lib/permissions";
@@ -31,11 +31,13 @@ export function useMcp(id: number, gate: QueryGate = {}) {
   return useQuery({ queryKey: qk.mcp(id), queryFn: () => ep.mcp(id), enabled: useAllowed("view_mcp_history", gate) });
 }
 
+/** Switching the period keeps the previous window on screen until the new one arrives (no flash). */
 export function useMcpHistory(id: number, hours: number, gate: QueryGate = {}) {
   return useQuery({
     queryKey: qk.history(id, hours),
     queryFn: () => ep.mcpHistory(id, hours),
     enabled: useAllowed("view_mcp_history", gate),
+    placeholderData: keepPreviousData,
   });
 }
 

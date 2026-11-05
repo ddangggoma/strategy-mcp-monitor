@@ -165,8 +165,9 @@
 
     /* ── Layers ───────────────────────────────────────────────────────── */
     --z-sticky: 10;
-    --z-popover: 50;
-    --z-modal: 60;
+    --z-modal: 50;
+    /* above modals: a select or menu opened inside a dialog must show over it */
+    --z-popover: 60;
     --z-toast: 70;
     --z-tooltip: 80;
 

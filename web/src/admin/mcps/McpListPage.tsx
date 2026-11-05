@@ -7,7 +7,7 @@ import {
   type Row,
 } from "@tanstack/react-table";
 import { Link, getRouteApi } from "@tanstack/react-router";
-import { ArrowDownIcon, ArrowUpIcon, ChevronsUpDownIcon, OctagonAlertIcon, PlusIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, ChevronsUpDownIcon, PlusIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { WithReason } from "@/components/app/WithReason";
 import { STATE_ICONS, StatusBadge } from "@/components/status/StatusBadge";
@@ -22,6 +22,7 @@ import { denyReason } from "@/lib/permissions";
 import { useSession } from "@/lib/session";
 import { cn } from "@/lib/utils";
 import { useMcps } from "../queries";
+import { ConfigErrorBadge } from "./ConfigErrorBadge";
 import { McpActions } from "./McpActions";
 
 const route = getRouteApi("/authed/admin/mcps");
@@ -114,14 +115,7 @@ function Dash() {
 }
 
 function StateCell({ mcp }: { mcp: McpDetail }) {
-  if (mcp.config_error) {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-sm border border-border-strong px-1.5 py-0.5 text-xs font-medium text-fg">
-        <OctagonAlertIcon aria-hidden="true" className="size-3.5" />
-        {copy.mcp.configErrorBadge}
-      </span>
-    );
-  }
+  if (mcp.config_error) return <ConfigErrorBadge />;
   if (!mcp.live) return <span className="text-xs text-fg-muted">{copy.mcp.noLive}</span>;
   return <StatusBadge state={mcp.live.state} issue={mcp.live.issue} />;
 }

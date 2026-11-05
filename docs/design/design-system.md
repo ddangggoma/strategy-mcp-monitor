@@ -83,7 +83,7 @@ Task 6 산출물(`design:design-system` 스킬). 방향과 근거는 `docs/desig
 | `--size-prose` | 40rem | 폼·고지 본문 폭 |
 | `--radius-xs/sm/md/lg/full` | 3 / 4 / 6 / 10px / 9999px | kbd / 배지·입력 / 버튼·카드·메뉴 / 대화상자·고지 / 점·스위치 |
 | `--shadow-xs…lg` | `--shadow-color` 기반 | 떠 있는 층만(md = 메뉴, lg = 대화상자) |
-| `--z-sticky/popover/modal/toast/tooltip` | 10 / 50 / 60 / 70 / 80 | 고정 척도(임의 z-index 금지) |
+| `--z-sticky/modal/popover/toast/tooltip` | 10 / 50 / 60 / 70 / 80 | 고정 척도(임의 z-index 금지). 팝오버(Select·메뉴)는 대화상자 안에서도 열리므로 modal 위(Task 11) |
 | `--focus-ring-width/offset` | 2px / 2px | 전역 `:focus-visible` |
 | `--motion-fast/base/slow` | 120 / 200 / 360ms | direction.md §6 |
 | `--ease-out` / `--ease-in-out` / `--ease-hover` | `cubic-bezier(.23,1,.32,1)` / `cubic-bezier(.77,0,.175,1)` / `ease` | 들고 남 / 화면 위 이동 / 색 피드백 |
@@ -137,7 +137,7 @@ Tailwind 기본 전환(`transition-colors` 등)도 `--motion-fast` + `--ease-hov
 | `admin/auth/OtpInput`, `ResendRing` | 9 | 6칸, 흔들림 피드백, 원형 타이머(U25 예외). docs/design/screens/auth-shell.md |
 | `admin/mcps/McpActions` | **10(완료)** | md = 아이콘 + 글자 버튼, sm(표 행) = 28px 아이콘 버튼 + `aria-label`·툴팁. 비활성 순서 권한 → running → config_error. 종료는 AlertDialog. docs/design/screens/mcp.md |
 | `admin/mcps/McpListPage` 표, `dashboard/DashboardPage` | **10(완료)** | TanStack Table v9, `aria-sort`, 이름 칸 `th scope=row`, 조치 열 sticky, 포인터가 본문에 있으면 행 순서 고정. 표에는 애니메이션 없음 |
-| `DeleteMcpDialog`, `TransferOwnerDialog`, 차트 | 11 | |
+| `admin/mcps/McpDetailPage`, `SettingsTab`, `HistoryTab`, `LatencyChart`, `ActionOutputDialog`, `OwnerTransferDialog`, `DeleteMcpDialog`, `ConfigErrorBadge`, `shell/LeaveGuard` | **11(완료)** | 폼 = shadcn Form + zod(`mcp-schema.ts`), 숫자 칸은 숫자 또는 빈 문자열. 차트 = 두 플롯(지연 ms / 가동률 %) + 공유 시간축, 중립 선 + 상태 색 전이선, 애니메이션 없음, 별도 청크. 대화상자는 자기 트리거를 가짐(Radix가 포커스 복귀). docs/design/screens/mcp.md §6·§10 |
 | `scripts/ScriptEditor`, `TextDiff` | 12 | CodeMirror 지연 로드, 읽기 전용은 `<pre>`(sunken) |
 | `notice/NoticeDialog` | 14 | `@starting-style` 진입(360ms), standalone/preview 같은 클래스 |
 

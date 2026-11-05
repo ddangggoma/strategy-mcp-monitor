@@ -58,7 +58,8 @@ it("logs in with email then OTP, restarts the stream and returns to the redirect
   expect(restart).toHaveBeenCalledTimes(1);
   expect(session.csrf).toBe("csrf-from-verify");
   expect(session.me?.user?.email).toBe("admin@x.com");
-  expect(await screen.findByRole("heading", { level: 1, name: copy.mcp.detail })).toBeInTheDocument();
+  // the detail page (lazy chunk) is titled with the MCP name: the default handler answers mcpDetailFixture({ id: 3 })
+  expect(await screen.findByRole("heading", { level: 1, name: "mcp3" }, { timeout: 5000 })).toBeInTheDocument();
 });
 
 it("sends the email and the code to the server", async () => {
