@@ -26,7 +26,19 @@ function blockActivation(e: KeyboardEvent<HTMLElement>): void {
  * ignores clicks and Enter/Space, and explains itself twice — a tooltip on hover and focus, and
  * an always-present description for screen readers. Without a reason the child is returned as is.
  */
-export function WithReason({ reason, children }: { reason: DisabledReason | null; children: ReactElement<ChildProps> }) {
+export function WithReason({
+  reason,
+  children,
+  side,
+  label,
+}: {
+  reason: DisabledReason | null;
+  children: ReactElement<ChildProps>;
+  /** Tooltip side (default top); a sidebar item uses right so the tip does not cover its neighbours. */
+  side?: "top" | "right" | "bottom" | "left";
+  /** Shown above the reason in the tooltip, for a control whose own text is not visible (icon rail). */
+  label?: string;
+}) {
   const id = useId();
   if (reason === null) return children;
 
@@ -44,7 +56,15 @@ export function WithReason({ reason, children }: { reason: DisabledReason | null
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>{trigger}</TooltipTrigger>
-          <TooltipContent>{text}</TooltipContent>
+          <TooltipContent side={side}>
+            {/* the label is already the control's name: kept out of its description */}
+            {label ? (
+              <span aria-hidden="true" className="block font-semibold">
+                {label}
+              </span>
+            ) : null}
+            {text}
+          </TooltipContent>
         </Tooltip>
       </TooltipProvider>
       <span id={id} hidden>

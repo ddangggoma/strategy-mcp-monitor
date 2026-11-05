@@ -1,0 +1,206 @@
+// Admin routes (TanStack Router, code-based, full paths without basepath). Pages load per route
+// (lazyRouteComponent); the shell is eager because every logged-in page needs it.
+import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
+import {
+  Link,
+  Outlet,
+  RouterProvider,
+  createRootRouteWithContext,
+  createRoute,
+  createRouter,
+  lazyRouteComponent,
+  redirect,
+  type RouterHistory,
+} from "@tanstack/react-router";
+import { copy } from "@/copy/ko";
+import type { McpState, ScriptKind } from "@/lib/api-types";
+import { bootstrapStatus } from "@/lib/endpoints";
+import { session } from "@/lib/session";
+import { AppShell } from "./shell/AppShell";
+import { LiveProvider, type LiveValue } from "./live";
+import { qk } from "./query-keys";
+
+export interface RouterContext {
+  qc: QueryClient;
+}
+
+export interface LoginSearch {
+  redirect?: string;
+  email?: string;
+}
+export type McpTab = "settings" | "scripts" | "history";
+export interface McpDetailSearch {
+  tab?: McpTab;
+  kind?: ScriptKind;
+}
+
+const STATES: ReadonlySet<string> = new Set<McpState>(["HEALTHY", "SUSPECT", "ACTION", "RECOVERING", "FAILED", "MAINTENANCE"]);
+const TABS: ReadonlySet<string> = new Set<McpTab>(["settings", "scripts", "history"]);
+const KINDS: ReadonlySet<string> = new Set<ScriptKind>(["start", "stop", "restart"]);
+
+/** A search value from the URL as a string (TanStack parses `?a=1` to a number), else undefined. */
+function str(v: unknown): string | undefined {
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  return undefined;
+}
+
+function oneOf<T extends string>(set: ReadonlySet<string>, v: unknown): T | undefined {
+  const s = str(v);
+  return s !== undefined && set.has(s) ? (s as T) : undefined;
+}
+
+/** Local, nobody logged in, no user yet: the first Admin has to be created. Errors count as "no". */
+async function setupNeeded(qc: QueryClient): Promise<boolean> {
+  const me = session.me;
+  if (me?.channel !== "local" || me.user) return false; // the external channel never asks
+  try {
+    const r = await qc.fetchQuery({ queryKey: qk.bootstrap, queryFn: bootstrapStatus, staleTime: 0 });
+    return r.needed;
+  } catch {
+    return false;
+  }
+}
+
+function NotFound() {
+  return (
+    <main className="mx-auto flex max-w-(--size-prose) flex-col items-start gap-3 px-4 py-16">
+      <p className="text-base text-fg">{copy.common.notFound}</p>
+      <Link to="/admin" className="text-sm font-semibold text-fg underline underline-offset-4">
+        {copy.common.adminHome}
+      </Link>
+    </main>
+  );
+}
+
+const rootRoute = createRootRouteWithContext<RouterContext>()({
+  component: Outlet,
+  notFoundComponent: NotFound,
+});
+
+const loginRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/login",
+  validateSearch: (s: Record<string, unknown>): LoginSearch => ({ redirect: str(s.redirect), email: str(s.email) }),
+  beforeLoad: async ({ context }) => {
+    if (await setupNeeded(context.qc)) throw redirect({ to: "/admin/setup" });
+  },
+  component: lazyRouteComponent(() => import("./auth/LoginPage"), "LoginPage"),
+});
+
+const setupRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/setup",
+  beforeLoad: async ({ context }) => {
+    if (!(await setupNeeded(context.qc))) throw redirect({ to: "/admin/login" });
+  },
+  component: lazyRouteComponent(() => import("./auth/SetupPage"), "SetupPage"),
+});
+
+/** Every page below needs a logged-in user; otherwise login, then back here. */
+const authedRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  id: "authed",
+  beforeLoad: ({ location }) => {
+    if (!session.me?.user) throw redirect({ to: "/admin/login", search: { redirect: location.href } });
+  },
+  component: AppShell,
+});
+
+const dashboardRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: "/admin",
+  component: lazyRouteComponent(() => import("./dashboard/DashboardPage"), "DashboardPage"),
+});
+
+const mcpListRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: "/admin/mcps",
+  validateSearch: (s: Record<string, unknown>): { state?: McpState } => ({ state: oneOf<McpState>(STATES, s.state) }),
+  component: lazyRouteComponent(() => import("./mcps/McpListPage"), "McpListPage"),
+});
+
+const mcpCreateRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: "/admin/mcps/new",
+  component: lazyRouteComponent(() => import("./mcps/McpCreatePage"), "McpCreatePage"),
+});
+
+const mcpDetailRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: "/admin/mcps/$mcpId",
+  validateSearch: (s: Record<string, unknown>): McpDetailSearch => ({
+    tab: oneOf<McpTab>(TABS, s.tab),
+    kind: oneOf<ScriptKind>(KINDS, s.kind),
+  }),
+  component: lazyRouteComponent(() => import("./mcps/McpDetailPage"), "McpDetailPage"),
+});
+
+const usersRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: "/admin/users",
+  component: lazyRouteComponent(() => import("./users/UsersPage"), "UsersPage"),
+});
+
+const settingsRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: "/admin/settings",
+  component: lazyRouteComponent(() => import("./settings/SettingsPage"), "SettingsPage"),
+});
+
+const noticeRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: "/admin/notice",
+  component: lazyRouteComponent(() => import("./notice/NoticeEditorPage"), "NoticeEditorPage"),
+});
+
+const routeTree = rootRoute.addChildren([
+  loginRoute,
+  setupRoute,
+  authedRoute.addChildren([
+    dashboardRoute,
+    mcpListRoute,
+    mcpCreateRoute,
+    mcpDetailRoute,
+    usersRoute,
+    settingsRoute,
+    noticeRoute,
+  ]),
+]);
+
+export function createAdminRouter({ qc, history }: { qc: QueryClient; history?: RouterHistory }) {
+  return createRouter({
+    routeTree,
+    history,
+    context: { qc },
+    defaultViewTransition: true,
+    // the API is the cache (React Query); route loaders do not cache anything themselves
+    defaultPreloadStaleTime: 0,
+    scrollRestoration: true,
+  });
+}
+
+export type AdminRouter = ReturnType<typeof createAdminRouter>;
+
+/** One-time note for the login page, carried in history state (not in the URL). */
+export type LoginFlash = "setup_done" | "bootstrap_done" | "expired";
+
+declare module "@tanstack/react-router" {
+  interface Register {
+    router: AdminRouter;
+  }
+  interface HistoryState {
+    flash?: LoginFlash;
+  }
+}
+
+/** Providers + router: one QueryClient, one live store/stream for the whole tab. */
+export function AdminApp({ router, qc, live }: { router: AdminRouter; qc: QueryClient; live: LiveValue }) {
+  return (
+    <QueryClientProvider client={qc}>
+      <LiveProvider value={live}>
+        <RouterProvider router={router} />
+      </LiveProvider>
+    </QueryClientProvider>
+  );
+}

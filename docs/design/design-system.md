@@ -78,7 +78,7 @@ Task 6 산출물(`design:design-system` 스킬). 방향과 근거는 `docs/desig
 |---|---|---|
 | `--spacing` | 0.25rem | Tailwind `p-4` = 16px 등 |
 | `--size-control` / `-sm` | 36px / 28px (터치: 44 / 36) | 버튼·입력 높이 |
-| `--size-topbar` / `--size-sidebar` | 3.5rem / 15rem | 셸 |
+| `--size-topbar` / `--size-sidebar` / `--size-rail` | 3.5rem / 15rem / 3.5rem | 셸(레일 = 창 폭 1024px 미만에서 접힌 사이드바) |
 | `--size-board-card` | 19rem | 보드 카드 최소 폭 |
 | `--size-prose` | 40rem | 폼·고지 본문 폭 |
 | `--radius-xs/sm/md/lg/full` | 3 / 4 / 6 / 10px / 9999px | kbd / 배지·입력 / 버튼·카드·메뉴 / 대화상자·고지 / 점·스위치 |
@@ -133,8 +133,8 @@ Tailwind 기본 전환(`transition-colors` 등)도 `--motion-fast` + `--ease-hov
 | `status/Sparkline` | 8 | 직접 그린 SVG(U18), HEALTHY는 `fg-muted`, 비정상은 상태 색, `data-volatile` |
 | `board/McpCard` | 8 | subgrid 4행, 컨테이너 쿼리, 비정상만 상단 3px 띠 + soft 채움, `data-testid="mcp-card"` |
 | `app/TopBar`, `ChannelBadge`, `StreamIndicator`, `AccountMenu` | 8·9 | `data-topbar`(스크롤 그림자는 base.css) |
-| `app/AppShell`, `WithReason`, `LocalOnlyPage`, `PlannedFeature` | 9 | 비활성 + 이유(U26) |
-| `login/OtpInput`, `ResendTimer` | 9 | 6칸, 흔들림 피드백, 원형 타이머(U25 예외) |
+| `admin/shell/AppShell`, `Nav`, `CommandPalette`, `PlannedFeature`, `app/WithReason`(`side` 선택) | 9 | 비활성 + 이유(U26). `LocalOnlyPage`는 Task 13 |
+| `admin/auth/OtpInput`, `ResendRing` | 9 | 6칸, 흔들림 피드백, 원형 타이머(U25 예외). docs/design/screens/auth-shell.md |
 | `mcp/McpActions`, `DeleteMcpDialog`, `TransferOwnerDialog`, 차트 | 10·11 | 표에는 애니메이션 없음 |
 | `scripts/ScriptEditor`, `TextDiff` | 12 | CodeMirror 지연 로드, 읽기 전용은 `<pre>`(sunken) |
 | `notice/NoticeDialog` | 14 | `@starting-style` 진입(360ms), standalone/preview 같은 클래스 |

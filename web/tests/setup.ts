@@ -39,6 +39,9 @@ if (!window.matchMedia) {
     }) as MediaQueryList;
 }
 
+// TanStack Router's scroll restoration scrolls the window on every navigation
+window.scrollTo = () => {};
+
 // Radix Select/Dropdown use pointer capture and scroll the active option into view
 Element.prototype.hasPointerCapture ??= () => false;
 Element.prototype.setPointerCapture ??= () => {};

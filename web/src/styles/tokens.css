@@ -145,6 +145,7 @@
     --size-control-sm: 1.75rem;
     --size-topbar: 3.5rem;
     --size-sidebar: 15rem;
+    --size-rail: 3.5rem; /* the admin sidebar collapsed to icons in a narrow window (< 1024px) */
     --size-board-card: 19rem; /* minimum card width in the board grid */
     --size-prose: 40rem; /* forms and notice text: < 80 characters a line */
 

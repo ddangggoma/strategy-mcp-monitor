@@ -1,0 +1,33 @@
+/* Wrong code: the cells shake once (transform only). The keyframes restart every time
+   [data-invalid] is added again, i.e. on each failed attempt. Movement on screen → ease-in-out. */
+@layer components {
+  .otp-cells[data-invalid] {
+    animation: otp-shake var(--motion-slow) var(--ease-in-out);
+  }
+
+  @keyframes otp-shake {
+    0%,
+    100% {
+      transform: translateX(0);
+    }
+    20% {
+      transform: translateX(-6px);
+    }
+    40% {
+      transform: translateX(6px);
+    }
+    60% {
+      transform: translateX(-4px);
+    }
+    80% {
+      transform: translateX(3px);
+    }
+  }
+
+  /* the red borders and the error sentence still say what happened */
+  @media (prefers-reduced-motion: reduce) {
+    .otp-cells[data-invalid] {
+      animation: none;
+    }
+  }
+}
