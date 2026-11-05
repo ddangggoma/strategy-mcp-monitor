@@ -99,6 +99,29 @@ def test_per_ip_cap_and_pre_flight_check():
     assert issubclass(IpStreamLimitError, StreamLimitError) and a2 in bus._subs
 
 
+@pytest.mark.parametrize("ip,cap", [("127.0.0.1", 20), ("::1", 20), ("10.0.0.5", 5), ("not-an-ip", 5)])
+def test_loopback_has_a_higher_per_ip_cap(ip, cap):
+    bus = BoardBus()
+    for _ in range(cap):
+        bus.subscribe(ip=ip)
+    with pytest.raises(IpStreamLimitError):
+        bus.subscribe(ip=ip)
+    with pytest.raises(IpStreamLimitError):
+        bus.check_capacity(ip)
+    assert bus.subscriber_count == cap
+
+
+def test_loopback_cap_is_configurable_and_independent_of_other_ips():
+    bus = BoardBus(max_per_ip=1, max_per_loopback=3)
+    for _ in range(3):
+        bus.subscribe(ip="127.0.0.1")
+    with pytest.raises(IpStreamLimitError):
+        bus.subscribe(ip="127.0.0.1")
+    bus.subscribe(ip="10.0.0.5")  # a non-loopback address keeps its own, lower cap
+    with pytest.raises(IpStreamLimitError):
+        bus.subscribe(ip="10.0.0.5")
+
+
 def test_global_cap_wins_over_ip_cap():
     bus = BoardBus(max_streams=1, max_per_ip=5)
     bus.subscribe(ip="1.1.1.1")

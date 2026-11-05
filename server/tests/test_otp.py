@@ -1,6 +1,7 @@
 import pytest
 
 from app.auth.otp import DummyOtpProvider, OtpRateLimitError, OtpService
+from app.clock import to_kst_iso
 from app.users.store import InvalidEmailError, UserStore
 from tests.fakes import CapturingOtpProvider
 
@@ -139,6 +140,45 @@ def test_dev_fixed_code_respects_attempt_limit(db, clock):
     svc.request("a@x.com", "ip")
     for _ in range(5): svc.verify("a@x.com", "999999", "1.1.1.1")
     assert svc.verify("a@x.com", "000000", "1.1.1.1") is None
+
+def _failure_count(db, email="a@x.com"):
+    return db.query("SELECT COUNT(*) AS n FROM otp_failures WHERE email = ?", (email,))[0]["n"]
+
+def test_success_clears_failure_history(env, db):
+    svc, p, u, _ = env
+    svc.request("a@x.com", "ip"); code = p.sent[-1][1]
+    wrong = "000000" if code != "000000" else "111111"
+    for _ in range(4): assert svc.verify("a@x.com", wrong, "1.1.1.1") is None
+    assert _failure_count(db) == 4
+    assert svc.verify("a@x.com", code, "1.1.1.1").id == u.id
+    assert _failure_count(db) == 0
+
+def test_failed_verify_keeps_failure_history_and_other_emails_unaffected(env, db, clock):
+    svc, p, u, _ = env
+    UserStore(db, clock).create("b@x.com", "b", "developer", None)
+    svc.request("a@x.com", "ip"); svc.request("b@x.com", "ip"); b_code = p.sent[-1][1]
+    for _ in range(2): svc.verify("a@x.com", "bad000", "1.1.1.1")
+    svc.verify("b@x.com", "bad000", "1.1.1.1")
+    assert svc.verify("b@x.com", b_code, "1.1.1.1") is not None
+    assert (_failure_count(db, "a@x.com"), _failure_count(db, "b@x.com")) == (2, 0)
+
+def test_dev_fixed_code_success_clears_failure_history(db, clock):
+    users = UserStore(db, clock); users.create("a@x.com", "a", "admin", None)
+    svc = OtpService(db, users, CapturingOtpProvider(), clock, b"k" * 32, dev_fixed_code="000000")
+    svc.request("a@x.com", "ip")
+    for _ in range(3): assert svc.verify("a@x.com", "999999", "1.1.1.1") is None
+    assert _failure_count(db) == 3
+    assert svc.verify("a@x.com", "000000", "1.1.1.1") is not None  # row exists: fixed code beside the real one
+    assert _failure_count(db) == 0
+
+def test_dev_fixed_code_success_without_code_row_clears_failure_history(db, clock):
+    users = UserStore(db, clock); users.create("a@x.com", "a", "admin", None)
+    svc = OtpService(db, users, CapturingOtpProvider(), clock, b"k" * 32, dev_fixed_code="000000")
+    db.execute("INSERT INTO otp_failures (email, at) VALUES ('a@x.com', ?)", (to_kst_iso(clock.now()),))
+    assert db.query("SELECT COUNT(*) AS n FROM otp_codes")[0]["n"] == 0  # no code was ever requested
+    assert _failure_count(db) == 1
+    assert svc.verify("a@x.com", "000000", "1.1.1.1") is not None
+    assert _failure_count(db) == 0
 
 # --- fix round 1 ---
 

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 
 from app.auth.policy import Action
 from app.web.app_factory import create_app
-from app.web.deps import check_csrf, current_user, require
+from app.web.deps import check_csrf, current_user, require, session_cookie_name
 
 
 def _make_app(channel, services):
@@ -54,10 +54,13 @@ def _client(app):
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1:8700")
 
 
-def _login(services, client, role="developer", channel="local", email="u@example.com"):
+def _login(
+    services, client, role="developer", channel="local", email="u@example.com", cookie_channel=None
+):
+    """Create a session on ``channel``; its cookie is named for ``cookie_channel`` (default: same)."""
     user = services.users.create(email, "U", role, None)
     sid, csrf = services.sessions.create(user.id, channel, "127.0.0.1", "ua")
-    client.cookies.set("mcpmon_sid", sid)
+    client.cookies.set(session_cookie_name(cookie_channel or channel), sid)
     return user, csrf
 
 
@@ -87,8 +90,20 @@ async def test_current_user_none_for_inactive_user(services):
 
 
 async def test_current_user_rejects_session_from_other_channel(services):
+    # A local-channel sid presented under the external cookie's name (the name the external app reads).
     async with _client(_make_app("external", services)) as c:
-        _login(services, c, channel="local")
+        _login(services, c, channel="local", cookie_channel="external")
+        assert (await c.get("/t/me")).json() == {"email": None}
+    # Control: the same kind of sid under its own channel's cookie name does authenticate.
+    async with _client(_make_app("local", services)) as c:
+        _login(services, c, channel="local", email="v@example.com")
+        assert (await c.get("/t/me")).json() == {"email": "v@example.com"}
+
+
+async def test_session_cookie_names_are_per_channel(services):
+    # Right channel, wrong cookie name: the external app ignores the local cookie name.
+    async with _client(_make_app("external", services)) as c:
+        _login(services, c, channel="external", cookie_channel="local")
         assert (await c.get("/t/me")).json() == {"email": None}
 
 

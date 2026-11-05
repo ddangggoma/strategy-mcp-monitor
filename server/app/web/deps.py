@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hmac
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING
 
 from fastapi import Request
@@ -15,9 +15,15 @@ from app.web.channels import Channel
 if TYPE_CHECKING:
     from app.services import Services
 
-SESSION_COOKIE = "mcpmon_sid"
+# One cookie name per channel: a browser keeps both for the same host (cookies ignore ports),
+# so a shared name would let one channel's login overwrite or clear the other's.
+SESSION_COOKIES: Mapping[Channel, str] = {"local": "mcpmon_sid_local", "external": "mcpmon_sid_ext"}
 CSRF_HEADER = "X-CSRF-Token"
 _UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+def session_cookie_name(channel: Channel) -> str:
+    return SESSION_COOKIES[channel]
 
 
 class ApiError(Exception):
@@ -61,9 +67,10 @@ def _resolve(request: Request) -> User | None:
     services = get_services(request)
     user: User | None = None
     session: AuthSession | None = None
-    sid = request.cookies.get(SESSION_COOKIE)
+    channel = get_channel(request)
+    sid = request.cookies.get(session_cookie_name(channel))
     if sid:
-        found = services.sessions.get(sid, get_channel(request))
+        found = services.sessions.get(sid, channel)
         if found is not None:
             candidate = services.users.get(found.user_id)
             if candidate is not None and candidate.active:

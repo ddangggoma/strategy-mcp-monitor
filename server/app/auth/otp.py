@@ -203,7 +203,10 @@ class OtpService:
             ).fetchone()
             if row is None:
                 # No code was ever requested; only the dev fixed code can pass.
-                return active_user if self._fixed_code_ok(code, active_user) else None
+                if self._fixed_code_ok(code, active_user):
+                    conn.execute("DELETE FROM otp_failures WHERE email = ?", (email,))
+                    return active_user
+                return None
 
             ok = False
             attempts = row["attempts"]
@@ -225,6 +228,7 @@ class OtpService:
                     " attempts = ? WHERE email = ?",
                     (attempts, email),
                 )
+                conn.execute("DELETE FROM otp_failures WHERE email = ?", (email,))
                 return active_user
             conn.execute(
                 "UPDATE otp_codes SET attempts = ?,"

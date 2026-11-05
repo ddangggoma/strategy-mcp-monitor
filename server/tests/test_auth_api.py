@@ -41,7 +41,7 @@ async def test_login_with_mixed_case_email(local_client, services):
     await bootstrap(local_client)
     r = await login(local_client, services, " ADMIN@x.com ")
     cookie = r.headers["set-cookie"].lower()
-    assert "mcpmon_sid=" in cookie and "httponly" in cookie and "samesite=strict" in cookie
+    assert "mcpmon_sid_local=" in cookie and "httponly" in cookie and "samesite=strict" in cookie
     me = (await local_client.get("/api/auth/me")).json()
     assert me["user"]["email"] == "admin@x.com" and me["channel"] == "local"
 
@@ -89,11 +89,11 @@ async def test_logout_without_session_is_204(local_client):
 async def test_logout_revokes_server_side_and_audits(local_client, services):
     await bootstrap(local_client)
     await login(local_client, services)
-    sid = local_client.cookies["mcpmon_sid"]
+    sid = local_client.cookies["mcpmon_sid_local"]
     r = await local_client.post("/api/auth/logout", headers={"X-CSRF-Token": local_client.csrf})
     assert r.status_code == 204
     assert services.sessions.get(sid, "local") is None
-    assert "mcpmon_sid" in r.headers["set-cookie"].lower()
+    assert "mcpmon_sid_local" in r.headers["set-cookie"].lower()
     events = [e for e in await audit_events(services, "auth") if e["event"] == "logout"]
     assert len(events) == 1 and events[0]["ok"] is True and events[0]["email"] == "admin@x.com"
 
@@ -111,11 +111,11 @@ async def test_login_response_shape_and_touch_login(local_client, services):
 async def test_login_revokes_preexisting_session(local_client, services, clock):
     await bootstrap(local_client)
     await login(local_client, services)
-    old_sid = local_client.cookies["mcpmon_sid"]
+    old_sid = local_client.cookies["mcpmon_sid_local"]
     assert services.sessions.get(old_sid, "local") is not None
     clock.advance(61)  # past the resend cooldown
     await login(local_client, services)  # client still carries the old cookie
-    new_sid = local_client.cookies["mcpmon_sid"]
+    new_sid = local_client.cookies["mcpmon_sid_local"]
     assert new_sid != old_sid
     assert services.sessions.get(old_sid, "local") is None
     assert services.sessions.get(new_sid, "local") is not None
@@ -124,7 +124,7 @@ async def test_login_revokes_preexisting_session(local_client, services, clock):
 async def test_failed_login_keeps_existing_session(local_client, services):
     await bootstrap(local_client)
     await login(local_client, services)
-    sid = local_client.cookies["mcpmon_sid"]
+    sid = local_client.cookies["mcpmon_sid_local"]
     r = await local_client.post("/api/auth/otp/verify", json={"email": "admin@x.com", "code": "000000"})
     assert r.status_code == 401
     assert services.sessions.get(sid, "local") is not None
@@ -186,7 +186,7 @@ async def test_bootstrap_audited(local_client, services):
 async def test_external_me_and_login(external_client, services):
     services.users.create_first_admin("admin@x.com", "관리자")
     me = (await external_client.get("/api/auth/me")).json()
-    assert me == {"user": None, "channel": "external", "csrf_token": None}
+    assert me == {"user": None, "channel": "external", "csrf_token": None, "otp_provider": "dummy"}
     await login(external_client, services)
     me = (await external_client.get("/api/auth/me")).json()
     assert me["user"]["email"] == "admin@x.com" and me["channel"] == "external"
@@ -195,7 +195,12 @@ async def test_external_me_and_login(external_client, services):
 async def test_session_from_other_channel_is_anonymous(local_client, external_client, services):
     await bootstrap(local_client)
     await login(local_client, services)
-    external_client.cookies.set("mcpmon_sid", local_client.cookies["mcpmon_sid"])
+    local_sid = local_client.cookies["mcpmon_sid_local"]
+    assert services.sessions.get(local_sid, "local") is not None
+    # Present the local sid under the name the external channel reads, so the cookie IS sent;
+    # only the session's channel binding keeps the request anonymous.
+    external_client.cookies.set("mcpmon_sid_ext", local_sid, domain="test")
+    assert external_client.cookies.get("mcpmon_sid_ext") == local_sid
     assert (await external_client.get("/api/auth/me")).json()["user"] is None
 
 
@@ -237,19 +242,20 @@ async def test_login_audited_ok_false_when_session_create_fails(services, monkey
 async def test_logout_does_not_revoke_other_channel_session(local_client, services):
     user = services.users.create_first_admin("admin@x.com", "관리자")
     ext_sid, _ = services.sessions.create(user.id, "external", "1.2.3.4", "ua")
-    local_client.cookies.set("mcpmon_sid", ext_sid, domain="127.0.0.1")
+    # the external sid under the LOCAL cookie name: the cookie reaches the server, the session is not local
+    local_client.cookies.set("mcpmon_sid_local", ext_sid, domain="127.0.0.1")
     r = await local_client.post("/api/auth/logout")
     assert r.status_code == 204
-    assert "mcpmon_sid" in r.headers["set-cookie"].lower()  # cookie still cleared
+    assert "mcpmon_sid_local" in r.headers["set-cookie"].lower()  # cookie still cleared
     assert services.sessions.get(ext_sid, "external") is not None
 
 
 async def test_login_does_not_revoke_other_channel_session(local_client, services):
     user = services.users.create_first_admin("admin@x.com", "관리자")
     ext_sid, _ = services.sessions.create(user.id, "external", "1.2.3.4", "ua")
-    local_client.cookies.set("mcpmon_sid", ext_sid, domain="127.0.0.1")
+    local_client.cookies.set("mcpmon_sid_local", ext_sid, domain="127.0.0.1")
     await login(local_client, services)
-    assert local_client.cookies["mcpmon_sid"] != ext_sid
+    assert local_client.cookies["mcpmon_sid_local"] != ext_sid
     assert services.sessions.get(ext_sid, "external") is not None
 
 
@@ -359,7 +365,31 @@ async def test_me_returns_csrf_token_for_live_session(local_client, services):
 
 async def test_me_anonymous_csrf_null(external_client):
     me = (await external_client.get("/api/auth/me")).json()
-    assert me == {"user": None, "channel": "external", "csrf_token": None}
+    assert me == {"user": None, "channel": "external", "csrf_token": None, "otp_provider": "dummy"}
+
+
+async def test_channel_cookies_do_not_collide(local_client, external_client, services, clock):
+    await bootstrap(local_client)
+    await login(local_client, services)
+    clock.advance(61)  # per-email resend cooldown
+    await login(external_client, services)
+    assert set(local_client.cookies) == {"mcpmon_sid_local"}
+    assert set(external_client.cookies) == {"mcpmon_sid_ext"}
+    local_sid = local_client.cookies["mcpmon_sid_local"]
+    ext_sid = external_client.cookies["mcpmon_sid_ext"]
+    # A browser keeps both cookies for one host (cookies ignore ports).
+    local_client.cookies.set("mcpmon_sid_ext", ext_sid, domain="127.0.0.1")
+    external_client.cookies.set("mcpmon_sid_local", local_sid, domain="test")
+    for client in (local_client, external_client):
+        assert {c.name for c in client.cookies.jar} == {"mcpmon_sid_local", "mcpmon_sid_ext"}
+    assert (await local_client.get("/api/auth/me")).json()["user"]["email"] == "admin@x.com"
+    assert (await external_client.get("/api/auth/me")).json()["user"]["email"] == "admin@x.com"
+    r = await local_client.post("/api/auth/logout", headers={"X-CSRF-Token": local_client.csrf})
+    set_cookie = r.headers["set-cookie"]
+    assert "mcpmon_sid_local" in set_cookie and "mcpmon_sid_ext" not in set_cookie
+    assert services.sessions.get(local_sid, "local") is None
+    assert services.sessions.get(ext_sid, "external") is not None
+    assert (await external_client.get("/api/auth/me")).json()["user"]["email"] == "admin@x.com"
 
 
 async def test_bootstrap_requires_json_content_type(local_client, services):

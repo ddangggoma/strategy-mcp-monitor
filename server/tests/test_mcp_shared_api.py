@@ -6,11 +6,12 @@ import httpx
 import pytest
 
 from app.clock import to_kst_iso
+from app.monitor.bus import MAX_STREAMS_PER_IP, MAX_STREAMS_PER_LOOPBACK
 from app.monitor.history import ActionRecord
 from app.monitor.models import Issue
 from app.web import mcp_shared
 from app.web.app_factory import create_app
-from app.web.deps import SESSION_COOKIE
+from app.web.deps import session_cookie_name
 from app.web.mcp_shared import board_stream
 from tests.fakes import ok_result
 from tests.live import live_app
@@ -280,6 +281,7 @@ async def test_stream_hides_action_events_from_anonymous(services):
     assert [n for n, _ in anon_out] and {n for n, _ in anon_out} <= {"mcp"}  # still gets state changes
     action = next(d for n, d in authed_out if n == "action")
     assert (action["run_id"], action["mcp_id"], action["kind"], action["status"], action["exit_code"]) == (run_id, m.id, "start", "ok", 0)
+    assert action["requested"] == "start"
     await ga.aclose(); await gb.aclose()
 
 
@@ -322,9 +324,11 @@ async def wait_for_count(bus, n, timeout=5.0):
         await asyncio.sleep(0.02)
 
 
-async def test_stream_releases_slot_on_disconnect(services):
+async def test_stream_releases_slot_on_disconnect(services, monkeypatch):
+    # uvicorn clients are loopback; lower the loopback cap so 8 loops are "more than the cap"
+    monkeypatch.setattr(services.bus, "_max_per_loopback", MAX_STREAMS_PER_IP)
     async with live_app(create_app("external", services)) as base, httpx.AsyncClient() as c:
-        for _ in range(8):  # more than the per-IP cap: a leak would show as a 429
+        for _ in range(8):  # more than the (lowered) cap: a leak would show as a 429
             async with c.stream("GET", base + "/api/stream") as r:
                 assert r.status_code == 200
                 assert (await anext(r.aiter_lines())) == "event: board"
@@ -337,7 +341,7 @@ async def test_stream_delivers_events_over_http(services, monkeypatch):
     owner = make_user(services, "o@x.com"); m = seed_mcp(services, owner)
     sid, _ = services.sessions.create(owner.id, "external", "127.0.0.1", "ua")
     async with live_app(create_app("external", services)) as base, httpx.AsyncClient() as c:
-        async with c.stream("GET", base + "/api/stream", headers={"Cookie": f"{SESSION_COOKIE}={sid}"}) as r:
+        async with c.stream("GET", base + "/api/stream", headers={"Cookie": f"{session_cookie_name('external')}={sid}"}) as r:
             lines = r.aiter_lines()
 
             async def event():
@@ -381,25 +385,43 @@ async def test_stream_limit_503(external_client, services, monkeypatch):
 
 
 async def test_stream_per_ip_limit_429(external_client, services):
-    for _ in range(5):
-        services.bus.subscribe(ip="127.0.0.1")  # the test client's address
+    # the ASGI test client's address is loopback (127.0.0.1): it gets the loopback cap, not the plain per-IP one
+    for _ in range(MAX_STREAMS_PER_LOOPBACK):
+        services.bus.subscribe(ip="127.0.0.1")
     r = await external_client.get("/api/stream")
     assert r.status_code == 429 and r.json() == {"error": "rate_limited"} and "retry-after" in r.headers
-    assert services.bus.subscriber_count == 5  # a refused request holds nothing
+    assert services.bus.subscriber_count == MAX_STREAMS_PER_LOOPBACK  # a refused request holds nothing
 
 
-async def test_stream_per_ip_limit_over_http_frees_on_close(services):
+async def test_stream_per_ip_limit_429_for_non_loopback_client(services):
+    transport = httpx.ASGITransport(app=create_app("external", services), client=("10.1.2.3", 5000))
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        for _ in range(MAX_STREAMS_PER_IP):
+            services.bus.subscribe(ip="10.1.2.3")
+        r = await c.get("/api/stream")
+        assert r.status_code == 429 and r.json() == {"error": "rate_limited"} and "retry-after" in r.headers
+        assert services.bus.subscriber_count == MAX_STREAMS_PER_IP
+    # a loopback address with the same number of open streams is still below ITS cap
+    services.bus.check_capacity("127.0.0.1")
+    for _ in range(MAX_STREAMS_PER_IP):
+        services.bus.subscribe(ip="127.0.0.1")
+    services.bus.check_capacity("127.0.0.1")
+
+
+async def test_stream_per_ip_limit_over_http_frees_on_close(services, monkeypatch):
+    # uvicorn clients are loopback; lower the loopback cap to the plain per-IP one to keep the scenario small
+    monkeypatch.setattr(services.bus, "_max_per_loopback", MAX_STREAMS_PER_IP)
     async with live_app(create_app("external", services)) as base, httpx.AsyncClient() as c:
         opened = []
-        for _ in range(5):
+        for _ in range(MAX_STREAMS_PER_IP):
             cm = c.stream("GET", base + "/api/stream"); r = await cm.__aenter__(); lines = r.aiter_lines(); opened.append((cm, lines))  # keep `lines`: dropping it closes the stream
             assert (await anext(lines)) == "event: board"
-        assert services.bus.subscriber_count == 5
+        assert services.bus.subscriber_count == MAX_STREAMS_PER_IP
         async with c.stream("GET", base + "/api/stream") as sixth:
             assert (sixth.status_code, (await sixth.aread())) == (429, b'{"error":"rate_limited"}')
         cm, _r = opened.pop()
         await cm.__aexit__(None, None, None)
-        await wait_for_count(services.bus, 4)
+        await wait_for_count(services.bus, MAX_STREAMS_PER_IP - 1)
         async with c.stream("GET", base + "/api/stream") as again:
             assert again.status_code == 200 and (await anext(again.aiter_lines())) == "event: board"
         for cm, _r in opened:

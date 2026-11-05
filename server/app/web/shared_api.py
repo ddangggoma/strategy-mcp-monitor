@@ -8,13 +8,13 @@ from app.services import Services
 from app.users.store import InvalidEmailError, User, normalize_email
 from app.web.channels import Channel
 from app.web.deps import (
-    SESSION_COOKIE,
     ApiError,
     check_csrf,
     client_ip,
     current_user,
     get_channel,
     get_services,
+    session_cookie_name,
     user_json,
 )
 
@@ -52,7 +52,7 @@ def _live_sid(request: Request) -> str | None:
     """
     if getattr(request.state, "auth_session", None) is None:
         return None
-    return request.cookies.get(SESSION_COOKIE)
+    return request.cookies.get(session_cookie_name(get_channel(request)))
 
 
 def _cookie_args(request: Request) -> dict[str, Any]:
@@ -156,7 +156,7 @@ async def otp_verify(
         audit_login(user.email, False)
         raise
     audit_login(user.email, True)
-    response.set_cookie(SESSION_COOKIE, sid, **_cookie_args(request))
+    response.set_cookie(session_cookie_name(channel), sid, **_cookie_args(request))
     return {"user": user_json(user), "csrf_token": csrf_token}
 
 
@@ -180,7 +180,7 @@ async def logout(
             ok=True,
         )
     response = Response(status_code=204)
-    response.delete_cookie(SESSION_COOKIE, **_cookie_args(request))
+    response.delete_cookie(session_cookie_name(channel), **_cookie_args(request))
     return response
 
 
@@ -189,6 +189,7 @@ async def me(
     request: Request,
     user: User | None = Depends(current_user),
     channel: Channel = Depends(get_channel),
+    services: Services = Depends(get_services),
 ) -> dict[str, object]:
     session = getattr(request.state, "auth_session", None) if user is not None else None
     return {
@@ -196,4 +197,6 @@ async def me(
         "channel": channel,
         # lets the SPA recover its CSRF token after a page reload (same-origin, session-bound)
         "csrf_token": session.csrf_token if session is not None else None,
+        # the login screen shows a dev hint only for the dummy provider
+        "otp_provider": services.settings.get().otp_provider,
     }

@@ -1,13 +1,22 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 MAX_STREAMS = 100
 MAX_STREAMS_PER_IP = 5
+MAX_STREAMS_PER_LOOPBACK = 20  # a local browser (many tabs) or a same-host reverse proxy shares one address
 MAX_PENDING_EVENTS = 100
+
+
+def _is_loopback(ip: str) -> bool:
+    try:
+        return ipaddress.ip_address(ip).is_loopback
+    except ValueError:
+        return False
 
 
 class StreamLimitError(Exception):
@@ -39,9 +48,15 @@ class BoardBus:
     Call from the event-loop thread only.
     """
 
-    def __init__(self, max_streams: int = MAX_STREAMS, max_per_ip: int = MAX_STREAMS_PER_IP) -> None:
+    def __init__(
+        self,
+        max_streams: int = MAX_STREAMS,
+        max_per_ip: int = MAX_STREAMS_PER_IP,
+        max_per_loopback: int = MAX_STREAMS_PER_LOOPBACK,
+    ) -> None:
         self._max_streams = max_streams
         self._max_per_ip = max_per_ip
+        self._max_per_loopback = max_per_loopback
         self._subs: list[Subscription] = []
         self._versions: dict[int, int] = {}
 
@@ -57,7 +72,10 @@ class BoardBus:
         """Raise if a subscription for ``ip`` would be refused now (a cheap pre-flight for routes)."""
         if len(self._subs) >= self._max_streams:
             raise StreamLimitError
-        if ip is not None and sum(1 for s in self._subs if s.ip == ip) >= self._max_per_ip:
+        if ip is None:
+            return
+        cap = self._max_per_loopback if _is_loopback(ip) else self._max_per_ip
+        if sum(1 for s in self._subs if s.ip == ip) >= cap:
             raise IpStreamLimitError
 
     def subscribe(self, authed: bool = False, ip: str | None = None) -> Subscription:

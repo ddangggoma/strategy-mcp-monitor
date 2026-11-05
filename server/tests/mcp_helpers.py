@@ -3,7 +3,7 @@ from __future__ import annotations
 from app.monitor.models import Mcp, McpConfig
 from app.monitor.scripts import ScriptUpload
 from app.users.store import User
-from app.web.deps import SESSION_COOKIE
+from app.web.deps import session_cookie_name
 
 BAT = {"start": ScriptUpload(".bat", "exit /b 0"), "stop": ScriptUpload(".bat", "exit /b 0")}
 
@@ -27,5 +27,5 @@ def seed_mcp(services, owner: User, scripts=BAT, **config) -> Mcp:
 def login_as(client, services, user: User, channel: str) -> str:
     """Create a session directly, set its cookie on the client and return its CSRF token."""
     sid, csrf = services.sessions.create(user.id, channel, "127.0.0.1", "ua")
-    client.cookies.set(SESSION_COOKIE, sid)
+    client.cookies.set(session_cookie_name(channel), sid)
     return csrf

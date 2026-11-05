@@ -236,8 +236,19 @@ async def test_action_event_only_to_authed_subscribers(services):
     await crash_to_action(services, m)
     assert [ev for ev, _ in anon.events] == []
     (ev, data), = list(authed.events)
-    assert ev == "action" and set(data) == {"run_id", "mcp_id", "kind", "trigger", "status", "exit_code", "duration_ms"}
+    assert ev == "action" and set(data) == {
+        "run_id", "mcp_id", "kind", "requested", "trigger", "status", "exit_code", "duration_ms"
+    }
     assert (data["mcp_id"], data["kind"], data["status"]) == (m.id, "start", "ok")
+    assert data["requested"] == "start"
+
+async def test_action_event_requested_differs_from_kind_on_restart_fallback(services):
+    m = seed_mcp(services, make_user(services, "o@x.com"))  # no restart script: restart = stop, then start
+    authed = services.bus.subscribe(authed=True)
+    await crash_to_action(services, m, Issue.UNRESPONSIVE)
+    assert [(d["kind"], d["requested"]) for ev, d in authed.events if ev == "action"] == [
+        ("stop", "restart"), ("start", "restart"),
+    ]
 
 async def test_tamper_log_fields(services):
     m = seed_mcp(services, make_user(services, "o@x.com"))

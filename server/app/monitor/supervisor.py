@@ -524,8 +524,8 @@ class Monitor:
         self._bus.publish(
             "action",
             {
-                "run_id": run_id, "mcp_id": mcp_id, "kind": kind, "trigger": run.trigger,
-                "status": result.status, "exit_code": result.exit_code, "duration_ms": result.duration_ms,
+                "run_id": run_id, "mcp_id": mcp_id, "kind": kind, "requested": run.kind,
+                "trigger": run.trigger, "status": result.status, "exit_code": result.exit_code, "duration_ms": result.duration_ms,
             },
             public=False,
         )
