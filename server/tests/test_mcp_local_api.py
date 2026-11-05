@@ -357,3 +357,61 @@ async def test_denied_mutation_audited_without_effect(local_client, services):
     ev = [(e["action"], e["result"]) for e in await audit_events(services, "admin.audit") if e["result"] == "denied"]
     assert ev == [("delete_mcp", "denied"), ("edit_scripts", "denied"), ("transfer_ownership", "denied")]
     assert services.mcps.get(m.id).owner_id == owner.id and services.scripts.get(m.id, "start").version == 1
+
+
+async def test_create_rejects_shell_metacharacters_in_name(local_client, services):
+    """I1: an injected name is refused at create time and nothing is stored."""
+    _, h = await as_user(local_client, services, "dev@x.com")
+    r = await local_client.post("/api/mcps", json={**BODY, "name": "calc & echo X"}, headers=h)
+    assert (r.status_code, r.json()) == (422, {"error": "validation"})
+    assert services.mcps.list() == [] and not list(services.paths.scripts_dir.iterdir())
+    assert [e["target"]["error"] for e in await admin_events(services, "mcp_create")] == ["validation"]
+
+
+def _failing_replace(*_args, **_kwargs):
+    raise PermissionError(13, "file in use")
+
+
+async def test_script_write_io_error_is_audited_500(local_client, services, monkeypatch):
+    """M2: an OSError from the script file write is a 500 internal with an audited io error."""
+    owner, h = await as_user(local_client, services, "o@x.com")
+    m = seed_mcp(services, owner)
+    with monkeypatch.context() as mp:
+        mp.setattr("app.monitor.scripts.os.replace", _failing_replace)
+        r1 = await local_client.post("/api/mcps", json={**BODY, "name": "other", "port": 9200}, headers=h)
+        r2 = await local_client.put(f"/api/mcps/{m.id}/scripts/start", json={"ext": ".bat", "content": "exit /b 1"}, headers=h)
+        r3 = await local_client.post(f"/api/mcps/{m.id}/scripts/start/versions/1/revert", headers=h)
+    for r in (r1, r2, r3):
+        assert (r.status_code, r.json()) == (500, {"error": "internal"})
+    assert [x.config.name for x in services.mcps.list()] == ["calc"] and services.scripts.get(m.id, "start").version == 1
+    for action in ("mcp_create", "script_update", "script_revert"):
+        (ev,) = await admin_events(services, action)
+        assert (ev["result"], ev["target"]["error"]) == ("error", "io"), action
+    assert sorted(p.name for p in (services.paths.scripts_dir / str(m.id)).iterdir()) == ["start.bat", "stop.bat"]
+
+
+async def test_invalid_stored_config_listed_fixable_and_deletable(local_client, services):
+    """M6: a stored row the stricter validator rejects is listed with config_error, can be fixed or deleted."""
+    owner, h = await as_user(local_client, services, "o@x.com", "admin")
+    good = seed_mcp(services, owner)
+    bad = seed_mcp(services, owner, name="legacy", port=9200)
+    services.monitor.remove(bad.id)
+    services.db.execute(
+        "UPDATE mcps SET name = ?, config = json_set(config, '$.name', ?) WHERE id = ?",
+        ("legacy & x", "legacy & x", bad.id),
+    )
+    listed = {d["id"]: d for d in (await local_client.get("/api/mcps")).json()}
+    assert listed[good.id]["config_error"] is False and listed[good.id]["live"]["state"] == "HEALTHY"
+    assert listed[bad.id]["config_error"] is True and listed[bad.id]["name"] == "legacy & x"
+    assert listed[bad.id]["live"] is None
+    r = await local_client.get(f"/api/mcps/{bad.id}")
+    assert r.status_code == 200 and r.json()["config_error"] is True
+    r = await local_client.put(f"/api/mcps/{bad.id}", json={"action_delay_sec": 5}, headers=h)
+    assert (r.status_code, r.json()) == (422, {"error": "validation"})  # still invalid: nothing written
+    r = await local_client.put(f"/api/mcps/{bad.id}", json={"name": "legacy"}, headers=h)
+    assert r.status_code == 200 and r.json()["config_error"] is False and r.json()["live"]["state"] == "HEALTHY"
+    assert services.monitor.engine(bad.id) is not None
+    services.db.execute("UPDATE mcps SET config = json_set(config, '$.name', 'x|y') WHERE id = ?", (bad.id,))
+    services.monitor.remove(bad.id)
+    assert (await local_client.delete(f"/api/mcps/{bad.id}", headers=h)).status_code == 204
+    assert [m.id for m in services.mcps.list()] == [good.id]

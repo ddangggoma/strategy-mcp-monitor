@@ -130,6 +130,8 @@ class McpHistory:
         self._db = db
         self._clock = clock
         self._live: dict[int, _Live] = {}
+        # (mcp_id, hours) -> (window start key, stored ok, stored total); see ``uptime``.
+        self._uptime_db: dict[tuple[int, int], tuple[str, int, int]] = {}
 
     # ---- checks / uptime ----
 
@@ -175,13 +177,25 @@ class McpHistory:
         return live.last_check_at if live else None
 
     def uptime(self, mcp_id: int, hours: int = 24) -> float | None:
+        """Share of ok checks since ``hours`` ago (minute granularity), None without checks.
+
+        The stored part (a SUM over up to 1,440 rows) is cached per MCP for the current minute
+        bucket: it changes only when the window start moves (minute rollover) or rows are written
+        (rollover writes, ``flush``) or purged; ``invalidate`` drops it explicitly. Unflushed
+        counts are added live on every call.
+        """
         since = minute_key(self._clock.now() - timedelta(hours=hours))
-        row = self._db.query(
-            "SELECT SUM(ok) AS ok, SUM(total) AS total FROM mcp_minutes"
-            " WHERE mcp_id = ? AND minute >= ?",
-            (mcp_id, since),
-        )[0]
-        ok, total = row["ok"] or 0, row["total"] or 0
+        cached = self._uptime_db.get((mcp_id, hours))
+        if cached is not None and cached[0] == since:
+            ok, total = cached[1], cached[2]
+        else:
+            row = self._db.query(
+                "SELECT SUM(ok) AS ok, SUM(total) AS total FROM mcp_minutes"
+                " WHERE mcp_id = ? AND minute >= ?",
+                (mcp_id, since),
+            )[0]
+            ok, total = row["ok"] or 0, row["total"] or 0
+            self._uptime_db[(mcp_id, hours)] = (since, ok, total)
         live = self._live.get(mcp_id)
         if live:
             for key, acc in live.pending.items():
@@ -222,7 +236,13 @@ class McpHistory:
             for key, acc in sorted(merged.items())
         ]
 
+    def invalidate(self, mcp_id: int) -> None:
+        """Drop the cached stored uptime of ``mcp_id`` (the next ``uptime`` re-reads the DB)."""
+        for key in [k for k in self._uptime_db if k[0] == mcp_id]:
+            del self._uptime_db[key]
+
     def _write(self, mcp_id: int, accs: dict[str, _Acc]) -> None:
+        self.invalidate(mcp_id)
         with self._db.transaction() as conn:
             for key, a in accs.items():
                 conn.execute(
@@ -240,10 +260,12 @@ class McpHistory:
     def purge(self) -> int:
         """Delete minute buckets older than HISTORY_KEEP_DAYS; return how many."""
         cutoff = minute_key(self._clock.now() - timedelta(days=HISTORY_KEEP_DAYS))
+        self._uptime_db.clear()
         return self._db.execute_rowcount("DELETE FROM mcp_minutes WHERE minute < ?", (cutoff,))
 
     def forget(self, mcp_id: int) -> None:
         self._live.pop(mcp_id, None)
+        self.invalidate(mcp_id)
 
     # ---- transitions ----
 

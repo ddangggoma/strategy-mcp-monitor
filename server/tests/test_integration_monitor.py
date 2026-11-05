@@ -28,6 +28,7 @@ from tests.test_auth_api import bootstrap, login
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(sys.platform != "win32", reason="Windows only"),
+    pytest.mark.timeout(240),  # the scenario needs 50-70 s; above the default 120 s per-test cap
 ]
 DUMMY = Path(__file__).resolve().parents[2] / "dummy-mcps"
 SCRIPTS = {

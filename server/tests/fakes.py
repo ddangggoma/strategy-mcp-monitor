@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 from collections import deque
-from collections.abc import Hashable, Mapping
+from collections.abc import Callable, Hashable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -81,7 +81,12 @@ class FakeRunner:
         timeout_sec: float,
         env: Mapping[str, str],
         lock_key: Hashable,
+        resolve: Callable[[], tuple[Path, str] | None] | None = None,
     ) -> ScriptResult:
+        if resolve is not None:  # like the real runner: resolved "inside the slot", here at call time
+            target = resolve()
+            if target is not None:
+                path, expected_sha256 = target
         self.calls.append(RunCall(Path(path), expected_sha256, timeout_sec, dict(env), lock_key))
         if self.raise_next is not None:
             exc, self.raise_next = self.raise_next, None

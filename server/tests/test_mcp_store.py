@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from datetime import UTC, datetime
 
@@ -339,3 +340,40 @@ def test_scripts_table_constraints(db, env):
         db.execute("INSERT INTO mcp_scripts(mcp_id, kind, ext, sha256, version, updated_at) VALUES (?, 'start', '.sh', 'h', 1, 't')", (m.id,))
     with pytest.raises(sqlite3.IntegrityError):
         db.execute("INSERT INTO mcp_scripts(mcp_id, kind, ext, sha256, version, updated_at) VALUES (999, 'start', '.ps1', 'h', 1, 't')")
+
+
+# ---- I1: shell metacharacters and control characters (MCP_NAME reaches cmd as %MCP_NAME%) ----
+
+NAME_FORBIDDEN = [*map(chr, range(0x00, 0x20)), "\x7f", *map(chr, range(0x80, 0xA0)),
+                  "%", "^", "&", "|", "<", ">", '"', "!", "`"]
+
+
+@pytest.mark.parametrize("ch", NAME_FORBIDDEN, ids=lambda c: f"U+{ord(c):04X}")
+def test_name_rejects_shell_and_control_characters(ch):
+    with pytest.raises(ValidationError):
+        cfg(name=f"calc{ch}x")
+    stored = json.dumps({"name": f"calc{ch}x", "host": "127.0.0.1", "port": 9102})
+    with pytest.raises(ValidationError):  # the path stored rows take
+        McpConfig.model_validate_json(stored)
+
+
+@pytest.mark.parametrize("ch", [*map(chr, range(0x00, 0x20)), "\x7f", *map(chr, range(0x80, 0xA0))],
+                         ids=lambda c: f"U+{ord(c):04X}")
+def test_expected_process_name_rejects_control_characters(ch):
+    with pytest.raises(ValidationError):
+        cfg(expected_process_name=f"python{ch}.exe")
+
+
+@pytest.mark.parametrize("name", ["서울 날씨", "calc (v2)", "my_mcp-1.0", "a.b", "Ünïcödé ☀"])
+def test_name_accepts_plain_text(name):
+    assert cfg(name=name).name == name
+
+
+def test_injected_name_cannot_be_stored(env):
+    store, _, owner = env
+    m = store.create(cfg(), owner.id)
+    with pytest.raises(ValidationError):
+        store.create(cfg(name="calc & echo X", port=9200), owner.id)
+    with pytest.raises(ValidationError):
+        store.update(m.id, {"name": "calc & echo X"})
+    assert [x.config.name for x in store.list()] == ["calc"]

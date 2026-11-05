@@ -4,7 +4,9 @@ No I/O, no timers: the caller feeds check results / ticks / script completions a
 executes the returned effects.  Time comes only from the injected ``Clock`` and from
 ``CheckResult.at``.  Effects are always ordered Transition -> RunScript -> Alert, and a
 Transition is only emitted when the state actually changes.  Events that arrive in a
-state where they have no meaning are ignored (never raise).
+state where they have no meaning are ignored (never raise).  Actions are single-flight: no
+RunScript is emitted while one is running (auto, manual and boot alike), and a completion settles
+only the very run object it reports (identity, not value equality).
 """
 
 from __future__ import annotations
@@ -149,7 +151,8 @@ class McpEngine:
         return []
 
     def on_action_done(self, run: RunScript, status: ScriptStatus) -> list[Effect]:
-        if self._running is None or run != self._running:
+        # Identity, not equality: two runs of the same kind/trigger/reason are equal values.
+        if self._running is None or run is not self._running:
             return []  # stale / unknown completion: nothing to settle
         self._running = None
         if self._state is not McpState.ACTION:
@@ -226,6 +229,10 @@ class McpEngine:
                 return []
             self._alerted = True
             return [Alert(issue)]
+        if self._running is not None:
+            # Single flight: a script from before a maintenance toggle is still running. Stay
+            # SUSPECT and act on a later check once it has settled.
+            return []
         now = self._clock.now()
         if self._window_count(now) < self._config.max_auto_actions:
             self._auto_stamps.append(now)

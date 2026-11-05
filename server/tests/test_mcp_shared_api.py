@@ -405,3 +405,17 @@ async def test_stream_per_ip_limit_over_http_frees_on_close(services):
         for cm, _r in opened:
             await cm.__aexit__(None, None, None)
         await wait_for_count(services.bus, 0)
+
+
+async def test_put_rejects_shell_metacharacters_in_name(external_client, services):
+    """I1: a name reaches .bat scripts as %MCP_NAME%; cmd metacharacters would inject commands."""
+    owner = make_user(services, "o@x.com"); m = seed_mcp(services, owner)
+    h = {"X-CSRF-Token": login_as(external_client, services, owner, "external")}
+    for bad in ("calc & echo X", "a%PATH%", "a|b", "a\nb", 'a"b'):
+        r = await external_client.put(f"/api/mcps/{m.id}", json={"name": bad}, headers=h)
+        assert (r.status_code, r.json()) == (422, {"error": "validation"}), bad
+    r = await external_client.put(f"/api/mcps/{m.id}", json={"expected_process_name": "py\x00.exe"}, headers=h)
+    assert (r.status_code, r.json()) == (422, {"error": "validation"})
+    assert services.mcps.get(m.id).config.name == "calc" and services.monitor.engine(m.id).config.name == "calc"
+    r = await external_client.put(f"/api/mcps/{m.id}", json={"name": "서울 날씨"}, headers=h)
+    assert r.status_code == 200 and services.mcps.get(m.id).config.name == "서울 날씨"

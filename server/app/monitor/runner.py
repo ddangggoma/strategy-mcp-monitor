@@ -15,7 +15,7 @@ import hashlib
 import os
 import subprocess
 import time
-from collections.abc import Hashable, Mapping
+from collections.abc import Callable, Hashable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -31,6 +31,8 @@ KILL_WAIT_SEC = 5.0
 
 _CHUNK = 65_536
 _EXTS = (".ps1", ".bat", ".cmd")
+
+ScriptTarget = tuple[Path, str]  # (script path, expected sha256)
 
 
 @dataclass(frozen=True)
@@ -143,7 +145,14 @@ class ScriptRunner:
         timeout_sec: float,
         env: Mapping[str, str],
         lock_key: Hashable,
+        resolve: Callable[[], ScriptTarget | None] | None = None,
     ) -> ScriptResult:
+        """Run ``path`` if its sha256 is ``expected_sha256``.
+
+        ``resolve``, when given, is called once the per-MCP lock and a global slot are held, right
+        before the hash check: its ``(path, expected_sha256)`` replaces the arguments (the script may
+        have been edited while the run waited for a slot), and ``None`` means the script is gone.
+        """
         started = time.perf_counter()
         try:
             lock = self._locks.setdefault(lock_key, asyncio.Lock())
@@ -152,6 +161,11 @@ class ScriptRunner:
                 self.active += 1
                 self.peak_active = max(self.peak_active, self.active)
                 try:
+                    if resolve is not None:
+                        target = resolve()
+                        if target is None:
+                            return _failure("missing", started)
+                        path, expected_sha256 = target
                     return await self._run(path, expected_sha256, timeout_sec, env)
                 finally:
                     self.active -= 1

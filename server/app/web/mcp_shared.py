@@ -40,12 +40,17 @@ McpId = Annotated[int, Path(ge=1, le=2**63 - 1)]  # SQLite INTEGER range; larger
 
 
 def mcp_detail(services: Services, mcp: Mcp) -> dict[str, Any]:
-    """Full detail: every McpConfig field, id, effective owner, creation time and the live board item."""
+    """Full detail: every McpConfig field, id, effective owner, creation time and the live board item.
+
+    ``config_error`` is true for a stored config that fails validation (M6): the fields are the
+    stored values, ``live`` is None (it is not monitored) and a PUT that fixes it starts monitoring.
+    """
     owner_id = services.mcps.effective_owner_id(mcp)
     owner = services.users.get(owner_id) if owner_id is not None else None
     return {
-        **mcp.config.model_dump(),
+        **mcp.config.model_dump(warnings=False),  # an invalid stored config may mismatch the types
         "id": mcp.id,
+        "config_error": mcp.config_error is not None,
         "owner": {"id": owner.id, "email": owner.email, "name": owner.name} if owner else None,
         "created_at": to_kst_iso(mcp.created_at),
         "live": services.monitor.board_item(mcp.id),
@@ -124,7 +129,7 @@ async def board_stream(
             events = list(sub.events)
             sub.events.clear()
             for mcp_id in dirty:
-                item = monitor.board_item(mcp_id)
+                item = monitor.batch_item(mcp_id)  # built once per change, shared by all streams
                 yield _sse("mcp", item) if item is not None else _sse("mcp_removed", {"id": mcp_id})
             for name, data in events:
                 yield _sse(name, data)
@@ -283,8 +288,11 @@ async def update_mcp(
             target={"mcp_id": mcp_id, "error": code}, result="error",
         )
         raise ApiError(status, code) from None
-    services.monitor.reconfigure(after)
-    old, new = before.config.model_dump(), after.config.model_dump()
+    if services.monitor.engine(mcp_id) is None:
+        services.monitor.add(after)  # a fixed config_error row (never monitored): start monitoring it
+    else:
+        services.monitor.reconfigure(after)
+    old, new = before.config.model_dump(warnings=False), after.config.model_dump()
     changes = {k: [old[k], v] for k, v in new.items() if old[k] != v}
     if changes:
         services.audit.admin(

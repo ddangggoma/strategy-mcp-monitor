@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import functools
+import time
 import uuid
 from collections.abc import Awaitable, Callable, Hashable, Mapping
 from datetime import datetime, timedelta
@@ -32,8 +33,8 @@ from app.monitor.engine import (
 from app.monitor.history import ActionRecord, McpHistory, TransitionRecord
 from app.monitor.models import ActionKind, CheckResult, Mcp, McpState, ScriptStatus
 from app.monitor.probes import ProbeResult
-from app.monitor.runner import ScriptResult
-from app.monitor.scripts import ScriptStore
+from app.monitor.runner import ScriptResult, ScriptTarget
+from app.monitor.scripts import ScriptInfo, ScriptStore
 from app.monitor.store import McpNotFoundError, McpStore
 from app.settings.store import Settings, SettingsStore
 from app.users.store import User
@@ -43,6 +44,7 @@ HOUSEKEEP_INTERVAL_SEC = 60.0
 PURGE_EVERY = 60  # housekeeping rounds (hourly)
 PORT_LOOKUP_LOG_EVERY = timedelta(minutes=10)
 DEFAULT_GRACE_SEC = 10.0
+BATCH_ITEM_TTL_SEC = 1.0  # = the SSE coalesce period: time-derived fields stay this fresh
 
 
 class ScriptRunnerLike(Protocol):
@@ -54,6 +56,7 @@ class ScriptRunnerLike(Protocol):
         timeout_sec: float,
         env: Mapping[str, str],
         lock_key: Hashable,
+        resolve: Callable[[], ScriptTarget | None] | None = None,
     ) -> ScriptResult: ...
 
 
@@ -106,6 +109,8 @@ class Monitor:
         self._probes: set[asyncio.Task[None]] = set()
         self._scripts: dict[int, asyncio.Task[None]] = {}
         self._loops: list[asyncio.Task[None]] = []
+        # SSE board items shared by every subscriber: mcp id -> (bus version, built at, item).
+        self._batch: dict[int, tuple[int, float, dict[str, Any] | None]] = {}
         self._housekeep_n = 0
         self._stopped = False
 
@@ -117,6 +122,8 @@ class Monitor:
     def add(self, mcp: Mcp) -> None:
         if mcp.id in self._engines:
             raise ValueError(f"MCP {mcp.id} is already monitored")
+        if mcp.config_error is not None:
+            raise ValueError(f"MCP {mcp.id} has an invalid stored config")
         self._config[mcp.id] = mcp
         self._engines[mcp.id] = McpEngine(mcp.config, self._clock)
         self._bus.mark_dirty(mcp.id)
@@ -131,6 +138,7 @@ class Monitor:
         if old.url != mcp.url:
             self._prober.forget(mcp.id)
         if old.config.maintenance != mcp.config.maintenance:
+            self._history.invalidate(mcp.id)  # maintenance time is not counted as uptime
             self._apply(mcp.id, engine.set_maintenance(mcp.config.maintenance))
         self._bus.mark_dirty(mcp.id)
 
@@ -143,6 +151,7 @@ class Monitor:
         self._config.pop(mcp_id, None)
         self._pids.pop(mcp_id, None)
         self._port_err_at.pop(mcp_id, None)
+        self._batch.pop(mcp_id, None)
         self._history.forget(mcp_id)
         self._prober.forget(mcp_id)
         self._bus.mark_dirty(mcp_id)
@@ -154,9 +163,18 @@ class Monitor:
     # ---- lifecycle ---------------------------------------------------------------
 
     async def start(self, run_loops: bool = True) -> None:
-        """Create engines for MCPs not yet monitored; boot-check the autostart ones among them."""
+        """Create engines for MCPs not yet monitored; boot-check the autostart ones among them.
+
+        A row whose stored config fails validation is skipped with a ``system`` event: it stays
+        listed by the API (``config_error``) so an admin can fix or delete it.
+        """
         for mcp in self._mcps.list():
             if mcp.id in self._engines:
+                continue
+            if mcp.config_error is not None:
+                self._log.emit(
+                    "system", event="monitor.mcp_config_invalid", mcp_id=mcp.id, error=mcp.config_error
+                )
                 continue
             self.add(mcp)
             if mcp.config.autostart_on_boot and not mcp.config.maintenance:
@@ -340,6 +358,19 @@ class Monitor:
             elif isinstance(effect, Alert):
                 self._log.emit("mcp.health", mcp_id=mcp_id, name=name, alert=True, issue=effect.issue.value)
             elif isinstance(effect, RunScript):
+                tracked = self._scripts.get(mcp_id)
+                if tracked is not None and not tracked.done():
+                    # Defensive (the engine is single-flight): never start a second script for an
+                    # MCP or lose track of the running one. Settle the refused run so the engine
+                    # cannot wait for it forever.
+                    self._log.emit(
+                        "system", event="monitor.action_refused", mcp_id=mcp_id, kind=effect.kind,
+                        trigger=effect.trigger, reason="action_in_progress",
+                    )
+                    engine = self._engines.get(mcp_id)
+                    if engine is not None:
+                        self._apply(mcp_id, engine.on_action_done(effect, "error"))
+                    continue
                 rid = run_id or uuid.uuid4().hex
                 task = asyncio.ensure_future(self._execute(mcp_id, effect, actor, rid))
                 self._scripts[mcp_id] = task
@@ -363,6 +394,8 @@ class Monitor:
         if mcp_id in self._scripts or engine.snapshot().running is not None:
             raise ActionInProgressError
         mcp = self._mcps.set_maintenance(mcp_id, kind == "stop")
+        if mcp.config.maintenance != self._config[mcp_id].config.maintenance:
+            self._history.invalidate(mcp_id)
         engine.reconfigure(mcp.config)
         self._config[mcp_id] = mcp
         run_id = uuid.uuid4().hex
@@ -406,6 +439,10 @@ class Monitor:
             result = _result("error", "missing")
         else:
             pid = self._pids.get(mcp_id)
+            # Script env contract: only validated values. cmd expands %VAR% before parsing a line,
+            # so MCP_NAME never holds control or shell metacharacters (McpConfig rejects them),
+            # MCP_HOST is a hostname/IP literal and the rest are fixed values. MCP_ACTOR is a
+            # registered email (registration is localhost-admin only).
             env = {
                 "MCP_ID": str(mcp_id),
                 "MCP_NAME": config.name,
@@ -416,17 +453,29 @@ class Monitor:
                 "MCP_TRIGGER": run.trigger,
                 "MCP_ACTOR": actor.email if actor is not None else "system",
             }
+            resolved: ScriptInfo | None = info
+
+            def resolve() -> ScriptTarget | None:
+                # Spec 5.8: compare with the DB right before execution. The run may wait for the
+                # MCP lock and a global slot (minutes when slots hang); an owner edit meanwhile is
+                # the new expected script, not tampering.
+                nonlocal resolved
+                resolved = self._scripts_store.get(mcp_id, kind)
+                return None if resolved is None else (resolved.path, resolved.sha256)
+
             result = await self._runner.run(
                 info.path,
                 expected_sha256=info.sha256,
                 timeout_sec=config.script_timeout_sec,
                 env=env,
                 lock_key=mcp_id,
+                resolve=resolve,
             )
             if result.error == "hash_mismatch":
+                checked = resolved or info
                 self._log.emit(
-                    "tamper", mcp_id=mcp_id, kind=kind, path=str(info.path),
-                    expected_sha256=info.sha256, actual_sha256=result.actual_sha256,
+                    "tamper", mcp_id=mcp_id, kind=kind, path=str(checked.path),
+                    expected_sha256=checked.sha256, actual_sha256=result.actual_sha256,
                 )
             elif result.error == "internal":
                 self._log.emit(
@@ -503,6 +552,24 @@ class Monitor:
             "maintenance": mcp.config.maintenance,
             "running": snap.running.kind if snap.running else None,
         }
+
+    def batch_item(self, mcp_id: int) -> dict[str, Any] | None:
+        """``board_item`` shared by every SSE subscriber (I3): built once per change, not per stream.
+
+        Rebuilt when the MCP is marked dirty again (a newer bus version) or after
+        BATCH_ITEM_TTL_SEC, so countdowns and uptime are never older than one coalesce period.
+        """
+        version = self._bus.version(mcp_id)
+        now = time.monotonic()
+        cached = self._batch.get(mcp_id)
+        if cached is not None and cached[0] == version and now - cached[1] < BATCH_ITEM_TTL_SEC:
+            return cached[2]
+        item = self.board_item(mcp_id)
+        if item is None:
+            self._batch.pop(mcp_id, None)
+        else:
+            self._batch[mcp_id] = (version, now, item)
+        return item
 
     def board_snapshot(self) -> dict[str, Any]:
         """The whole board as the API serves it (GET /api/board and the first SSE event)."""

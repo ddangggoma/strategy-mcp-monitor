@@ -53,6 +53,26 @@ def _normalize_host(value: str) -> str:
     raise ValueError("host must be a hostname, IPv4 or IPv6 address")
 
 
+# C0 controls, DEL and C1 controls: never valid in a name a script or a log line receives.
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+# The name reaches scripts as MCP_NAME. cmd expands %MCP_NAME% before it parses the line, so these
+# characters would inject commands into a .bat/.cmd (& | < > ^ " and % ! for nested expansion);
+# the backtick is PowerShell's escape character.
+_NAME_FORBIDDEN_RE = re.compile(r"[\x00-\x1f\x7f-\x9f%^&|<>\"!`]")
+
+
+def _check_name(value: str) -> str:
+    if _NAME_FORBIDDEN_RE.search(value):
+        raise ValueError('name must not contain control characters or any of % ^ & | < > " ! `')
+    return value
+
+
+def _check_process_name(value: str | None) -> str | None:
+    if value is not None and _CONTROL_RE.search(value):
+        raise ValueError("expected_process_name must not contain control characters")
+    return value
+
+
 class McpConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -76,6 +96,16 @@ class McpConfig(BaseModel):
     def _strip_name(cls, v: object) -> object:
         return v.strip() if isinstance(v, str) else v
 
+    @field_validator("name")
+    @classmethod
+    def _safe_name(cls, v: str) -> str:
+        return _check_name(v)
+
+    @field_validator("expected_process_name")
+    @classmethod
+    def _safe_process_name(cls, v: str | None) -> str | None:
+        return _check_process_name(v)
+
     @field_validator("host", mode="before")
     @classmethod
     def _check_host(cls, v: object) -> object:
@@ -89,6 +119,10 @@ class Mcp:
     owner_id: int | None
     created_by: int | None
     created_at: datetime
+    # Set when the stored config fails validation (e.g. a row written before a validator tightened).
+    # ``config`` then holds the stored values unvalidated: such an MCP is never monitored or run,
+    # it is only listed so an admin can fix (PUT) or delete it.
+    config_error: str | None = None
 
     @property
     def url(self) -> str:

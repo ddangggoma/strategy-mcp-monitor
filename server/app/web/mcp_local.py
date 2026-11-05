@@ -107,6 +107,11 @@ class _Audit:
         self._write({**target, "error": code}, "error")
         raise ApiError(status, code)
 
+    def io_error(self, **target: Any) -> NoReturn:
+        """A script file write failed (file held by antivirus or cmd, disk full): audit, then 500."""
+        self._write({**target, "error": "io"}, "error")
+        raise ApiError(500, "internal")
+
 
 def _require_mcp(services: Services, mcp_id: int) -> Mcp:
     mcp = services.mcps.get(mcp_id)
@@ -158,6 +163,8 @@ async def create_mcp(
         audit.fail(409, "name_taken", name=config.name)
     except EndpointTakenError:
         audit.fail(409, "endpoint_taken", name=config.name)
+    except OSError:
+        audit.io_error(name=config.name)
     services.monitor.add(mcp)
     audit.ok(mcp_id=mcp.id, name=config.name, host=config.host, port=config.port)
     return mcp_detail(services, mcp)
@@ -311,6 +318,8 @@ async def put_script(
         audit.fail(422, exc.code, mcp_id=mcp_id, kind=kind)
     except McpNotFoundError:
         audit.fail(404, "not_found", mcp_id=mcp_id, kind=kind)
+    except OSError:
+        audit.io_error(mcp_id=mcp_id, kind=kind)
     audit.ok(mcp_id=mcp_id, kind=kind, version=info.version, sha256=info.sha256)
     return _script_summary(info)
 
@@ -352,5 +361,7 @@ async def revert_script(
         audit.fail(404, "not_found", mcp_id=mcp_id, kind=kind, from_version=version)
     except ScriptValidationError as exc:
         audit.fail(422, exc.code, mcp_id=mcp_id, kind=kind, from_version=version)
+    except OSError:
+        audit.io_error(mcp_id=mcp_id, kind=kind, from_version=version)
     audit.ok(mcp_id=mcp_id, kind=kind, from_version=version, version=info.version)
     return _script_summary(info)

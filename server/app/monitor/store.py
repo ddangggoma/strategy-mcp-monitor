@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
+
+from pydantic import ValidationError
 
 from app.clock import Clock
 from app.db import Database
@@ -30,13 +33,40 @@ def _parse_dt(value: str) -> datetime:
     return dt.astimezone(UTC)
 
 
+def validation_reason(exc: ValidationError) -> str:
+    """A compact, input-free summary of a ValidationError (safe to log)."""
+    return "; ".join(
+        f"{'.'.join(str(p) for p in e['loc']) or 'config'}: {e['msg']}"
+        for e in exc.errors(include_url=False, include_input=False)
+    )
+
+
+def _unvalidated_config(row: sqlite3.Row) -> McpConfig:
+    """The stored values without validation, for listing a row the validator now rejects."""
+    try:
+        raw = json.loads(row["config"])
+    except (TypeError, ValueError):
+        raw = None
+    fields = McpConfig.model_fields
+    values = {k: v for k, v in raw.items() if k in fields} if isinstance(raw, dict) else {}
+    values = {"name": row["name"], "host": row["host"], "port": row["port"], **values}
+    return McpConfig.model_construct(**values)
+
+
 def _to_mcp(row: sqlite3.Row) -> Mcp:
+    error: str | None = None
+    try:
+        config = McpConfig.model_validate_json(row["config"])
+    except ValidationError as exc:
+        error = validation_reason(exc)
+        config = _unvalidated_config(row)
     return Mcp(
         id=row["id"],
-        config=McpConfig.model_validate_json(row["config"]),
+        config=config,
         owner_id=row["owner_id"],
         created_by=row["created_by"],
         created_at=_parse_dt(row["created_at"]),
+        config_error=error,
     )
 
 
@@ -106,7 +136,11 @@ class McpStore:
                 if row is None:
                     raise McpNotFoundError(mcp_id)
                 before = _to_mcp(row)
-                new_config = McpConfig.model_validate({**before.config.model_dump(), **patch})
+                # warnings=False: a stored config that fails validation (Mcp.config_error) is
+                # unvalidated and may not match the field types; the merge must then fix it.
+                new_config = McpConfig.model_validate(
+                    {**before.config.model_dump(warnings=False), **patch}
+                )
                 conn.execute(
                     "UPDATE mcps SET name = ?, host = ?, port = ?, config = ? WHERE id = ?",
                     (

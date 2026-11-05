@@ -43,6 +43,11 @@ class BoardBus:
         self._max_streams = max_streams
         self._max_per_ip = max_per_ip
         self._subs: list[Subscription] = []
+        self._versions: dict[int, int] = {}
+
+    def version(self, mcp_id: int) -> int:
+        """How many times ``mcp_id`` was marked dirty: a shared board item is valid for one version."""
+        return self._versions.get(mcp_id, 0)
 
     @property
     def subscriber_count(self) -> int:
@@ -69,6 +74,7 @@ class BoardBus:
             pass
 
     def mark_dirty(self, mcp_id: int) -> None:
+        self._versions[mcp_id] = self._versions.get(mcp_id, 0) + 1
         for sub in self._subs:
             sub.dirty.add(mcp_id)
             sub.wake.set()

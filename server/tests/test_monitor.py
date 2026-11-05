@@ -1,5 +1,6 @@
 import asyncio
 import json
+import sys
 from datetime import timedelta
 
 import pytest
@@ -411,3 +412,157 @@ async def test_stop_flushes_history(services):
     await mon.stop()
     rows = services.db.query("SELECT ok, total FROM mcp_minutes WHERE mcp_id = ?", (m.id,))
     assert [(r["ok"], r["total"]) for r in rows] == [(1, 1)]
+
+
+# ---- whole-plan review fixes (I1, I2, I3, M1, M6) ----
+
+win_only = pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
+
+
+async def probes_idle(mon):
+    """Wait for in-flight probes only (a gated script keeps running)."""
+    while tasks := [t for t in mon._probes if not t.done()]:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def crash_gated(services, m):
+    """crash_to_action without waiting for the (gated) script to finish."""
+    mon = services.monitor; mon._prober.set_check(m.id, Issue.PROCESS_DOWN)
+    await mon.issue_round(); await probes_idle(mon)
+    services.clock.advance(30); await mon.confirm_round(); await probes_idle(mon)
+    await asyncio.sleep(0)
+
+
+async def test_single_action_task_across_maintenance_toggle(services):
+    """I2: a hung auto start, maintenance on/off, checks failing past the delay -> still one runner call."""
+    m = seed_mcp(services, make_user(services, "o@x.com")); mon = services.monitor
+    mon._runner.gate = asyncio.Event()
+    await crash_gated(services, m)
+    assert len(mon._runner.calls) == 1
+    first = mon._scripts[m.id]
+    for on in (True, False):
+        _, after = services.mcps.update(m.id, {"maintenance": on}); mon.reconfigure(after)
+    for _ in range(4):
+        await mon.issue_round(); await probes_idle(mon)
+        services.clock.advance(30); await mon.confirm_round(); await probes_idle(mon)
+    assert len(mon._runner.calls) == 1 and mon._scripts[m.id] is first and not first.done()
+    with pytest.raises(ActionInProgressError): mon.remove(m.id)
+    stop = asyncio.ensure_future(mon.stop(grace_sec=5)); await asyncio.sleep(0.05)
+    assert not stop.done()  # stop() waits for the original task
+    mon._runner.gate.set(); await stop
+    assert first.done() and [a.kind for a in services.history.actions(m.id)] == ["start"]
+
+
+async def test_apply_refuses_a_second_tracked_run(services):
+    """I2 (defensive): _apply never replaces a tracked, unfinished script task."""
+    from app.monitor.engine import RunScript
+    m = seed_mcp(services, make_user(services, "o@x.com")); mon = services.monitor
+    mon._runner.gate = asyncio.Event()
+    await crash_gated(services, m)
+    first = mon._scripts[m.id]
+    mon._apply(m.id, [RunScript("restart", "auto", "UNRESPONSIVE")])
+    await asyncio.sleep(0)
+    assert mon._scripts[m.id] is first and len(mon._runner.calls) == 1
+    refused = [e for e in await logs(services, "system") if e.get("event") == "monitor.action_refused"]
+    assert refused and refused[0]["mcp_id"] == m.id and refused[0]["kind"] == "restart"
+    mon._runner.gate.set(); await mon.wait_idle()
+
+
+async def test_board_items_shared_across_subscribers_per_batch(services, monkeypatch):
+    """I3: 100 subscribers x 50 changed MCPs -> at most one uptime() per MCP per batch."""
+    from app.web.mcp_shared import board_stream
+    owner = make_user(services, "o@x.com")
+    ids = [seed_mcp(services, owner, name=f"m{i}", port=10000 + i).id for i in range(50)]
+    gens = []
+    for _ in range(100):
+        sub = services.bus.subscribe()
+        gen = board_stream(services.monitor, services.bus, sub, coalesce_sec=0, heartbeat_sec=30)
+        await anext(gen)  # the initial board snapshot
+        gens.append(gen)
+    calls = []
+    real = services.history.uptime
+    monkeypatch.setattr(services.history, "uptime", lambda mcp_id, hours=24: calls.append(mcp_id) or real(mcp_id, hours))
+    for _batch in range(2):
+        calls.clear()
+        for mcp_id in ids: services.bus.mark_dirty(mcp_id)
+        for gen in gens:
+            got = [json.loads((await anext(gen)).split("data: ", 1)[1])["id"] for _ in ids]
+            assert got == ids
+        assert sorted(calls) == ids  # once per MCP, shared by all 100 subscribers
+    for gen in gens: await gen.aclose()
+
+
+async def test_uptime_db_query_cached_per_minute(services, monkeypatch):
+    """I3: the 24 h SUM runs once per MCP per minute bucket; flush, rollover and maintenance invalidate it."""
+    owner = make_user(services, "o@x.com"); m = seed_mcp(services, owner); mon = services.monitor
+    h = services.history; queries = []
+    real = services.db.query
+    monkeypatch.setattr(services.db, "query", lambda sql, params=(): queries.append(sql) or real(sql, params))
+    sums = lambda: sum("SUM(ok)" in q for q in queries)  # noqa: E731
+    await mon.ping_round(); await mon.wait_idle()
+    assert h.uptime(m.id) == 1.0 and h.uptime(m.id) == 1.0 and sums() == 1
+    services.history.record(m.id, services.clock.now(), False, None)
+    assert h.uptime(m.id) == 0.5 and sums() == 1  # unflushed counts are always live
+    h.flush()
+    assert h.uptime(m.id) == 0.5 and sums() == 2
+    services.clock.advance(60)
+    assert h.uptime(m.id) == 0.5 and sums() == 3
+    assert h.uptime(m.id) == 0.5 and sums() == 3
+    _, after = services.mcps.update(m.id, {"maintenance": True}); mon.reconfigure(after)
+    assert h.uptime(m.id) == 0.5 and sums() == 4
+
+
+async def test_script_hash_captured_inside_the_slot(services):
+    """M1: an owner edit while the run waits for a slot runs the new script, with no tamper event."""
+    if sys.platform != "win32": pytest.skip("Windows only")
+    from app.monitor.runner import ScriptRunner
+    owner = make_user(services, "o@x.com"); m = seed_mcp(services, owner); mon = services.monitor
+    services.scripts.put(m.id, "start", ScriptUpload(".bat", "exit /b 3"), owner.id)
+    runner = mon._runner = ScriptRunner(concurrency=1)
+    await runner._slots.acquire()  # every slot busy
+    mon.manual_action(m.id, "start", owner)
+    await asyncio.sleep(0.05)
+    services.scripts.put(m.id, "start", ScriptUpload(".bat", "@echo off\necho new\nexit /b 0"), owner.id)
+    runner._slots.release()
+    await mon.wait_idle()
+    a = services.history.actions(m.id)[0]
+    assert (a.result.status, a.result.error, a.result.stdout.strip()) == ("ok", None, "new")
+    assert await logs(services, "tamper") == []
+
+
+@win_only
+async def test_real_bat_gets_validated_name(services):
+    """I1 regression: a Korean name with spaces reaches a .bat intact; an injected one cannot be stored."""
+    from pydantic import ValidationError
+
+    from app.monitor.runner import ScriptRunner
+    try: "서울 날씨".encode("oem")
+    except UnicodeEncodeError: pytest.skip("OEM code page cannot encode Korean")
+    owner = make_user(services, "o@x.com")
+    scripts = {"start": ScriptUpload(".bat", "@echo off\necho [%MCP_NAME%]\nexit /b 0"), "stop": ScriptUpload(".bat", "exit /b 0")}
+    m = seed_mcp(services, owner, scripts=scripts, name="서울 날씨"); mon = services.monitor
+    mon._runner = ScriptRunner()
+    mon.manual_action(m.id, "start", owner); await mon.wait_idle()
+    a = services.history.actions(m.id)[0]
+    assert (a.result.status, a.result.stdout.strip()) == ("ok", "[서울 날씨]")
+    with pytest.raises(ValidationError):
+        services.mcps.update(m.id, {"name": "calc & echo INJECTED"})
+    assert services.mcps.get(m.id).config.name == "서울 날씨"
+
+
+async def test_start_skips_invalid_stored_config(services):
+    """M6: one row the validator rejects is skipped (system event); every other MCP is monitored."""
+    owner = make_user(services, "o@x.com")
+    good = seed_mcp(services, owner); bad = seed_mcp(services, owner, name="legacy", port=9200)
+    mon = services.monitor; mon.remove(good.id); mon.remove(bad.id)
+    services.db.execute("UPDATE mcps SET config = json_set(config, '$.name', 'legacy & x') WHERE id = ?", (bad.id,))
+    await mon.start(run_loops=False)
+    assert mon.engine(good.id) is not None and mon.engine(bad.id) is None
+    assert [i["id"] for i in mon.board()] == [good.id]
+    await mon.ping_round(); await mon.wait_idle()
+    assert mon._prober.probe_calls == [good.id]
+    ev = [e for e in await logs(services, "system") if e.get("event") == "monitor.mcp_config_invalid"]
+    assert len(ev) == 1 and ev[0]["mcp_id"] == bad.id and "name" in ev[0]["error"]
+    bad_row = services.mcps.get(bad.id)
+    assert bad_row.config_error and bad_row.config.name == "legacy & x"
+    with pytest.raises(ValueError): mon.add(bad_row)

@@ -287,3 +287,23 @@ def test_decode_output_oem_fallback():
     except UnicodeEncodeError: pytest.skip("OEM code page cannot encode Korean")
     assert decode_output(data) == "가나"
     assert decode_output(b"\xff\xfe ok") == b"\xff\xfe ok".decode("oem", errors="replace")
+
+
+async def test_resolve_runs_inside_the_slot(tmp_path):
+    """M1: resolve() is called once the lock and a slot are held; its target replaces the arguments."""
+    old, old_sha = write(tmp_path, "old.bat", "exit /b 3")
+    new, new_sha = write(tmp_path, "new.bat", "@echo off\necho new\nexit /b 0")
+    runner = ScriptRunner(concurrency=1); seen = []
+    await runner._slots.acquire()
+
+    def resolve():
+        seen.append(runner._slots.locked()); return new, new_sha
+
+    task = asyncio.ensure_future(runner.run(old, expected_sha256=old_sha, timeout_sec=10, env=ENV, lock_key=1, resolve=resolve))
+    await asyncio.sleep(0.05)
+    assert seen == []  # still waiting for the slot
+    runner._slots.release()
+    r = await task
+    assert seen == [True] and (r.status, r.stdout.strip(), r.actual_sha256) == ("ok", "new", new_sha)
+    gone = await runner.run(old, expected_sha256=old_sha, timeout_sec=10, env=ENV, lock_key=1, resolve=lambda: None)
+    assert (gone.status, gone.error) == ("error", "missing")

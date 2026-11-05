@@ -115,22 +115,24 @@ def test_alert_only(clock, kw, issue):
 
 def test_manual_stop_is_maintenance(clock):
     e = eng(clock)
-    assert e.manual("stop") == [T(S.HEALTHY, S.MAINTENANCE, None), R("stop", "manual", "manual")]
+    effects = e.manual("stop")
+    assert effects == [T(S.HEALTHY, S.MAINTENANCE, None), R("stop", "manual", "manual")]
     with pytest.raises(ActionInProgressError):
         e.manual("start")
-    e.on_action_done(R("stop", "manual", "manual"), "ok")
-    assert e.on_check(bad(clock)) == [] and e.state == S.MAINTENANCE
+    e.on_action_done(effects[-1], "ok")
+    assert e.on_check(bad(clock)) == [] and e.state == S.MAINTENANCE and e.snapshot().running is None
 
 
 def test_manual_start_from_failed_and_non_ok(clock):
     e = eng(clock, startup_grace_sec=0, max_auto_actions=1)
     run = to_action(e, clock)[-1]
     e.on_action_done(run, "ok")
-    to_action(e, clock)
-    assert e.state == S.FAILED
-    e.on_action_done(R("stop", "auto", "PROCESS_DOWN"), "ok")
-    assert e.manual("start") == [T(S.FAILED, S.ACTION, None), R("start", "manual", "manual")]
-    assert e.on_action_done(R("start", "manual", "manual"), "failed") == [T(S.ACTION, S.RECOVERING, None)]
+    stop = to_action(e, clock)[1]
+    assert e.state == S.FAILED and stop == R("stop", "auto", "PROCESS_DOWN")
+    e.on_action_done(stop, "ok")
+    effects = e.manual("start")
+    assert effects == [T(S.FAILED, S.ACTION, None), R("start", "manual", "manual")]
+    assert e.on_action_done(effects[-1], "failed") == [T(S.ACTION, S.RECOVERING, None)]
 
 
 def test_maintenance_toggle_and_initial(clock):
@@ -695,3 +697,51 @@ def test_engine_is_deterministic(clock):
     clock.advance(-30)  # rewind the same clock: identical inputs
     b, snap_b = drive()
     assert a == b and snap_a.auto_actions_in_window == snap_b.auto_actions_in_window == 1
+
+
+# ---------------------------------------------------------------- I2: single-flight actions
+
+
+def test_no_second_action_while_first_runs_after_maintenance_toggle(clock):
+    """Auto start running -> maintenance on/off -> checks fail past the delay: no second RunScript."""
+    e = eng(clock)
+    first = to_action(e, clock)[-1]
+    assert first == R("start", "auto", "PROCESS_DOWN")
+    e.set_maintenance(True); e.set_maintenance(False)
+    assert e.state is S.HEALTHY and e.snapshot().running is first
+    effects = e.on_check(bad(clock))
+    for _ in range(4):
+        clock.advance(30)
+        effects += e.on_check(bad(clock))
+    assert not any(isinstance(x, R) for x in effects) and e.state is S.SUSPECT
+    assert e.snapshot().running is first
+    assert e.on_action_done(first, "ok") == []  # settles the first run only; the state moved on
+    assert e.snapshot().running is None
+    clock.advance(1)
+    assert [x for x in e.on_check(bad(clock)) if isinstance(x, R)] == [R("start", "auto", "PROCESS_DOWN")]
+
+
+def test_no_failed_stop_while_a_run_is_in_flight(clock):
+    """Budget exhausted while the old run still runs: no stop RunScript until it settles."""
+    e = eng(clock, max_auto_actions=1)
+    first = to_action(e, clock)[-1]
+    e.set_maintenance(True); e.set_maintenance(False)
+    e.on_check(bad(clock)); clock.advance(30)
+    assert e.on_check(bad(clock)) == [] and e.state is S.SUSPECT and e.snapshot().running is first
+
+
+def test_boot_does_not_start_while_a_run_is_in_flight(clock):
+    e = eng(clock, autostart_on_boot=True)
+    run = e.manual("start")[-1]
+    e.set_maintenance(True); e.set_maintenance(False)
+    assert not any(isinstance(x, R) for x in e.boot(bad(clock)))
+    assert e.snapshot().running is run
+
+
+def test_completion_matches_by_identity_not_value(clock):
+    e = eng(clock)
+    run = to_action(e, clock)[-1]
+    snap = e.snapshot()
+    assert e.on_action_done(R("start", "auto", "PROCESS_DOWN"), "ok") == []  # equal value, different run
+    assert e.snapshot() == snap and e.snapshot().running is run
+    assert e.on_action_done(run, "timeout") == [T(S.ACTION, S.SUSPECT, PD)]
