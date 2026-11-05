@@ -120,7 +120,8 @@ async def test_script_crud_shapes_and_files(local_client, services):
     base = f"/api/mcps/{m.id}/scripts"
     lst = (await local_client.get(base)).json()
     assert [s["kind"] for s in lst] == ["start", "stop"]
-    assert set(lst[0]) == {"kind", "ext", "version", "sha256", "updated_at", "updated_by"} and lst[0]["updated_by"] == owner.id
+    assert set(lst[0]) == {"kind", "ext", "version", "sha256", "updated_at", "updated_by", "updated_by_user"} and lst[0]["updated_by"] == owner.id
+    assert lst[0]["updated_by_user"] == {"id": owner.id, "email": "o@x.com", "name": "o"}
     g = (await local_client.get(f"{base}/start")).json()
     assert set(g) == {"kind", "ext", "version", "sha256", "content", "editable"} and g["editable"] is True
     assert (await local_client.get(f"{base}/restart")).status_code == 404
@@ -136,9 +137,10 @@ async def test_script_crud_shapes_and_files(local_client, services):
     assert (await local_client.get(f"{base}/restart")).status_code == 404 and not (d / "restart.cmd").exists()
     vs = (await local_client.get(f"{base}/restart/versions")).json()
     assert [(v["version"], v["deleted"]) for v in vs] == [(2, True), (1, False)]
-    assert set(vs[0]) == {"version", "ext", "sha256", "author_id", "created_at", "deleted"} and vs[0]["sha256"] is None
+    assert set(vs[0]) == {"version", "ext", "sha256", "author_id", "author", "created_at", "deleted"} and vs[0]["sha256"] is None
+    assert vs[0]["author"]["id"] == owner.id == vs[0]["author_id"] and vs[0]["author"]["email"] == "o@x.com"
     one = (await local_client.get(f"{base}/restart/versions/1")).json()
-    assert set(one) == {"version", "ext", "sha256", "author_id", "created_at", "deleted", "content"} and one["ext"] == ".cmd"
+    assert set(one) == {"version", "ext", "sha256", "author_id", "author", "created_at", "deleted", "content"} and one["ext"] == ".cmd"
     # reverting a deleted tombstone is refused, reverting a real one restores the script
     assert (await local_client.post(f"{base}/restart/versions/2/revert", headers=h)).json() == {"error": "validation"}
     r = await local_client.post(f"{base}/restart/versions/1/revert", headers=h)

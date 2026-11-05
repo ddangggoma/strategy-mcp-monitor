@@ -16,7 +16,7 @@ from tests.fakes import ok_result
 from tests.mcp_helpers import make_user, seed_mcp
 
 BOARD_KEYS = {"id", "name", "state", "issue", "latency_ms", "sparkline", "uptime_24h", "last_check_at",
-              "action_due_at", "action_in_sec", "maintenance", "running"}
+              "action_due_at", "action_in_sec", "action_delay_sec", "maintenance", "running"}
 
 
 async def logs(services, cat):
@@ -298,7 +298,7 @@ async def test_board_item_and_order(services):
     item = mon.board_item(b.id)
     assert set(item) == BOARD_KEYS
     assert item == {"id": b.id, "name": "beta", "state": "HEALTHY", "issue": None, "latency_ms": None, "sparkline": [],
-                    "uptime_24h": None, "last_check_at": None, "action_due_at": None, "action_in_sec": None,
+                    "uptime_24h": None, "last_check_at": None, "action_due_at": None, "action_in_sec": None, "action_delay_sec": None,
                     "maintenance": False, "running": None}
     mon._prober.set_check(b.id, Issue.PROCESS_DOWN)
     await mon.issue_round(); await mon.wait_idle()
@@ -587,3 +587,13 @@ async def test_start_skips_invalid_stored_config(services):
     bad_row = services.mcps.get(bad.id)
     assert bad_row.config_error and bad_row.config.name == "legacy & x"
     with pytest.raises(ValueError): mon.add(bad_row)
+
+
+async def test_board_item_action_delay_follows_config(services):
+    m = seed_mcp(services, make_user(services, "o@x.com"), action_delay_sec=45)
+    mon = services.monitor
+    assert mon.board_item(m.id)["action_delay_sec"] is None  # HEALTHY: no countdown
+    mon._prober.set_check(m.id, Issue.PROCESS_DOWN)
+    await mon.issue_round(); await mon.wait_idle()
+    item = mon.board_item(m.id)
+    assert (item["state"], item["action_delay_sec"], item["action_in_sec"]) == ("SUSPECT", 45, 45.0)

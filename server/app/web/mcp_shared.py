@@ -23,7 +23,7 @@ from app.monitor.supervisor import Monitor
 from app.services import Services
 from app.users.store import User
 from app.web.channels import Channel
-from app.web.deps import ApiError, client_ip, get_channel, get_services, require
+from app.web.deps import ApiError, client_ip, get_channel, get_services, require, user_summary
 
 router = APIRouter()
 
@@ -32,6 +32,8 @@ HEARTBEAT_SEC = 15.0
 STREAM_RETRY_AFTER_SEC = 5
 HISTORY_TRANSITIONS = 200
 HISTORY_ACTIONS = 100
+
+UserCache = dict[int | None, dict[str, object] | None]
 
 McpId = Annotated[int, Path(ge=1, le=2**63 - 1)]  # SQLite INTEGER range; larger overflows
 
@@ -57,7 +59,18 @@ def mcp_detail(services: Services, mcp: Mcp) -> dict[str, Any]:
     }
 
 
-def _action_json(a: ActionRecord) -> dict[str, Any]:
+def cached_user_summary(
+    services: Services, user_id: int | None, cache: UserCache | None
+) -> dict[str, object] | None:
+    """``user_summary`` memoized in ``cache`` (one per request) when given."""
+    if cache is None:
+        return user_summary(services, user_id)
+    if user_id not in cache:
+        cache[user_id] = user_summary(services, user_id)
+    return cache[user_id]
+
+
+def _action_json(services: Services, a: ActionRecord, users: UserCache | None = None) -> dict[str, Any]:
     return {
         "id": a.id,
         "run_id": a.run_id,
@@ -67,6 +80,7 @@ def _action_json(a: ActionRecord) -> dict[str, Any]:
         "trigger": a.trigger,
         "reason": a.reason,
         "actor_id": a.actor_id,
+        "actor": cached_user_summary(services, a.actor_id, users),
         "status": a.result.status,
         "exit_code": a.result.exit_code,
         "duration_ms": a.result.duration_ms,
@@ -214,6 +228,7 @@ async def mcp_history(
     _get_mcp(services, mcp_id)
     since = services.clock.now() - timedelta(hours=hours)
     history = services.history
+    users: UserCache = {}
     return {
         "buckets": [
             {
@@ -236,7 +251,38 @@ async def mcp_history(
             if t.at >= since
         ],
         "actions": [
-            _action_json(a) for a in history.actions(mcp_id, HISTORY_ACTIONS) if a.at >= since
+            _action_json(services, a, users)
+            for a in history.actions(mcp_id, HISTORY_ACTIONS)
+            if a.at >= since
+        ],
+    }
+
+
+@router.get("/api/mcp-activity")
+async def mcp_activity(
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    _user: User | None = Depends(require(Action.VIEW_MCP_HISTORY)),
+    services: Services = Depends(get_services),
+) -> dict[str, Any]:
+    """The latest state transitions and script actions across every MCP, newest first."""
+    names = {m.id: m.config.name for m in services.mcps.list()}
+    users: UserCache = {}
+    history = services.history
+    return {
+        "transitions": [
+            {
+                "mcp_id": mcp_id,
+                "name": names.get(mcp_id),
+                "at": to_kst_iso(t.at),
+                "from": t.from_state.value,
+                "to": t.to_state.value,
+                "issue": t.issue.value if t.issue else None,
+            }
+            for mcp_id, t in history.recent_transitions(limit)
+        ],
+        "actions": [
+            {**_action_json(services, a, users), "mcp_id": a.mcp_id, "name": names.get(a.mcp_id)}
+            for a in history.recent_actions(limit)
         ],
     }
 
@@ -253,7 +299,7 @@ async def mcp_action_detail(
         raise ApiError(404, "not_found")
     r = record.result
     return {
-        **_action_json(record),
+        **_action_json(services, record),
         "stdout": r.stdout,
         "stderr": r.stderr,
         "stdout_truncated": r.stdout_truncated,

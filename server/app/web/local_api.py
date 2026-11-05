@@ -1,12 +1,15 @@
 """Routes served only on the local channel. Never registered on the external app."""
+import asyncio
+from datetime import date
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, Path, Request
+from fastapi import APIRouter, Depends, Path, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError
 
 from app.auth.policy import Action, can
-from app.clock import to_kst_iso
+from app.clock import KST, to_kst_iso
+from app.logstore.retention import preview
 from app.services import Services
 from app.users.store import (
     BootstrapDoneError,
@@ -80,7 +83,7 @@ class UpdateUserBody(BaseModel):
     active: StrictBool | None = None
 
 
-def _admin_user_json(user: User) -> dict[str, object]:
+def _admin_user_json(user: User, owned_mcps: int) -> dict[str, object]:
     return {
         "id": user.id,
         "email": user.email,
@@ -89,6 +92,7 @@ def _admin_user_json(user: User) -> dict[str, object]:
         "active": user.active,
         "created_at": to_kst_iso(user.created_at),
         "last_login_at": to_kst_iso(user.last_login_at) if user.last_login_at else None,
+        "owned_mcps": owned_mcps,
     }
 
 
@@ -97,7 +101,8 @@ async def list_users(
     _actor: User | None = Depends(require(Action.MANAGE_USERS)),
     services: Services = Depends(get_services),
 ) -> list[dict[str, object]]:
-    return [_admin_user_json(u) for u in services.users.list()]
+    counts = services.mcps.owner_counts()
+    return [_admin_user_json(u, counts.get(u.id, 0)) for u in services.users.list()]
 
 
 @router.post("/api/users", status_code=201)
@@ -127,7 +132,7 @@ async def create_user(
             target={"user_id": user.id, "email": user.email, "role": user.role},
             result="ok",
         )
-        return JSONResponse(_admin_user_json(user), status_code=201)
+        return JSONResponse(_admin_user_json(user, 0), status_code=201)  # a new user owns nothing yet
     services.audit.admin(
         actor=actor,
         action="user_create",
@@ -193,7 +198,7 @@ async def update_user(
             actor=actor, action="user_update", channel=channel, ip=ip, target=target, result="ok"
         )
     assert user is not None
-    return _admin_user_json(user)
+    return _admin_user_json(user, services.mcps.owner_counts().get(user.id, 0))
 
 
 _RETENTION_KEYS = frozenset({"log_retention_days", "log_compress_after_days"})
@@ -205,6 +210,32 @@ async def get_settings(
     services: Services = Depends(get_services),
 ) -> dict[str, object]:
     return services.settings.get().model_dump()
+
+
+def _iso_date(d: date | None) -> str | None:
+    return d.isoformat() if d else None
+
+
+@router.get("/api/settings/retention/preview")
+async def retention_preview(
+    days: Annotated[int, Query(ge=7, le=3650)],
+    _actor: User | None = Depends(require(Action.EDIT_RETENTION)),
+    services: Services = Depends(get_services),
+) -> dict[str, object]:
+    """What keeping ``days`` days of logs would delete today (KST date); nothing is deleted."""
+    today = services.clock.now().astimezone(KST).date()
+    p = await asyncio.to_thread(preview, services.paths.logs_dir, today, days)
+    return {
+        "days": p.days,
+        "cutoff": p.cutoff.isoformat(),
+        "total_files": p.total_files,
+        "total_bytes": p.total_bytes,
+        "oldest_date": _iso_date(p.oldest_date),
+        "delete_files": p.delete_files,
+        "delete_bytes": p.delete_bytes,
+        "delete_from": _iso_date(p.delete_from),
+        "delete_to": _iso_date(p.delete_to),
+    }
 
 
 @router.put("/api/settings")

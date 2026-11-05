@@ -554,6 +554,7 @@ class Monitor:
             "last_check_at": to_kst_iso(last) if last else None,
             "action_due_at": to_kst_iso(due) if due else None,
             "action_in_sec": in_sec,
+            "action_delay_sec": mcp.config.action_delay_sec if due is not None else None,
             "maintenance": mcp.config.maintenance,
             "running": snap.running.kind if snap.running else None,
         }

@@ -29,7 +29,7 @@ from app.services import Services
 from app.users.store import User
 from app.web.channels import Channel
 from app.web.deps import ApiError, client_ip, get_channel, get_services, require
-from app.web.mcp_shared import McpId, mcp_detail
+from app.web.mcp_shared import McpId, UserCache, cached_user_summary, mcp_detail
 
 router = APIRouter()
 
@@ -124,12 +124,13 @@ def _script_summary(info: ScriptInfo) -> dict[str, Any]:
     return {"kind": info.kind, "ext": info.ext, "version": info.version, "sha256": info.sha256}
 
 
-def _version_json(v: ScriptVersion) -> dict[str, Any]:
+def _version_json(services: Services, v: ScriptVersion, users: UserCache | None = None) -> dict[str, Any]:
     return {
         "version": v.version,
         "ext": v.ext,
         "sha256": v.sha256,
         "author_id": v.author_id,
+        "author": cached_user_summary(services, v.author_id, users),
         "created_at": to_kst_iso(v.created_at),
         "deleted": v.deleted,
     }
@@ -237,11 +238,13 @@ async def list_scripts(
     services: Services = Depends(get_services),
 ) -> list[dict[str, Any]]:
     _require_mcp(services, mcp_id)
+    users: UserCache = {}
     return [
         {
             **_script_summary(i),
             "updated_at": to_kst_iso(i.updated_at),
             "updated_by": i.updated_by,
+            "updated_by_user": cached_user_summary(services, i.updated_by, users),
         }
         for i in services.scripts.list(mcp_id)
     ]
@@ -276,7 +279,8 @@ async def list_versions(
     services: Services = Depends(get_services),
 ) -> list[dict[str, Any]]:
     _require_mcp(services, mcp_id)
-    return [_version_json(v) for v in services.scripts.versions(mcp_id, kind)]
+    users: UserCache = {}
+    return [_version_json(services, v, users) for v in services.scripts.versions(mcp_id, kind)]
 
 
 @router.get("/api/mcps/{mcp_id}/scripts/{kind}/versions/{version}")
@@ -291,7 +295,7 @@ async def get_version(
     found = services.scripts.version(mcp_id, kind, version)
     if found is None:
         raise ApiError(404, "not_found")
-    return {**_version_json(found), "content": found.content}
+    return {**_version_json(services, found), "content": found.content}
 
 
 # ---- scripts: edit (owner only) ----------------------------------------------------

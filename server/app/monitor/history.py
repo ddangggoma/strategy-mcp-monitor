@@ -299,6 +299,26 @@ class McpHistory:
             for r in rows
         ]
 
+    def recent_transitions(self, limit: int) -> list[tuple[int, TransitionRecord]]:
+        """``(mcp_id, transition)`` across all MCPs, newest first (equal times: later insert first)."""
+        rows = self._db.query(
+            "SELECT mcp_id, at, from_state, to_state, issue FROM mcp_transitions"
+            " ORDER BY at DESC, id DESC LIMIT ?",
+            (limit,),
+        )
+        return [
+            (
+                r["mcp_id"],
+                TransitionRecord(
+                    at=_parse_dt(r["at"]),
+                    from_state=McpState(r["from_state"]),
+                    to_state=McpState(r["to_state"]),
+                    issue=Issue(r["issue"]) if r["issue"] else None,
+                ),
+            )
+            for r in rows
+        ]
+
     # ---- actions ----
 
     def record_action(self, rec: ActionRecord) -> int:
@@ -335,6 +355,11 @@ class McpHistory:
             "SELECT * FROM mcp_actions WHERE mcp_id = ? ORDER BY at DESC, id DESC LIMIT ?",
             (mcp_id, limit),
         )
+        return [_to_action(r) for r in rows]
+
+    def recent_actions(self, limit: int) -> list[ActionRecord]:
+        """Actions of all MCPs, newest first (equal times: later insert first)."""
+        rows = self._db.query("SELECT * FROM mcp_actions ORDER BY at DESC, id DESC LIMIT ?", (limit,))
         return [_to_action(r) for r in rows]
 
     def action(self, mcp_id: int, action_id: int) -> ActionRecord | None:

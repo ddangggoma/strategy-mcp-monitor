@@ -18,7 +18,7 @@ from tests.live import live_app
 from tests.mcp_helpers import login_as, make_user, seed_mcp
 from tests.test_auth_api import audit_events
 
-KEYS = {"id", "name", "state", "issue", "latency_ms", "sparkline", "uptime_24h", "last_check_at", "action_due_at", "action_in_sec", "maintenance", "running"}
+KEYS = {"id", "name", "state", "issue", "latency_ms", "sparkline", "uptime_24h", "last_check_at", "action_due_at", "action_in_sec", "action_delay_sec", "maintenance", "running"}
 
 
 def parse(chunk: str):
@@ -40,6 +40,7 @@ async def test_board_anonymous(external_client, services):
     seed_mcp(services, make_user(services, "o@x.com"))
     item = (await external_client.get("/api/board")).json()["mcps"][0]
     assert set(item) == KEYS and item["state"] == "HEALTHY" and item["running"] is None
+    assert item["action_delay_sec"] is None  # no countdown while HEALTHY
 
 
 async def test_board_has_no_endpoint_or_owner(external_client, services):
@@ -58,6 +59,7 @@ async def test_board_suspect_countdown(external_client, services):
     item = (await external_client.get("/api/board")).json()["mcps"][0]
     assert (item["state"], item["issue"], item["action_in_sec"]) == ("SUSPECT", "PROCESS_DOWN", 20.0)
     assert item["action_due_at"] == to_kst_iso(t0 + timedelta(seconds=30))
+    assert item["action_delay_sec"] == 30  # anonymous viewers see the countdown length (ruling F29)
 
 
 async def test_detail_requires_login(external_client, services):
@@ -100,8 +102,10 @@ async def test_history_content_and_action_detail(external_client, services):
     h = (await external_client.get(f"/api/mcps/{m.id}/history?hours=24")).json()
     assert h["buckets"] == [{"minute": to_kst_iso(services.clock.now().replace(second=0, microsecond=0)), "ok": 1, "total": 2, "avg_latency_ms": 12.0, "max_latency_ms": 12.0}]
     assert [a["run_id"] for a in h["actions"]] == ["r1"]  # the 30 h old one is outside the window
-    assert set(h["actions"][0]) == {"id", "run_id", "at", "requested", "kind", "trigger", "reason", "actor_id", "status", "exit_code", "duration_ms", "killed", "error"}
+    assert set(h["actions"][0]) == {"id", "run_id", "at", "requested", "kind", "trigger", "reason", "actor_id", "actor", "status", "exit_code", "duration_ms", "killed", "error"}
     assert "stdout" not in h["actions"][0]
+    assert h["actions"][0]["actor"] is None  # auto action: no actor
+    assert [a["actor"] for a in h["actions"]] == [None]
     d = (await external_client.get(f"/api/mcps/{m.id}/actions/{aid}")).json()
     assert (d["stdout"], d["stderr"], d["stdout_truncated"], d["stderr_truncated"]) == ("out", "err", True, False)
     assert d["requested"] == "restart" and d["kind"] == "start" and d["trigger"] == "auto"
@@ -179,6 +183,9 @@ async def test_manual_action_result_audit_and_history(external_client, services)
     await services.monitor.wait_idle()
     acts = (await external_client.get(f"/api/mcps/{m.id}/history")).json()["actions"]
     assert [(a["run_id"], a["trigger"], a["actor_id"], a["status"]) for a in acts][0] == (run_id, "manual", owner.id, "ok")
+    assert acts[0]["actor"] == {"id": owner.id, "email": "o@x.com", "name": "o"}
+    detail = (await external_client.get(f"/api/mcps/{m.id}/actions/{acts[0]['id']}")).json()
+    assert detail["actor"] == acts[0]["actor"]
     ev = [e for e in await audit_events(services, "admin.audit") if e["action"] == "mcp_action"]
     assert [(e["result"], e["target"]) for e in ev] == [("ok", {"mcp_id": m.id, "kind": "restart", "run_id": run_id})]
     services.monitor._runner.gate = asyncio.Event()

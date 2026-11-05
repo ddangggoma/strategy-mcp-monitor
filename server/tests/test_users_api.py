@@ -69,7 +69,7 @@ async def test_list_users_shape(local_client, services):
     rows = (await c.get("/api/users")).json()
     assert [u["email"] for u in rows] == ["admin@x.com", "dev@x.com"]
     admin, dev = rows
-    assert set(admin) == {"id", "email", "name", "role", "active", "created_at", "last_login_at"}
+    assert set(admin) == {"id", "email", "name", "role", "active", "created_at", "last_login_at", "owned_mcps"}
     assert admin["last_login_at"] is not None and admin["last_login_at"].endswith("+09:00")
     assert dev["last_login_at"] is None and dev["created_at"].endswith("+09:00")
     assert dev["active"] is True and dev["role"] == "developer"
@@ -186,3 +186,20 @@ async def test_user_bodies_strict_422(local_client, services):
     # boundary values are accepted
     r = await c.post("/api/users", json={**ok, "name": "n" * 100}, headers=h)
     assert r.status_code == 201
+
+
+async def test_owned_mcps_counts_effective_owners(local_client, services):
+    from tests.mcp_helpers import make_user, seed_mcp
+    c = await admin_client(local_client, services); h = {"X-CSRF-Token": c.csrf}
+    dev = make_user(services, "dev@x.com"); gone = make_user(services, "gone@x.com")
+    seed_mcp(services, dev); seed_mcp(services, dev, name="clock", port=9103); seed_mcp(services, gone, name="weather", port=9104)
+    services.users.set_active(gone.id, False)  # its MCPs have no effective owner (F30): not counted
+    rows = {u["email"]: u for u in (await c.get("/api/users")).json()}
+    assert [rows[e]["owned_mcps"] for e in ("admin@x.com", "dev@x.com", "gone@x.com")] == [0, 2, 0]
+    # POST and PATCH return the same field
+    r = await c.post("/api/users", json={"email": "new@x.com", "name": "n", "role": "developer"}, headers=h)
+    assert r.status_code == 201 and r.json()["owned_mcps"] == 0
+    r = await c.patch(f"/api/users/{dev.id}", json={"name": "renamed"}, headers=h)
+    assert r.json()["owned_mcps"] == 2
+    await c.patch(f"/api/users/{gone.id}", json={"active": True}, headers=h)  # reactivated: counted again
+    assert (await c.patch(f"/api/users/{gone.id}", json={"name": "back"}, headers=h)).json()["owned_mcps"] == 1

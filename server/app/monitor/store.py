@@ -175,6 +175,14 @@ class McpStore:
         if self._db.execute_rowcount("DELETE FROM mcps WHERE id = ?", (mcp_id,)) == 0:
             raise McpNotFoundError(mcp_id)
 
+    def owner_counts(self) -> dict[int, int]:
+        """MCPs per effective owner: only active users appear (a deactivated owner has no effective MCPs)."""
+        rows = self._db.query(
+            "SELECT m.owner_id AS owner_id, COUNT(*) AS n FROM mcps m"
+            " JOIN users u ON u.id = m.owner_id WHERE u.active = 1 GROUP BY m.owner_id"
+        )
+        return {r["owner_id"]: r["n"] for r in rows}
+
     def effective_owner_id(self, mcp: Mcp) -> int | None:
         """The owner's id while the owner is an active user, else None (no owner)."""
         if mcp.owner_id is None:
