@@ -19,7 +19,7 @@ const codePoints = (s: string) => [...s].length;
  * An integer in [min, max] from a number or the text of an input. No z.coerce: it reads "" as 0,
  * and an empty field must be an error, not a zero.
  */
-function int(min: number, max: number) {
+export function int(min: number, max: number) {
   const message = copy.mcp.rangeError(min, max);
   // NaN (an emptied number input read as a number) fails z.number(): same message
   return z.union([z.number(), z.string()], { error: message }).transform((v, ctx) => {
