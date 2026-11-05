@@ -18,7 +18,12 @@ import { NAV_ITEMS, navReason } from "./Nav";
  * with the reason — and every MCP by name (the `qk.mcps` cache, fetched on first open).
  * Loaded as its own chunk the first time it opens (cmdk stays out of the shell).
  */
-export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenChange(open: boolean): void }) {
+export function CommandPalette({ open, onOpenChange, onCloseAutoFocus }: {
+  open: boolean;
+  onOpenChange(open: boolean): void;
+  /** Where focus goes on close (default: back to what had it when the palette opened). */
+  onCloseAutoFocus?(e: Event): void;
+}) {
   const me = useSession();
   const navigate = useNavigate();
   const { data: mcps } = useMcps({ enabled: open });
@@ -26,7 +31,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
   const close = () => onOpenChange(false);
 
   return (
-    <CommandDialog open={open} onOpenChange={onOpenChange}>
+    <CommandDialog open={open} onOpenChange={onOpenChange} onCloseAutoFocus={onCloseAutoFocus}>
       <CommandInput placeholder={copy.common.commandHint} />
       <CommandList>
         <CommandEmpty>{copy.common.noResults}</CommandEmpty>

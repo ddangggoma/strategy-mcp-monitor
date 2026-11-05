@@ -71,6 +71,8 @@ export function SettingsTab({ mcp, onDirtyChange }: { mcp: McpDetail; onDirtyCha
 
   const readOnly = reason !== null || isSubmitting;
   const canSave = reason === null && isDirty && !isSubmitting;
+  // nothing to save or discard yet: say so instead of a silently dimmed button (U26)
+  const unchanged = isDirty ? null : "unchanged";
 
   const onValid = async (values: McpConfig) => {
     const patch = dirtyPatch(values, dirtyFields);
@@ -118,20 +120,22 @@ export function SettingsTab({ mcp, onDirtyChange }: { mcp: McpDetail; onDirtyCha
         ) : null}
 
         <div className="flex flex-wrap items-center gap-2">
-          <WithReason reason={reason}>
+          <WithReason reason={reason ?? unchanged}>
             <Button type="submit" aria-disabled={canSave ? undefined : true}>
               {isSubmitting ? copy.common.saving : copy.common.save}
             </Button>
           </WithReason>
-          <Button
-            variant="outline"
-            aria-disabled={isDirty && !isSubmitting ? undefined : true}
-            onClick={() => {
-              if (isDirty && !isSubmitting) form.reset(serverValues);
-            }}
-          >
-            {copy.mcp.discard}
-          </Button>
+          <WithReason reason={reason ?? unchanged}>
+            <Button
+              variant="outline"
+              aria-disabled={isDirty && !isSubmitting ? undefined : true}
+              onClick={() => {
+                if (isDirty && !isSubmitting) form.reset(serverValues);
+              }}
+            >
+              {copy.mcp.discard}
+            </Button>
+          </WithReason>
         </div>
       </form>
     </Form>

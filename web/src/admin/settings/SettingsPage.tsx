@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
+import { WithReason } from "@/components/app/WithReason";
 import { Button } from "@/components/ui/button";
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -213,18 +214,23 @@ function SettingsForm({ settings }: { settings: Settings }) {
         ) : null}
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button ref={saveButton} type="submit" aria-disabled={canSave ? undefined : true}>
-            {isSubmitting && !saving ? s.checking : busy ? copy.common.saving : copy.common.save}
-          </Button>
-          <Button
-            variant="outline"
-            aria-disabled={isDirty && !busy ? undefined : true}
-            onClick={() => {
-              if (isDirty && !busy) form.reset(serverValues);
-            }}
-          >
-            {s.discard}
-          </Button>
+          {/* nothing to save or discard yet: say so instead of a silently dimmed button (U26) */}
+          <WithReason reason={isDirty ? null : "unchanged"}>
+            <Button ref={saveButton} type="submit" aria-disabled={canSave ? undefined : true}>
+              {isSubmitting && !saving ? s.checking : busy ? copy.common.saving : copy.common.save}
+            </Button>
+          </WithReason>
+          <WithReason reason={isDirty ? null : "unchanged"}>
+            <Button
+              variant="outline"
+              aria-disabled={isDirty && !busy ? undefined : true}
+              onClick={() => {
+                if (isDirty && !busy) form.reset(serverValues);
+              }}
+            >
+              {s.discard}
+            </Button>
+          </WithReason>
         </div>
       </form>
 

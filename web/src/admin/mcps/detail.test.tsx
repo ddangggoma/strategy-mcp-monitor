@@ -61,8 +61,12 @@ it("PUT sends only dirty fields", async () => {
   let body: unknown; server.use(http.put("/api/mcps/1", async ({ request }) => { body = await request.json(); return HttpResponse.json(mcpDetailFixture({ id: 1, action_delay_sec: 45 })); }));
   await renderDetail(mcpDetailFixture({ id: 1 }));
   expect(saveButton()).toHaveAttribute("aria-disabled", "true");
+  // a dimmed button says why (U26)
+  expect(saveButton()).toHaveAccessibleDescription(copy.deny.unchanged);
+  expect(screen.getByRole("button", { name: copy.mcp.discard })).toHaveAccessibleDescription(copy.deny.unchanged);
   await retype(copy.mcp.fields.action_delay_sec, "45");
   expect(saveButton()).not.toHaveAttribute("aria-disabled");
+  expect(saveButton()).not.toHaveAccessibleDescription(copy.deny.unchanged);
   await userEvent.click(saveButton());
   await waitFor(() => expect(body).toEqual({ action_delay_sec: 45 }));
   expect(await screen.findByText(copy.common.saved)).toBeInTheDocument();

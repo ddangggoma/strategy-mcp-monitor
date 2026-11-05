@@ -94,7 +94,7 @@ Tailwind 기본 전환(`transition-colors` 등)도 `--motion-fast` + `--ease-hov
 
 공통 규칙:
 - **포커스:** 컴포넌트가 따로 링을 그리지 않습니다. 전역 `:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px }` 하나. 메뉴 항목·cmdk 항목만 강조 채움(`bg-hover`)이 포커스 표시입니다(`outline-hidden`).
-- **비활성:** 권한 때문에 못 쓰는 컨트롤은 `disabled`가 아니라 `aria-disabled="true"` + 클릭 무시 + 이유 툴팁(U26). Button·Switch는 `aria-disabled:` 스타일을 갖고 포커스를 받습니다.
+- **비활성:** 못 쓰는 컨트롤은 `disabled`가 아니라 `aria-disabled="true"` + 클릭 무시 + 이유 툴팁(U26). Button·Switch는 `aria-disabled:` 스타일을 갖고 포커스를 받습니다. 이유는 권한만이 아닙니다: 저장·변경 취소처럼 **바뀐 내용이 없어서** 못 누르는 버튼도 `deny.unchanged`("아직 바뀐 내용이 없어요.")를 보입니다(Task 16). 이유는 늘 `app/WithReason`으로 붙이고, 컨트롤 안에 따로 쓰지 않습니다.
 - **전환 속성은 이름으로**(`transition-all` 금지). 움직이는 요소는 `data-anim`을 답니다.
 - **아이콘**은 `aria-hidden="true"`, 아이콘만 있는 버튼은 `aria-label`(문구는 `ko.ts`).
 - **문구**는 컴포넌트에 직접 쓰지 않고 `copy.*`에서 가져옵니다.
@@ -115,12 +115,12 @@ Tailwind 기본 전환(`transition-colors` 등)도 `--motion-fast` + `--ease-hov
 | `Input` / `Textarea` | — | hover border fg-muted, `aria-invalid` → border danger, read-only → sunken | 터치 기기에서 16px 이상(iOS 확대 방지, base.css) |
 | `Label` | — | peer/group disabled | `htmlFor` 필수 |
 | `Select` | trigger `default`/`sm` | Input과 같은 경계 | Radix listbox |
-| `Switch` | `default`, `sm` | 꺼짐 border-strong, 켜짐 accent, 썸 surface | 라벨 행 전체가 누름 영역 |
+| `Switch` | `default`(36×20), `sm` | 꺼짐 border-strong, 켜짐 accent, 썸 surface | 라벨 행 전체가 누름 영역. 20px 높이는 WCAG 2.5.8의 간격 예외로 통과(axe `target-size`, Task 16) |
 | `Table` | Header/Body/Row/Head/Cell/Caption | 행 hover 채움, **전환 없음** | `tabular-nums`, 머리 12px muted |
 | `Separator` | 가로/세로 | — | 기본 장식(`decorative`) |
 | `Skeleton` | — | `animate-pulse`, `data-anim="pulse"` | `aria-hidden` |
 | `Sonner`(`Toaster`) | success/info/warning/error/loading 아이콘 | raised 면, 아이콘이 상태 색 | 결과는 아이콘 + 글자. `aria-live`는 Sonner 기본 |
-| `Command` / `CommandDialog` | Input/List/Empty/Group/Item/Shortcut | 선택 항목 `bg-hover` | 제목·설명(`copy.common.commandTitle/Hint`)이 Content 안에 있어 대화상자 이름이 됨. admin 지연 청크 전용 |
+| `Command` / `CommandDialog` | Input/List/Empty/Group/Item/Shortcut | 선택 항목 `bg-hover`, 비활성 항목은 글자 `fg-muted` + 아이콘 60%(**글자에 불투명도 없음**: 이유 문장이 4.5:1을 지킴, Task 16) | 제목·설명(`copy.common.commandTitle/Hint`)이 Content 안에 있어 대화상자 이름이 됨. `onCloseAutoFocus`로 닫힐 때 포커스 위치를 정함. admin 지연 청크 전용 |
 | `Form` | Item/Label/Control/Description/Message | 오류 → label·message danger | react-hook-form 연결, `aria-describedby`·`aria-invalid` 자동 |
 
 ### 2.2 이 계획의 앱 컴포넌트
@@ -128,14 +128,15 @@ Tailwind 기본 전환(`transition-colors` 등)도 `--motion-fast` + `--ease-hov
 | 컴포넌트 | 과제 | 메모 |
 |---|---|---|
 | `app/ThemeToggle` | **6(완료)** | 상단 바 고스트 아이콘 버튼 + 라디오 메뉴(시스템 설정/어둡게/밝게). 트리거 이름에 현재 값(“화면 테마(지금: 시스템 설정)”) |
-| `status/StatusBadge` | 8 | 아이콘 + `copy.states` 글자, `bg-state-*-soft text-state-*-fg`, 크로스페이드 120ms |
-| `status/CountdownBar` | 8 | `transform: scaleX()` + `--gauge-from`, `ease-linear`(시간 표시), `data-anim`·`data-volatile` |
-| `status/Sparkline` | 8 | 직접 그린 SVG(U18), HEALTHY는 `fg-muted`, 비정상은 상태 색, `data-volatile` |
-| `board/McpCard` | 8 | subgrid 4행, 컨테이너 쿼리, 비정상만 상단 3px 띠 + soft 채움, `data-testid="mcp-card"` |
-| `app/TopBar`, `ChannelBadge`, `StreamIndicator`, `AccountMenu` | 8·9 | `data-topbar`(스크롤 그림자는 base.css) |
-| `admin/shell/AppShell`, `Nav`, `CommandPalette`, `PlannedFeature`, `app/WithReason`(`side` 선택) | 9 | 비활성 + 이유(U26). `LocalOnlyPage`는 Task 13 행 |
-| `admin/auth/OtpInput`, `ResendRing` | 9 | 6칸, 흔들림 피드백, 원형 타이머(U25 예외). docs/design/screens/auth-shell.md |
-| `admin/mcps/McpActions` | **10(완료)** | md = 아이콘 + 글자 버튼, sm(표 행) = 28px 아이콘 버튼 + `aria-label`·툴팁. 비활성 순서 권한 → running → config_error. 종료는 AlertDialog. docs/design/screens/mcp.md |
+| `status/StatusBadge` | **8(완료)**, 16 | 아이콘 + `copy.states` 글자, 문제 상태는 `bg-state-*-soft text-state-*-fg`, **HEALTHY는 채움 없이** 초록 아이콘 + `fg-muted` 글자(색 있는 배지 = 문제, Task 16 크리틱), 크로스페이드 120ms |
+| `status/CountdownBar` | **8(완료)** | `transform: scaleX()` + `--gauge-from`, `ease-linear`(시간 표시), `data-anim`·`data-volatile` |
+| `status/Sparkline` | **8(완료)** | 직접 그린 SVG(U18), HEALTHY는 `fg-muted`, 비정상은 상태 색, `data-volatile` |
+| `status/McpCard` | **8(완료)** | subgrid 4행, 컨테이너 쿼리, 비정상만 상단 3px 띠 + soft 채움, `data-testid="mcp-card"` |
+| `status/ConnectionBanner`, `SessionCard`, `UptimeMeter`, `RollingNumber`, `board/BoardPage` | **8(완료)** | 세션 띠·카드는 `sessions` 필드가 없으면 `board.sessionsNotReady` 한 줄(Plan 4가 채움). 가동률은 0–1 비율을 %로. 판정 문장(h1)만 `aria-live=polite`, 카드 상태 변화는 알리지 않음 |
+| `app/TopBar`, `ChannelBadge`, `status/StreamIndicator`, `AccountMenu` | **8·9(완료)** | `data-topbar`(스크롤 그림자는 base.css) |
+| `admin/shell/AppShell`, `Nav`, `CommandPalette`, `PlannedFeature`, `app/WithReason`(`side`, `label` 선택) | **9(완료)**, 16 | 비활성 + 이유(U26). `WithReason`은 이유가 있든 없든 **같은 요소 트리**라서 이유가 생기거나 사라져도 컨트롤이 다시 마운트되지 않고 포커스가 남습니다. 이유 없이 `label`만 주면 아이콘 버튼의 이름 툴팁이 됩니다(표 행 조치 버튼). 툴팁 글자는 `aria-hidden`이고 이유는 숨긴 설명으로 한 번만 읽힙니다. 팔레트를 단축키로 열었다가 닫으면 포커스는 연 요소로, 없으면 `#main`으로 갑니다. 모르는 `/admin/*` 주소는 셸 안의 “화면을 찾을 수 없어요” h1 + 관리 화면 링크(`authedRoute.notFoundComponent`). `LocalOnlyPage`는 Task 13 행 |
+| `admin/auth/AuthFrame`, `LoginPage`, `SetupPage`, `OtpInput`, `ResendRing` | **9(완료)** | 6칸, 흔들림 피드백, 원형 타이머(U25 예외). docs/design/screens/auth-shell.md |
+| `admin/mcps/McpActions`, `ActionResult`, `action-toasts` | **10(완료)** | md = 아이콘 + 글자 버튼(좁은 창에서 줄바꿈), sm(표 행) = 28px 아이콘 버튼 + `aria-label`·툴팁(둘 다 `WithReason` 하나). 비활성 순서 권한 → running → config_error. 종료는 AlertDialog. docs/design/screens/mcp.md |
 | `admin/mcps/McpListPage` 표, `dashboard/DashboardPage` | **10(완료)** | TanStack Table v9, `aria-sort`, 이름 칸 `th scope=row`, 조치 열 sticky, 포인터가 본문에 있으면 행 순서 고정. 표에는 애니메이션 없음 |
 | `admin/mcps/McpDetailPage`, `SettingsTab`, `HistoryTab`, `LatencyChart`, `ActionOutputDialog`, `OwnerTransferDialog`, `DeleteMcpDialog`, `ConfigErrorBadge`, `shell/LeaveGuard` | **11(완료)** | 폼 = shadcn Form + zod(`mcp-schema.ts`), 숫자 칸은 숫자 또는 빈 문자열. 차트 = 두 플롯(지연 ms / 가동률 %) + 공유 시간축, 중립 선 + 상태 색 전이선, 애니메이션 없음, 별도 청크. 대화상자는 자기 트리거를 가짐(Radix가 포커스 복귀). docs/design/screens/mcp.md §6·§10 |
 | `scripts/ScriptsTab`, `ScriptEditor`(+`ScriptField`), `ScriptViewer`, `VersionList`, `app/TextDiff`, `mcps/McpCreatePage`, `McpConfigFields` | **12(완료)** | CodeMirror 6 = 지연 청크 하나(스크립트 탭과 등록 폼이 공유), 테마는 토큰 변수, 문법 강조에 hue 없음, Tab 미바인딩. 읽기 전용은 `<pre>`(sunken) + 복사. diff = 표, +/− 기호 + `diff-add`/`diff-del` 틴트(surface 위), 애니메이션 없음. 초안 `lib/draft.ts`(sessionStorage, 로그아웃 때 모두 지움). docs/design/screens/mcp.md §6·§11 |
@@ -153,7 +154,7 @@ Tailwind 기본 전환(`transition-colors` 등)도 `--motion-fast` + `--ease-hov
 - **타이포:** 말줄임표는 `…`, 따옴표는 “ ”, 범위는 en dash(7–3,650일). `ko.test.ts`가 `...`, 곧은 따옴표, `!`, 사과 표현을 막습니다.
 - **고정 용어**(테스트가 씀): 역할, 채널, 상태 6종, 이슈 4종 — 바꾸지 않습니다.
 
-## 4. 하드코딩 값 점검 (2026-11-05)
+## 4. 하드코딩 값 점검 (2026-11-05, Task 16에서 2026-11-06에 다시 실행)
 
 `rg`가 없어(preflight F22) git grep으로 같은 패턴을 돌렸습니다(추적되지 않은 새 파일 포함):
 
@@ -173,3 +174,25 @@ git grep --untracked -nE "#[0-9a-fA-F]{3,8}\b|rgb\(|oklch\(" -- web/src ':!web/s
 | 간격·크기 | `--spacing` + 크기 7개 | 0 (shadcn 내부의 `h-6`, `px-2.5` 등은 4px 격자 배수) |
 | 글자 | 글꼴 2, 굵기 4, 크기 8 | 0 (Tailwind 기본 크기 비움) |
 | 반경·그림자·층·모션 | 5 / 4 / 5 / 6 | 0 (임의 z-index 없음) |
+
+### 4.1 Task 16 재점검 (2026-11-06, `design:design-system` audit)
+
+Task 7–15가 화면을 모두 만든 뒤 같은 점검을 다시 돌렸습니다.
+
+```
+git grep -nE "#[0-9a-fA-F]{3,8}\b|rgb\(|oklch\(" -- web/src ':!web/src/styles/tokens.css'
+git grep -nP "\"[가-힣]" -- web/src ':!web/src/copy/**' ':!*.test.*'
+```
+
+- 색 리터럴: 위와 같은 3줄(함수 이름 `toRgb(` 2줄 + 검사기의 나쁜 예 1줄), **색 값 0건**.
+- 한글 문자열 리터럴(`ko.ts` 밖, 테스트 제외): **0건**. 처음 돌렸을 때 8줄이 나왔지만 모두 주석 안의 인용(예: 주석의 `"코드 다시 받기"`)이었고, 인용 부호를 “ ”로 바꿔 0건으로 만들었습니다. 화면 문구는 모두 `copy.*`에서 옵니다.
+- `hardcoded-values.test.ts`는 그대로 통과(새 화면에도 `tokens.css` 밖 색 값, shadcn 기본 이름, Tailwind 팔레트 클래스, `dark:` 변형 없음).
+- 컴포넌트 목록(§2.2)을 실제 파일과 맞췄습니다: 빠졌던 `ConnectionBanner`·`SessionCard`·`UptimeMeter`·`RollingNumber`·`BoardPage`·`AuthFrame`·`LoginPage`·`SetupPage`·`ActionResult`·`action-toasts`를 더하고, `McpCard`의 경로(`components/status`)를 고쳤습니다.
+
+| 범주 | 하드코딩 발견 | 메모 |
+|---|---|---|
+| 색 | 0 | |
+| 간격·크기 | 0 | 새 값은 `min-h-6`(24px, 정렬 머리·출력 보기 버튼의 누름 영역, WCAG 2.5.8)뿐이며 4px 격자 배수 |
+| 글자 | 0 | |
+| 반경·그림자·층·모션 | 0 | |
+| 문구 | 0 | |

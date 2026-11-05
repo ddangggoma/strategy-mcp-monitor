@@ -22,9 +22,11 @@ export const STATE_ICONS: Record<McpState, LucideIcon> = {
   MAINTENANCE: CirclePauseIcon,
 };
 
-// Full class names (Tailwind only sees literal strings)
+// Full class names (Tailwind only sees literal strings). HEALTHY stays quiet — no fill, a green
+// icon and muted text — so in a table or on the board a colored badge always means a problem
+// (direction.md §2: "정상은 조용하게, 비정상은 크게"; Task 16 critique).
 const BADGE_TONE: Record<McpState, string> = {
-  HEALTHY: "bg-state-healthy-soft text-state-healthy-fg",
+  HEALTHY: "text-fg-muted [&_svg]:text-state-healthy",
   SUSPECT: "bg-state-suspect-soft text-state-suspect-fg",
   ACTION: "bg-state-action-soft text-state-action-fg",
   RECOVERING: "bg-state-recovering-soft text-state-recovering-fg",

@@ -30,7 +30,7 @@ export interface VersionListProps {
 /**
  * Version history of one script, newest first. Picking a version shows its line diff against the
  * current script; the owner can publish it again as a new version ("revert", with confirmation).
- * A deletion is a version too: marked "삭제됨", nothing to compare and nothing to revert to.
+ * A deletion is a version too: marked “삭제됨”, nothing to compare and nothing to revert to.
  */
 export function VersionList({ mcpId, kind, current, revertReason }: VersionListProps) {
   const versions = useScriptVersions(mcpId, kind);

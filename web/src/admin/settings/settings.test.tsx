@@ -233,6 +233,8 @@ it("shows a server 422 under the form and discard puts the saved values back", a
   server.use(http.put("/api/settings", () => HttpResponse.json({ error: "validation" }, { status: 422 })));
   await renderSettings(settingsFixture({ ping_interval_sec: 5 }));
   expect(screen.getByRole("button", { name: copy.settings.discard })).toHaveAttribute("aria-disabled", "true");
+  expect(screen.getByRole("button", { name: copy.settings.discard })).toHaveAccessibleDescription(copy.deny.unchanged);
+  expect(saveButton()).toHaveAccessibleDescription(copy.deny.unchanged);
   await setNumber(copy.settings.fields.ping_interval_sec, 9);
   await userEvent.click(saveButton());
   expect(await screen.findByText(copy.errors.validation)).toHaveAttribute("role", "alert");

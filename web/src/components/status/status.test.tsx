@@ -59,6 +59,17 @@ describe("StatusBadge", () => {
     expect(screen.getByText("응답 없음")).toBeInTheDocument();
   });
 
+  it("keeps HEALTHY quiet (no fill) and fills every problem state", () => {
+    const { rerender } = render(<StatusBadge state="HEALTHY" />);
+    const healthy = screen.getByText("정상");
+    expect(healthy.className).not.toMatch(/\bbg-/);
+    expect(healthy.querySelector("svg")).not.toBeNull(); // still icon + word (WCAG 1.4.1)
+    for (const [state, word] of [["FAILED", "실패"], ["SUSPECT", "이상 감지"], ["ACTION", "조치 중"], ["RECOVERING", "복구 중"]] as const) {
+      rerender(<StatusBadge state={state} />);
+      expect(screen.getByText(word).className).toContain(`bg-state-${state.toLowerCase()}-soft`);
+    }
+  });
+
   it("crossfades to the new state", async () => {
     const { rerender } = render(<StatusBadge state="HEALTHY" />);
     rerender(<StatusBadge state="FAILED" />);
@@ -171,6 +182,47 @@ describe("WithReason", () => {
     expect(b).not.toHaveAttribute("aria-describedby");
     await userEvent.click(b);
     expect(onClick).toHaveBeenCalledTimes(1);
+    b.focus();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByRole("tooltip")).toBeNull(); // nothing to explain, no label: no tooltip
+  });
+
+  it("keeps the same focused control when a reason comes and goes (no remount, focus not dropped)", async () => {
+    const { rerender } = render(
+      <WithReason reason={null}>
+        <button>저장</button>
+      </WithReason>,
+    );
+    const b = screen.getByRole("button", { name: "저장" });
+    b.focus();
+    rerender(
+      <WithReason reason="unchanged">
+        <button>저장</button>
+      </WithReason>,
+    );
+    expect(screen.getByRole("button", { name: "저장" })).toBe(b);
+    expect(b).toHaveFocus();
+    // read once, even with the tooltip open (focus opened it): the open tooltip adds nothing
+    expect(b).toHaveAccessibleDescription(new RegExp(`^${copy.deny.unchanged}\\s*$`));
+    rerender(
+      <WithReason reason={null}>
+        <button>저장</button>
+      </WithReason>,
+    );
+    expect(screen.getByRole("button", { name: "저장" })).toBe(b);
+    expect(b).toHaveFocus();
+    expect(b).not.toHaveAttribute("aria-disabled");
+  });
+
+  it("names an icon-only control in its tooltip without a reason", async () => {
+    render(
+      <WithReason reason={null} label="시작">
+        <button aria-label="시작">▶</button>
+      </WithReason>,
+    );
+    await userEvent.tab();
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("시작");
+    expect(screen.getByRole("button", { name: "시작" })).toHaveAccessibleDescription(""); // the name is not read again
   });
 });
 

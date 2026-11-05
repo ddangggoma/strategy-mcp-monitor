@@ -1,6 +1,7 @@
-import { copy, expect, test } from "./fixtures";
+import { copy, expect, tabTo, test } from "./fixtures";
 
 const TITLE = "E2E 점검 공지";
+const KEYBOARD_TITLE = "E2E 키보드 공지";
 
 test("notice editor preview, save, standalone page, revert to default", async ({ page, context, state, loginAs }) => {
   await loginAs(page, "admin", "local");
@@ -37,4 +38,26 @@ test("notice editor preview, save, standalone page, revert to default", async ({
   // the button acknowledges and the page says it may be closed
   await standalone.getByRole("dialog").getByRole("button", { name: copy.notice.builtIn.button_text }).click();
   await expect(standalone.getByText(copy.notice.acknowledged)).toBeVisible();
+});
+
+test("keyboard-only: edit the notice title and save it", async ({ page, state, loginAs }) => {
+  await loginAs(page, "admin", "local");
+  await page.goto(`${state.localUrl}/admin/notice`);
+  const title = page.getByLabel(copy.notice.fields.title);
+  await expect(title).toHaveValue(copy.notice.builtIn.title);
+  await tabTo(page, title);
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type(KEYBOARD_TITLE);
+  await tabTo(page, page.getByRole("button", { name: copy.common.save, exact: true }));
+  await page.keyboard.press("Enter");
+  await expect(page.getByText(copy.notice.savedVersion(3))).toBeVisible();
+  await expect(page.getByRole("group", { name: copy.notice.previewLabel })).toContainText(KEYBOARD_TITLE);
+
+  // and back to the built-in title the same way (the visual baselines show the default notice)
+  await tabTo(page, title, { back: true });
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type(copy.notice.builtIn.title);
+  await tabTo(page, page.getByRole("button", { name: copy.common.save, exact: true }));
+  await page.keyboard.press("Enter");
+  await expect(page.getByText(copy.notice.savedVersion(4))).toBeVisible();
 });

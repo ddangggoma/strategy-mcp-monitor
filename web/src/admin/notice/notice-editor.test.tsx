@@ -86,8 +86,12 @@ it("starts from the saved notice and shows each field's length", async () => {
   expect(field(copy.notice.fields.title)).toHaveAccessibleDescription(expect.stringContaining(copy.notice.count(5, 80)));
   expect(field(copy.notice.fields.body)).toHaveAccessibleDescription(expect.stringContaining(copy.notice.count(2, 4000)));
   expect(field(copy.notice.fields.button_text)).toHaveAccessibleDescription(expect.stringContaining(copy.notice.count(2, 20)));
-  // nothing changed yet: nothing to save
+  // nothing changed yet: nothing to save, and the button says so (U26)
   expect(saveButton()).toHaveAttribute("aria-disabled", "true");
+  expect(saveButton()).toHaveAccessibleDescription(copy.deny.unchanged);
+  await userEvent.type(field(copy.notice.fields.title), "!");
+  expect(saveButton()).not.toHaveAttribute("aria-disabled");
+  expect(saveButton()).not.toHaveAccessibleDescription(copy.deny.unchanged);
 });
 
 it("counts characters by code point", async () => {

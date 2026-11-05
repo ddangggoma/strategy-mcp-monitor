@@ -1,7 +1,7 @@
 # Strategy MCP Monitor — 하이레벨 개발 계획서
 
-- 버전: **v0.5** (2026-11-05)
-- 상태: 요구사항 확정. 구현 중입니다 (P0–P2 완료: 기반, 인증·권한, MCP 모니터 엔진). 이 문서가 기준이며, 구현에서 달라진 점은 변경 이력에 적습니다.
+- 버전: **v0.6** (2026-11-06)
+- 상태: 요구사항 확정. 구현 중입니다 (P0–P3 완료: 기반, 인증·권한, MCP 모니터 엔진, 웹 UI). 이 문서가 기준이며, 구현에서 달라진 점은 변경 이력에 적습니다.
 - 대상: **Windows 11 Pro**에서 실행되는 MCP 관리 + RDP 접속·행동 감사 웹 애플리케이션
 
 ### 변경 이력
@@ -12,6 +12,7 @@
 | v0.3 | **역할 명칭 변경**: Admin → **MCP 개발자**, Super Admin → **Admin**. **User 역할 삭제**(로그인은 MCP 개발자·Admin만). Admin이 다른 Admin을 지정할 수 있음. 로그인 가능 이메일은 Admin이 등록. **cmd 내부 명령 수집(Clink) 제외**. 고지 다이얼로그는 **연결될 때마다** 표시. 로그 보존 기간 설정 UI 추가 |
 | v0.4 | 스크립트 예외 격리 추가: 별도 프로세스 실행, **120초 타임아웃**, 결과 분류(ok/failed/timeout/error), 출력·동시 실행 제한 (R20) |
 | v0.5 | **구현 정합 (P1–P2):** §4.3 스크립트 **조회**(읽기 전용) 행 추가(MCP 개발자 이상, Local), §4.4 `can(user, action, channel, owner_id)`, §5.8 조회/편집 권한 구분, §8 `PATCH /api/users/{id}`와 MCP·스크립트·스트림 엔드포인트 보강(수동 조치는 202 + `run_id`, 외부 채널에서 Local 전용 경로는 405가 아니라 404) |
+| v0.6 | 구현 정합 (P3): 채널별 세션 쿠키(mcpmon_sid_local/_ext), /api/auth/me otp_provider, 보드 action_delay_sec, action 이벤트 requested, 응답의 사용자 요약(actor/author/updated_by_user)·owned_mcps, GET /api/mcp-activity, GET /api/settings/retention/preview(retention_cutoff = today−(days−1)), 고지 API(versions·revert, 버전 0 = 기본 문구), 정적 라우트(/, /admin/*, /notice, /assets/*)와 CSP, loopback 스트림 상한 20, CLI --static-dir/--dev-otp-code |
 
 ---
 
@@ -105,7 +106,7 @@
    - 쿠키 속성은 `HttpOnly`, `SameSite=Strict`이고, HTTPS일 때는 `Secure`도 붙습니다.
    - 세션은 최대 8시간이며, 30분 동안 사용이 없으면 만료됩니다.
    - 변경 요청은 CSRF 토큰을 검사합니다.
-4. **채널별 세션:** 8700과 8701은 쿠키를 공유하지 않으므로 각각 로그인합니다.
+4. **채널별 세션:** 브라우저 쿠키는 포트가 아니라 호스트 단위라서, 두 채널이 서로의 세션을 덮어쓰지 않도록 채널별 쿠키 이름(`mcpmon_sid_local`, `mcpmon_sid_ext`)을 씁니다. 8700과 8701에는 각각 로그인합니다.
 5. **감사 기록:** 모든 로그인 시도를 남깁니다(성공·실패, 채널, IP, User-Agent). localhost에서는 브라우저를 연 Windows 계정도 함께 기록합니다.
 
 **OtpProvider (교체 가능)**
@@ -367,6 +368,7 @@
 | `GET /api/board`, `GET /api/stream` (SSE: `board`·`mcp`·`mcp_removed` 이벤트. `action` 이벤트는 로그인한 MCP 개발자 이상에게만) | ✓ | ✓ | ✓ | 둘 다 |
 | `POST /api/auth/otp/request`, `POST /api/auth/otp/verify`, `POST /api/auth/logout` | ✓ | ✓ | ✓ | 둘 다 |
 | `GET /api/mcps`, `GET /api/mcps/{id}` (설정 포함), `GET /api/mcps/{id}/history`, `GET /api/mcps/{id}/actions/{action_id}` (출력 포함), `GET /api/sessions/history` | ✗ | ✓ | ✓ | 둘 다 |
+| `GET /api/mcp-activity?limit=` (모든 MCP의 최근 상태 전이·조치, 대시보드용) | ✗ | ✓ | ✓ | 둘 다 |
 | `GET /api/logs?from&to&users&cat&q&cursor`, `GET /api/logs/histogram`, `GET /api/logs/export` | ✗ | ✓ | ✓ | 둘 다 |
 | `PUT /api/mcps/{id}`, `POST /api/mcps/{id}/actions/{start\|restart\|stop}` (**202 + `run_id`**: 결과는 `action` 이벤트와 이력으로 확인) | ✗ | ✓ | ✓ | 둘 다 |
 | `POST /api/mcps`, `DELETE /api/mcps/{id}` | ✗ | 등록: ✓ / 삭제: 소유자 | ✓ | **Local만** |
@@ -375,6 +377,7 @@
 | `POST /api/mcps/{id}/owner` | ✗ | ✗ | ✓ | **Local만** |
 | `GET/POST /api/users`, `PATCH /api/users/{id}` | ✗ | ✗ | ✓ | **Local만** |
 | `GET/PUT /api/settings` (보존 기간 포함), `GET /api/settings/retention/preview`, `GET/PUT /api/notice` | ✗ | ✗ | ✓ | **Local만** |
+| `GET /api/notice/versions[/{v}]`, `POST /api/notice/versions/{v}/revert` (버전 0 = 기본 문구) | ✗ | ✗ | ✓ | **Local만** |
 
 `DELETE /api/mcps/{id}`는 MCP 개발자는 소유자일 때만, Admin은 모든 MCP에 대해 허용합니다. 스크립트를 **바꾸는** 라우트(`PUT`/`DELETE`/`revert`)는 역할과 관계없이 소유자만 허용하고, `GET` 라우트는 MCP 개발자 이상이면 소유자가 아니어도 읽을 수 있습니다.
 

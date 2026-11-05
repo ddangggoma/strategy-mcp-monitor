@@ -1,6 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
-import type { Locator, Page } from "@playwright/test";
-import { DEV_OTP_CODE, MCP_NAME, UI_USERS, copy, expect, test } from "./fixtures";
+import { DEV_OTP_CODE, MCP_NAME, UI_USERS, copy, expect, tabTo, test } from "./fixtures";
 
 const PAGES = [
   "/",
@@ -13,6 +12,7 @@ const PAGES = [
   "/admin/users",
   "/admin/settings",
   "/admin/notice",
+  "/admin/no-such-page",
   "/notice",
 ];
 
@@ -23,18 +23,9 @@ for (const path of PAGES) {
     // analyse the loaded page, not its skeleton
     await expect(page.locator("[role='status'] .sr-only", { hasText: copy.common.loading })).toHaveCount(0);
     await expect(page.locator("h1, [role='dialog'] h2").first()).toBeVisible();
-    const r = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+    const r = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
     expect(r.violations.map((v) => `${v.id}: ${v.nodes.length} (${v.nodes.map((n) => n.target.join(" ")).join(", ")})`)).toEqual([]);
   });
-}
-
-/** Presses Tab until `target` has focus (never clicks). */
-async function tabTo(page: Page, target: Locator, max = 60): Promise<void> {
-  for (let i = 0; i < max; i += 1) {
-    if (await target.evaluate((el) => el === document.activeElement).catch(() => false)) return;
-    await page.keyboard.press("Tab");
-  }
-  throw new Error(`could not reach ${String(target)} with Tab`);
 }
 
 test("keyboard-only: login and run an action", async ({ page, state }) => {
@@ -56,4 +47,44 @@ test("keyboard-only: login and run an action", async ({ page, state }) => {
   await tabTo(page, start);
   await page.keyboard.press("Enter");
   await expect(page.getByText(copy.toasts.ok(MCP_NAME, "start"))).toBeVisible({ timeout: 60_000 });
+});
+
+test("keyboard-only: command palette opens with Ctrl+K, skips blocked screens, and gives focus back to the page", async ({ page, state, loginAs }) => {
+  await loginAs(page, "admin", "local");
+  await page.goto(`${state.localUrl}/admin/mcps`);
+  await expect(page.locator("main h1")).toBeVisible();
+  // nothing focused (the case that used to drop focus on <body>)
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+
+  const dialog = page.getByRole("dialog", { name: copy.common.commandTitle });
+  await page.keyboard.press("Control+k");
+  await expect(dialog).toBeVisible();
+  await page.keyboard.type(copy.nav.sessions);
+  const sessions = dialog.getByRole("option", { name: new RegExp(copy.nav.sessions) });
+  await expect(sessions).toHaveAttribute("aria-disabled", "true");
+  await expect(sessions).toContainText(copy.deny.planned_sessions); // the reason, readable (not dimmed text)
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(`${state.localUrl}/admin/mcps`); // a blocked screen does not open
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator("main")).toBeFocused();
+
+  await page.keyboard.press("Control+k");
+  await expect(dialog).toBeVisible();
+  await page.keyboard.type(copy.nav.settings);
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(`${state.localUrl}/admin/settings`);
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator("main")).toBeFocused();
+});
+
+test("an unknown admin address keeps the shell and says how to get back", async ({ page, state, loginAs }) => {
+  await loginAs(page, "admin", "local");
+  await page.goto(`${state.localUrl}/admin/no-such-page`);
+  const main = page.getByRole("main");
+  await expect(main.getByRole("heading", { level: 1, name: copy.common.notFoundTitle })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: copy.nav.label })).toBeVisible();
+  await main.getByRole("link", { name: copy.common.adminHome }).click();
+  await expect(page).toHaveURL(`${state.localUrl}/admin`);
 });

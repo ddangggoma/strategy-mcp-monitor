@@ -15,7 +15,7 @@ export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
 
 export const DISABLED_REASONS = [
   "login", "local_only", "admin_only", "owner_only", "no_owner", "running", "config_error",
-  "planned_sessions", "planned_logs", "planned_audit", "planned_alerts",
+  "planned_sessions", "planned_logs", "planned_audit", "planned_alerts", "unchanged",
 ] as const;
 /** Why a visible control is unavailable (shown next to it, never hidden: spec §4.4). */
 export type DisabledReason = (typeof DISABLED_REASONS)[number];
@@ -62,7 +62,8 @@ export const copy = {
     commandShortcut: (mac: boolean) => (mac ? "⌘K" : "Ctrl K"),
     commandScreens: "화면",
     commandMcps: "MCP",
-    notFound: "찾는 화면이 없어요. 주소를 확인하거나 관리 화면 처음으로 가세요.",
+    notFoundTitle: "화면을 찾을 수 없어요",
+    notFound: "주소가 틀렸거나 없어진 화면이에요. 주소를 확인하거나 관리 화면 처음으로 가세요.",
     unsavedTitle: "저장하지 않은 변경 사항이 있어요",
     unsavedBody: "이 페이지를 떠나면 지금 고친 내용이 사라져요.",
     leave: "떠나기",
@@ -592,6 +593,7 @@ export const copy = {
     planned_logs: "로그 조회는 아직 준비 중이에요.",
     planned_audit: "감사 로그는 아직 준비 중이에요.",
     planned_alerts: "알림 채널은 아직 준비 중이에요.",
+    unchanged: "아직 바뀐 내용이 없어요.",
   } satisfies Record<DisabledReason, string>,
 
   errors: {

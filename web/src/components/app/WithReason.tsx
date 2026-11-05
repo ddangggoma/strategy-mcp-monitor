@@ -1,6 +1,7 @@
 import {
   cloneElement,
   useId,
+  useState,
   type HTMLAttributes,
   type KeyboardEvent,
   type ReactElement,
@@ -24,7 +25,12 @@ function blockActivation(e: KeyboardEvent<HTMLElement>): void {
  * A control the user cannot use right now, kept visible with its reason (§4.4, U26): instead of
  * `disabled` (unfocusable, no tooltip), the child gets aria-disabled, stays in the tab order,
  * ignores clicks and Enter/Space, and explains itself twice — a tooltip on hover and focus, and
- * an always-present description for screen readers. Without a reason the child is returned as is.
+ * an always-present description for screen readers. Without a reason the child works normally
+ * (with `label`, its tooltip still names it).
+ *
+ * The element tree is the same with and without a reason, so a reason that comes or goes (a save
+ * that leaves nothing to save, an action that starts running) never remounts the control and
+ * never drops the keyboard focus on <body>.
  */
 export function WithReason({
   reason,
@@ -40,36 +46,45 @@ export function WithReason({
   label?: string;
 }) {
   const id = useId();
-  if (reason === null) return children;
+  const [open, setOpen] = useState(false);
+  const text = reason === null ? null : copy.deny[reason];
+  const hasTip = text !== null || label !== undefined;
 
-  const text = copy.deny[reason];
-  const describedBy = [children.props["aria-describedby"], id].filter(Boolean).join(" ");
-  const trigger = cloneElement(children, {
-    "aria-disabled": true,
-    "aria-describedby": describedBy,
-    onClick: block,
-    onKeyDown: blockActivation,
-  });
+  const trigger =
+    text === null
+      ? children
+      : cloneElement(children, {
+          "aria-disabled": true,
+          "aria-describedby": [children.props["aria-describedby"], id].filter(Boolean).join(" "),
+          onClick: block,
+          onKeyDown: blockActivation,
+        });
 
   return (
     <>
       <TooltipProvider>
-        <Tooltip>
+        <Tooltip open={hasTip && open} onOpenChange={setOpen}>
           <TooltipTrigger asChild>{trigger}</TooltipTrigger>
-          <TooltipContent side={side}>
-            {/* the label is already the control's name: kept out of its description */}
-            {label ? (
-              <span aria-hidden="true" className="block font-semibold">
-                {label}
-              </span>
-            ) : null}
-            {text}
-          </TooltipContent>
+          {hasTip ? (
+            <TooltipContent side={side}>
+              {/* Both parts are for the eye only. The label is already the control's name, and the
+                  reason is read from the hidden description below: Radix also points the trigger's
+                  aria-describedby at an open tooltip, which would read the reason twice. */}
+              {label ? (
+                <span aria-hidden="true" className={text === null ? undefined : "block font-semibold"}>
+                  {label}
+                </span>
+              ) : null}
+              {text === null ? null : <span aria-hidden="true">{text}</span>}
+            </TooltipContent>
+          ) : null}
         </Tooltip>
       </TooltipProvider>
-      <span id={id} hidden>
-        {text}
-      </span>
+      {text === null ? null : (
+        <span id={id} hidden>
+          {text}
+        </span>
+      )}
     </>
   );
 }

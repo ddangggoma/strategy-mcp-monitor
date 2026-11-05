@@ -24,6 +24,12 @@ function isPaletteShortcut(e: KeyboardEvent): boolean {
   return e.code === "KeyK" || e.key.toLowerCase() === "k"; // code: Korean IME mode still reports KeyK
 }
 
+/** The focused element, or null when focus is nowhere in particular (<body>). */
+function focusedElement(): Element | null {
+  const el = document.activeElement;
+  return el && el !== document.body ? el : null;
+}
+
 /**
  * Logged-in admin layout: the shared TopBar (same store and stream as the rest of the tab), the
  * navigation, the page, toasts and the command palette. Owns the session-expired path: a 401
@@ -43,8 +49,26 @@ export function AppShell() {
   const [palette, setPalette] = useState({ open: false, mounted: false });
   const leaving = useRef(false);
 
-  const openPalette = useCallback(() => setPalette({ open: true, mounted: true }), []);
+  // what had focus when the palette opened: Radix hands focus back to it on close, but a palette
+  // opened by the shortcut with nothing focused would hand it to <body> (start of the page)
+  const paletteOpener = useRef<Element | null>(null);
+  const paletteOpen = useRef(false);
+  useEffect(() => {
+    paletteOpen.current = palette.open;
+  }, [palette.open]);
+
+  const openPalette = useCallback(() => {
+    paletteOpener.current = focusedElement();
+    setPalette({ open: true, mounted: true });
+  }, []);
   const setPaletteOpen = useCallback((open: boolean) => setPalette((p) => ({ ...p, open })), []);
+  const onPaletteCloseFocus = useCallback((e: Event) => {
+    e.preventDefault();
+    const opener = paletteOpener.current;
+    // back to the opener; without one (or once a navigation removed it) to the page content
+    if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+    else document.getElementById("main")?.focus();
+  }, []);
 
   useEffect(() => {
     const handler = () => {
@@ -78,6 +102,7 @@ export function AppShell() {
     const onKey = (e: KeyboardEvent) => {
       if (!isPaletteShortcut(e)) return;
       e.preventDefault();
+      if (!paletteOpen.current) paletteOpener.current = focusedElement();
       setPalette((p) => ({ open: !p.open, mounted: true }));
     };
     document.addEventListener("keydown", onKey);
@@ -118,7 +143,7 @@ export function AppShell() {
       </div>
       {palette.mounted ? (
         <Suspense fallback={null}>
-          <CommandPalette open={palette.open} onOpenChange={setPaletteOpen} />
+          <CommandPalette open={palette.open} onOpenChange={setPaletteOpen} onCloseAutoFocus={onPaletteCloseFocus} />
         </Suspense>
       ) : null}
       <Toaster position="bottom-right" />

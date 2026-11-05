@@ -25,7 +25,7 @@ import { storeMcp, useUsers } from "../queries";
 import { qk } from "../query-keys";
 
 /**
- * "소유권 이전" button and its dialog (Local, Admin). The user list is fetched only while the dialog
+ * “소유권 이전” button and its dialog (Local, Admin). The user list is fetched only while the dialog
  * is open; only active users are offered and the current owner is shown but not selectable.
  * Without permission the button stays visible, disabled with its reason (U26).
  */

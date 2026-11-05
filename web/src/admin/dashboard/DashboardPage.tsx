@@ -15,7 +15,7 @@ import { useLive } from "../live";
 import { PlannedFeature } from "../shell/PlannedFeature";
 import { useMcpActivity } from "../queries";
 
-/** Rows shown in "최근 이슈와 조치" (the feed holds ACTIVITY_LIMIT). */
+/** Rows shown in “최근 이슈와 조치” (the feed holds ACTIVITY_LIMIT). */
 const RECENT = 10;
 
 const STATES = (Object.keys(STATE_SEVERITY) as McpState[]).sort((a, b) => STATE_SEVERITY[a] - STATE_SEVERITY[b]);

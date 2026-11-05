@@ -13,13 +13,14 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { copy, messageForError, type DisabledReason } from "@/copy/ko";
 import { trackerTimeoutMs } from "@/lib/action-tracker";
 import { ApiError } from "@/lib/api";
 import type { McpDetail, ScriptKind } from "@/lib/api-types";
 import { denyReason } from "@/lib/permissions";
 import { useSession } from "@/lib/session";
+import { cn } from "@/lib/utils";
 import { useLive } from "../live";
 import { useManualAction } from "../queries";
 
@@ -76,7 +77,7 @@ export function McpActions({ mcp, size = "md" }: { mcp: McpDetail; size?: "sm" |
 
   return (
     <TooltipProvider>
-      <div role="group" aria-label={copy.mcp.actionsLabel(mcp.name)} className="flex items-center gap-1.5">
+      <div role="group" aria-label={copy.mcp.actionsLabel(mcp.name)} className={cn("flex items-center gap-1.5", !compact && "flex-wrap")}>
         {KINDS.map(({ kind, icon: Icon }) => {
           const label = copy.mcp[kind];
           const button = (
@@ -92,21 +93,12 @@ export function McpActions({ mcp, size = "md" }: { mcp: McpDetail; size?: "sm" |
               {compact ? null : label}
             </Button>
           );
-          if (reason !== null || !compact) {
-            // a compact button's name is not visible: the reason tooltip shows it too
-            return (
-              <WithReason key={kind} reason={reason} label={compact ? label : undefined}>
-                {button}
-              </WithReason>
-            );
-          }
+          // a compact button's name is not visible: its tooltip shows it (above the reason, if any).
+          // One WithReason either way, so the button is not remounted when the reason changes.
           return (
-            <Tooltip key={kind}>
-              <TooltipTrigger asChild>{button}</TooltipTrigger>
-              <TooltipContent>
-                <span aria-hidden="true">{label}</span>
-              </TooltipContent>
-            </Tooltip>
+            <WithReason key={kind} reason={reason} label={compact ? label : undefined}>
+              {button}
+            </WithReason>
           );
         })}
         <AlertDialog open={confirmStop} onOpenChange={setConfirmStop}>

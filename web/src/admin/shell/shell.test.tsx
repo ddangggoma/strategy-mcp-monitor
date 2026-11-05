@@ -148,6 +148,27 @@ it("opens the command palette with Ctrl+K and navigates to an MCP", async () => 
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });
 
+it("closing a shortcut-opened palette puts focus on the page content, not <body>", async () => {
+  await renderShell(meFixture("admin", "local"));
+  (document.activeElement as HTMLElement | null)?.blur();
+  expect(document.activeElement).toBe(document.body);
+  await userEvent.keyboard("{Control>}k{/Control}");
+  await screen.findByRole("dialog", { name: copy.common.commandTitle });
+  await userEvent.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("main")));
+});
+
+it("closing a palette opened from the quick-jump button gives focus back to the button", async () => {
+  await renderShell(meFixture("admin", "local"));
+  const opener = screen.getByRole("button", { name: new RegExp(copy.common.commandTitle) });
+  await userEvent.click(opener);
+  await screen.findByRole("dialog", { name: copy.common.commandTitle });
+  await userEvent.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  await waitFor(() => expect(opener).toHaveFocus()); // Radix restores focus on the next tick
+});
+
 it("lists blocked screens in the palette as disabled with the reason", async () => {
   const { router } = await renderShell(meFixture("developer", "external"));
   await userEvent.click(screen.getByRole("button", { name: new RegExp(copy.common.commandTitle) }));
@@ -198,8 +219,18 @@ it("shows a planned feature as an empty state without data", () => {
   expect(card?.querySelector("canvas, table, [role=img], [data-testid=card-skeleton]")).toBeNull();
 });
 
-it("shows a not-found page for unknown admin paths", async () => {
-  renderWithProviders(null, { route: "/admin/nowhere", me: meFixture("admin", "local") });
-  expect(await screen.findByText(copy.common.notFound)).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: copy.common.adminHome })).toHaveAttribute("href", "/admin");
+it("shows a not-found page for unknown admin paths inside the shell, with a heading", async () => {
+  await renderShell(meFixture("admin", "local"), "/admin/nowhere/deeper");
+  const main = screen.getByRole("main");
+  expect(await within(main).findByRole("heading", { level: 1, name: copy.common.notFoundTitle })).toBeInTheDocument();
+  expect(within(main).getByText(copy.common.notFound)).toBeInTheDocument();
+  expect(within(main).getByRole("link", { name: copy.common.adminHome })).toHaveAttribute("href", "/admin");
+  // the navigation stays, so the way back is not only the one link
+  expect(navLink(copy.nav.mcps)).toHaveAttribute("href", "/admin/mcps");
+});
+
+it("sends an anonymous visitor of an unknown admin path to login first", async () => {
+  const { router } = renderWithProviders(null, { route: "/admin/nowhere", me: meFixture(null, "local") });
+  await waitFor(() => expect(router.state.location.pathname).toBe("/admin/login"));
+  expect(router.state.location.search).toMatchObject({ redirect: "/admin/nowhere" });
 });

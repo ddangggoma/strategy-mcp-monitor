@@ -18,7 +18,7 @@ function secondsLeft(seconds: number, startedAt: number, now: number): number {
 }
 
 /**
- * Wait before "코드 다시 받기": a 24px ring that empties (U25's one exception: `@property
+ * Wait before “코드 다시 받기”: a 24px ring that empties (U25's one exception: `@property
  * --progress` + conic-gradient, one CSS animation, no per-frame JS) and the seconds left as text.
  * The text ticks on the shared 1 s clock and is not announced (role=timer, aria-live=off).
  */

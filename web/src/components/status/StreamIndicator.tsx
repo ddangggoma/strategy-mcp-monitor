@@ -23,7 +23,7 @@ function Late() {
 }
 
 /**
- * Live-stream health in the top bar. Silent while connecting or open; "다시 시도 중" once a
+ * Live-stream health in the top bar. Silent while connecting or open; “다시 시도 중” once a
  * reconnect lasts 3 s (the status region is always present so screen readers hear the change).
  */
 export function StreamIndicator({ status, className }: { status: StreamStatus; className?: string }) {

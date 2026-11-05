@@ -12,6 +12,7 @@ import {
   redirect,
   type RouterHistory,
 } from "@tanstack/react-router";
+import { buttonVariants } from "@/components/ui/button";
 import { copy } from "@/copy/ko";
 import type { McpState, ScriptKind } from "@/lib/api-types";
 import { bootstrapStatus } from "@/lib/endpoints";
@@ -62,13 +63,24 @@ async function setupNeeded(qc: QueryClient): Promise<boolean> {
   }
 }
 
-function NotFound() {
+/** Heading, what happened and the way back; inside the shell for a logged-in user (authedRoute). */
+function NotFoundBody() {
   return (
-    <main className="mx-auto flex max-w-(--size-prose) flex-col items-start gap-3 px-4 py-16">
-      <p className="text-base text-fg">{copy.common.notFound}</p>
-      <Link to="/admin" className="text-sm font-semibold text-fg underline underline-offset-4">
+    <div className="flex max-w-(--size-prose) flex-col items-start gap-3">
+      <h1 className="text-xl font-semibold text-fg">{copy.common.notFoundTitle}</h1>
+      <p className="text-sm text-fg">{copy.common.notFound}</p>
+      <Link to="/admin" className={buttonVariants({ variant: "outline" })}>
         {copy.common.adminHome}
       </Link>
+    </div>
+  );
+}
+
+/** Outside every route (no shell): a page of its own with a main landmark. */
+function NotFound() {
+  return (
+    <main className="mx-auto max-w-(--size-prose) px-6 py-16">
+      <NotFoundBody />
     </main>
   );
 }
@@ -105,6 +117,8 @@ const authedRoute = createRoute({
     if (!session.me?.user) throw redirect({ to: "/admin/login", search: { redirect: location.href } });
   },
   component: AppShell,
+  // any other /admin path for a logged-in user: the not-found page keeps the shell and navigation
+  notFoundComponent: NotFoundBody,
 });
 
 const dashboardRoute = createRoute({

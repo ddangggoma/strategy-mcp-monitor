@@ -8,7 +8,7 @@ const ERROR_CODES = ["validation", "invalid_email", "rate_limited", "login_requi
   "body_too_large", "bad_host", "internal", "method_not_allowed", "network"];
 
 const REASONS = ["login", "local_only", "admin_only", "owner_only", "no_owner", "running", "config_error",
-  "planned_sessions", "planned_logs", "planned_audit", "planned_alerts"];
+  "planned_sessions", "planned_logs", "planned_audit", "planned_alerts", "unchanged"];
 
 /** Every leaf string in the deck, with function leaves called on sample arguments. */
 function leaves(node: unknown, path = "copy"): [string, string][] {

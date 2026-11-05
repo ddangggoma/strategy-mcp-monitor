@@ -25,15 +25,15 @@ Every later plan reads this file before it is written and checks off the items i
 - [x] Run ruff and mypy once (install them as dev dependencies). (Plan 2 Task 14: both clean; config in `server/pyproject.toml`)
 
 ### Plan 3 (Web UI)
-- [ ] Lowering only the retention period below `log_compress_after_days` returns 422. The UI must explain that both values have to be lowered together.
-- [ ] Both ports use the same cookie name (`mcpmon_sid`), and browser cookies are scoped by host, not port. Logging in on one channel overwrites the other channel's cookie. Consider per-channel cookie names.
-- [ ] Show an OTP lockout message: up to 1 hour after 10 failures. Optionally clear the failure history after a successful login.
-- [ ] Read the CSRF token from `GET /api/auth/me` (added in the Plan 1 final fixes).
-- [ ] (From Plan 2) The board is `GET /api/board` plus the SSE events `board` / `mcp` / `mcp_removed` / `action` on `GET /api/stream`.
-- [ ] (From Plan 2) A manual action returns 202 + `run_id`; show the result toast from the `action` event (signed-in developer+ only; anonymous streams never get `action` events).
-- [ ] (From Plan 2) Compute script diffs in the client from the versions API content (`GET .../scripts/{kind}/versions[/{version}]`).
-- [ ] (From Plan 2) The anonymous board omits host:port, owner and config; those come from `GET /api/mcps[/{id}]` (developer+).
-- [ ] (From Plan 2) An SSE stream keeps the auth level it connected with: after logout, close and reopen `/api/stream`.
+- [x] Lowering only the retention period below `log_compress_after_days` returns 422. The UI must explain that both values have to be lowered together. (Plan 3 Task 13)
+- [x] Both ports use the same cookie name (`mcpmon_sid`), and browser cookies are scoped by host, not port. Logging in on one channel overwrites the other channel's cookie. Consider per-channel cookie names. (Plan 3 Task 3)
+- [x] Show an OTP lockout message: up to 1 hour after 10 failures. Optionally clear the failure history after a successful login. (Plan 3 Task 3, 9)
+- [x] Read the CSRF token from `GET /api/auth/me` (added in the Plan 1 final fixes). (Plan 3 Task 7)
+- [x] (From Plan 2) The board is `GET /api/board` plus the SSE events `board` / `mcp` / `mcp_removed` / `action` on `GET /api/stream`. (Plan 3 Task 7, 8)
+- [x] (From Plan 2) A manual action returns 202 + `run_id`; show the result toast from the `action` event (signed-in developer+ only; anonymous streams never get `action` events). (Plan 3 Task 10)
+- [x] (From Plan 2) Compute script diffs in the client from the versions API content (`GET .../scripts/{kind}/versions[/{version}]`). (Plan 3 Task 12)
+- [x] (From Plan 2) The anonymous board omits host:port, owner and config; those come from `GET /api/mcps[/{id}]` (developer+). (Plan 3 Task 8)
+- [x] (From Plan 2) An SSE stream keeps the auth level it connected with: after logout, close and reopen `/api/stream`. (Plan 3 Task 7, 9)
 
 ### Plan 4 (Windows collection)
 - [ ] `LogWriter.emit()` is loop-thread only. Collector threads must go through `loop.call_soon_threadsafe`.
@@ -81,12 +81,12 @@ Every later plan reads this file before it is written and checks off the items i
 ## From the Plan 2 whole-plan review
 
 ### Plan 3 (Web UI)
-- [ ] An SSE stream's auth level is fixed at connect time, so a logout does not cut a live stream. The UI should reconnect the stream on login and logout. The server could also re-check the auth level periodically.
-- [ ] A client that loses the race for the last stream slot gets an empty 200 instead of 503. Make the UI's EventSource reconnect with backoff.
-- [ ] The per-IP stream cap is 5, and on the local channel every browser on the PC shares 127.0.0.1. Keep each tab to one stream, and consider raising the cap for loopback.
-- [ ] MCP detail always includes `config_error` (true/false), and an invalid row has `live: null`. Show an "invalid config — rename or delete" state.
-- [ ] MCP names are now allowlisted: Unicode letters and digits, space, `.`, `_`, `-`. Explain this in the form's validation text.
-- [ ] Manual action returns 202 `{run_id}`, and the result arrives as an SSE `action` event that only authenticated users receive. A concurrent request returns 409 `action_in_progress`.
+- [x] An SSE stream's auth level is fixed at connect time, so a logout does not cut a live stream. The UI should reconnect the stream on login and logout. The server could also re-check the auth level periodically. (Plan 3 Task 9)
+- [x] A client that loses the race for the last stream slot gets an empty 200 instead of 503. Make the UI's EventSource reconnect with backoff. (Plan 3 Task 7)
+- [x] The per-IP stream cap is 5, and on the local channel every browser on the PC shares 127.0.0.1. Keep each tab to one stream, and consider raising the cap for loopback. (Plan 3 Task 3, 7)
+- [x] MCP detail always includes `config_error` (true/false), and an invalid row has `live: null`. Show an "invalid config — rename or delete" state. (Plan 3 Task 11)
+- [x] MCP names are now allowlisted: Unicode letters and digits, space, `.`, `_`, `-`. Explain this in the form's validation text. (Plan 3 Task 11)
+- [x] Manual action returns 202 `{run_id}`, and the result arrives as an SSE `action` event that only authenticated users receive. A concurrent request returns 409 `action_in_progress`. (Plan 3 Task 10)
 
 ### Plan 5 (log viewer, retention, packaging)
 - [ ] FAILED status and the auto-action budget reset on service restart. Decide whether to persist them.
@@ -101,3 +101,21 @@ Every later plan reads this file before it is written and checks off the items i
 - [ ] E501 is not enforced (about 80 lines over 100 columns), and ruff is pinned to `E4,E7,E9,F,I,UP,B`.
 - [ ] Add a unit test for the `--open-meteo` wiring.
 - [ ] `MCP_ACTOR` (the user email) is not allowlisted for script env vars. Only an admin registers emails, but consider tightening email validation.
+
+## From Plan 3 (web UI)
+
+### Plan 4 (Windows collection)
+- [ ] The board `sessions` field and the SSE `sessions` event (`{sessions}`, a full replacement) fill exactly the keys of `RdpSession` in `web/src/lib/api-types.ts`. Without the field the UI shows the "not collected yet" line (`board.sessionsNotReady`: "원격 접속 정보는 다음 업데이트부터 표시돼요.").
+- [ ] Replace the notice bundle's `loadNoticeContent()` and `notifyHost()` (U16) with the agent path.
+- [ ] The notice version recorded in `notice_shown` is `NoticeStore.current().version` (0 = the built-in text).
+- [ ] The dashboard "현재 세션" card uses the same sessions data.
+
+### Plan 5 (log viewer, retention, packaging)
+- [ ] The retention purge must use `app.logstore.retention.retention_cutoff`, so it matches the settings preview.
+- [ ] Fill the sessions, logs and audit-log navigation items and the dashboard "로그인 실패 추이" and "우회 탐지 이벤트" cards (now `PlannedFeature`).
+- [ ] The log table uses TanStack Virtual and no animation.
+- [ ] PyInstaller packaging: change the `--static-dir` default (now `<repo>/web/dist`) to a path relative to the executable.
+
+### Later
+- [ ] Server 422 responses carry no field information, so forms rely on client validation (U27).
+- [ ] Script `PUT` has no optimistic locking (`If-Match`).

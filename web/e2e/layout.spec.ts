@@ -46,3 +46,22 @@ for (const width of WIDTHS) {
     await expect(start).toBeInViewport();
   });
 }
+
+// WCAG 1.4.10 Reflow: 200% zoom of a 1280 px window is the 640 px case above; 400% is 320 CSS px.
+// No phone layout is built for it (user ruling), but nothing may need a sideways page scroll.
+test("reflows at 400% zoom (320 CSS px) without horizontal page scroll", async ({ page, state, loginAs }) => {
+  await page.setViewportSize({ width: 320, height: 256 });
+  const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  for (const path of ["/", "/admin/login"]) {
+    await page.goto(`${state.localUrl}${path}`);
+    await expect(page.locator("h1").first()).toBeAttached();
+    expect(await overflow(), path).toBeLessThanOrEqual(0);
+  }
+  await loginAs(page, "admin", "local");
+  for (const path of [...ADMIN_PAGES, "/notice"]) {
+    await page.goto(`${state.localUrl}${path.replace("{id}", String(state.mcpId))}`);
+    await expect(page.locator("h1, [role='dialog'] h2").first()).toBeAttached();
+    await expect(page.locator("[role='status'] .sr-only", { hasText: copy.common.loading })).toHaveCount(0);
+    expect(await overflow(), path).toBeLessThanOrEqual(0);
+  }
+});

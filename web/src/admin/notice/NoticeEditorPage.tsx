@@ -3,6 +3,7 @@ import { BoldIcon, ExternalLinkIcon, HistoryIcon, ListIcon } from "lucide-react"
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode, type Ref } from "react";
 import { toast } from "sonner";
 import { TextDiff } from "@/components/app/TextDiff";
+import { WithReason } from "@/components/app/WithReason";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
   AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
@@ -288,9 +289,12 @@ function NoticeForm({ initial, onDirtyChange }: { initial: Notice; onDirtyChange
               </p>
             ) : null}
             <div>
-              <Button type="submit" aria-disabled={canSave ? undefined : true} aria-describedby={error ? ids.error : undefined}>
-                {saving ? copy.common.saving : copy.common.save}
-              </Button>
+              {/* nothing to save yet: say so instead of a silently dimmed button (U26) */}
+              <WithReason reason={dirty ? null : "unchanged"}>
+                <Button type="submit" aria-disabled={canSave ? undefined : true} aria-describedby={error ? ids.error : undefined}>
+                  {saving ? copy.common.saving : copy.common.save}
+                </Button>
+              </WithReason>
             </div>
           </form>
 

@@ -21,7 +21,7 @@ export function ActionResult({ status }: { status: ScriptStatus }) {
   );
 }
 
-/** "시작", or "다시 시작(종료 단계)" for a restart that fell back to stop + start (U9). */
+/** “시작”, or “다시 시작(종료 단계)” for a restart that fell back to stop + start (U9). */
 export function actionKindLabel(a: Pick<ActionRecord, "requested" | "kind">): string {
   return a.requested === a.kind ? copy.mcp[a.kind] : copy.mcp.requestedStep(a.requested, a.kind);
 }

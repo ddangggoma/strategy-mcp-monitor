@@ -242,7 +242,7 @@ function ActionsTable({
               <TableCell className="whitespace-nowrap">
                 <button
                   type="button"
-                  className="font-mono text-xs text-fg underline decoration-border-strong underline-offset-4 hover:decoration-fg"
+                  className="min-h-6 font-mono text-xs text-fg underline decoration-border-strong underline-offset-4 hover:decoration-fg"
                 >
                   {formatKst(a.at)}
                   <span className="sr-only"> {copy.mcp.viewOutput}</span>

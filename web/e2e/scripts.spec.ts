@@ -1,4 +1,4 @@
-import { copy, expect, test } from "./fixtures";
+import { copy, expect, tabTo, test } from "./fixtures";
 
 test("owner edits a script in CodeMirror, sees the diff and reverts", async ({ page, state, loginAs }) => {
   await loginAs(page, "admin", "local");
@@ -29,4 +29,23 @@ test("owner edits a script in CodeMirror, sees the diff and reverts", async ({ p
   await expect(page.getByText(copy.scripts.reverted(1, 3))).toBeVisible();
   await expect(versions.getByRole("button", { name: new RegExp(`^${copy.scripts.versionLabel(3)}`) })).toBeVisible();
   await expect(editor).not.toContainText("# e2e");
+});
+
+test("keyboard-only: reach the script editor with Tab, edit, save with Ctrl+S", async ({ page, state, loginAs }) => {
+  await loginAs(page, "admin", "local");
+  await page.goto(`${state.localUrl}/admin/mcps/${state.mcpId}?tab=scripts&kind=restart`);
+  await expect(page.getByTestId("script-editor")).toBeVisible();
+  const pane = page.getByRole("region", { name: copy.scripts.kinds.restart });
+  await expect(pane.getByText(copy.scripts.versionLabel(3), { exact: true }).first()).toBeVisible();
+
+  const editor = page.getByRole("textbox", { name: copy.scripts.editorLabel(copy.scripts.kinds.restart) });
+  await tabTo(page, editor);
+  await page.keyboard.press("Control+End");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("# keyboard");
+  await page.keyboard.press("Control+s");
+  await expect(page.getByText(copy.scripts.savedVersion(4))).toBeVisible();
+  // Tab leaves the editor (WCAG 2.1.2: no keyboard trap)
+  await page.keyboard.press("Tab");
+  await expect(editor).not.toBeFocused();
 });

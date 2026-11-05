@@ -23,7 +23,7 @@ function HistoryLink({ mcpId }: { mcpId: number }) {
   );
 }
 
-/** "종료 코드 3, 1.2초 걸렸어요." and friends: what the result means, in one sentence. */
+/** “종료 코드 3, 1.2초 걸렸어요.” and friends: what the result means, in one sentence. */
 export function resultDetail(e: ActionResult): string | undefined {
   const duration = formatDuration(e.duration_ms);
   if (e.status === "error") return copy.toasts.runError;

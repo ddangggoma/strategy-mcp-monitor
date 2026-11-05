@@ -11,6 +11,7 @@ import { tags } from "@lezer/highlight";
 import { HistoryIcon } from "lucide-react";
 import { useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type Ref } from "react";
 import { toast } from "sonner";
+import { WithReason } from "@/components/app/WithReason";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -403,9 +404,12 @@ export function ScriptEditor({ mcpId, kind, initial, onSaved, onDirtyChange }: S
       ) : null}
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <Button aria-disabled={canSave ? undefined : true} onClick={() => void save()}>
-          {saving ? copy.common.saving : copy.common.save}
-        </Button>
+        {/* nothing to save yet: say so instead of a silently dimmed button (U26) */}
+        <WithReason reason={dirty ? null : "unchanged"}>
+          <Button aria-disabled={canSave ? undefined : true} onClick={() => void save()}>
+            {saving ? copy.common.saving : copy.common.save}
+          </Button>
+        </WithReason>
         <p id={ids.hint} className="min-w-0 flex-1 text-xs text-fg-muted">
           {copy.scripts.saveHint}
         </p>

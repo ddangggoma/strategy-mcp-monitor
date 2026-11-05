@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { test as base, expect, type APIRequestContext, type APIResponse, type Page } from "@playwright/test";
+import { test as base, expect, type APIRequestContext, type APIResponse, type Locator, type Page } from "@playwright/test";
 import { copy } from "../src/copy/ko";
 import {
   AUTH_DIR,
@@ -89,6 +89,15 @@ export const test = base.extend<Fixtures>({
     });
   },
 });
+
+/** Presses Tab (Shift+Tab with `back`) until `target` has focus (never clicks): the keyboard-only paths use it. */
+export async function tabTo(page: Page, target: Locator, { max = 60, back = false }: { max?: number; back?: boolean } = {}): Promise<void> {
+  for (let i = 0; i < max; i += 1) {
+    if (await target.evaluate((el) => el === document.activeElement).catch(() => false)) return;
+    await page.keyboard.press(back ? "Shift+Tab" : "Tab");
+  }
+  throw new Error(`could not reach ${String(target)} with Tab`);
+}
 
 export interface AdminApi {
   get(path: string): Promise<APIResponse>;

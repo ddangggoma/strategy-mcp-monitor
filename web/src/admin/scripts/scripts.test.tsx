@@ -85,6 +85,7 @@ it("owner on local gets the CodeMirror editor and saves a new version", async ()
   view = await editorView();
   expect(editorText()).toBe("Write-Host start\n");
   expect(saveButton()).toHaveAttribute("aria-disabled", "true"); // nothing changed yet
+  expect(saveButton()).toHaveAccessibleDescription(copy.deny.unchanged); // and it says so (U26)
   replaceText(view, "Write-Host changed\n");
   expect(saveButton()).not.toHaveAttribute("aria-disabled");
   await userEvent.click(saveButton());

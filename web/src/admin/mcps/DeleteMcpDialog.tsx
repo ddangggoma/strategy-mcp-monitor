@@ -26,7 +26,7 @@ import { useSession } from "@/lib/session";
 import { qk } from "../query-keys";
 
 /**
- * "삭제" button and its confirmation (Local; a developer only for an MCP they own). The delete
+ * “삭제” button and its confirmation (Local; a developer only for an MCP they own). The delete
  * button stays inactive until the MCP's name is typed again; the dialog says the stop script is
  * not run. 204 → the list; 409 action_in_progress stays in the dialog.
  */

@@ -213,7 +213,7 @@ function McpTable({ data }: { data: McpDetail[] }) {
                         type="button"
                         onClick={header.column.getToggleSortingHandler()}
                         className={cn(
-                          "-mx-1 inline-flex items-center gap-1 rounded-xs px-1 py-0.5 hover:text-fg",
+                          "-mx-1 inline-flex min-h-6 items-center gap-1 rounded-xs px-1 hover:text-fg",
                           dir && "text-fg",
                         )}
                       >
