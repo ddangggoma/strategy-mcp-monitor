@@ -1,0 +1,108 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { test as base, expect, type APIRequestContext, type APIResponse, type Page } from "@playwright/test";
+import { copy } from "../src/copy/ko";
+import {
+  AUTH_DIR,
+  DEV_OTP_CODE,
+  STATE_FILE,
+  UI_USERS,
+  type BackendState,
+  type ChannelName,
+  type SavedSession,
+  type UiUser,
+  type Who,
+} from "./backend";
+
+export { expect, copy };
+export { DEV_OTP_CODE, UI_USERS, MCP_NAME } from "./backend";
+export type { BackendState, ChannelName, UiUser, Who } from "./backend";
+
+function readState(): BackendState {
+  return JSON.parse(readFileSync(STATE_FILE, "utf-8")) as BackendState;
+}
+
+function readSession(who: Who, channel: ChannelName): SavedSession {
+  return JSON.parse(readFileSync(join(AUTH_DIR, `${who}-${channel}.json`), "utf-8")) as SavedSession;
+}
+
+export function urlFor(s: BackendState, channel: ChannelName): string {
+  return channel === "local" ? s.localUrl : s.externalUrl;
+}
+
+const FAILED_RESOURCE = /^Failed to load resource: the server responded with a status of (\d{3})/;
+
+interface Fixtures {
+  state: BackendState;
+  /** HTTP statuses a test provokes on purpose (e.g. 401 for a wrong code); Chrome logs them as errors. */
+  expectedStatuses: number[];
+  consoleErrors: string[];
+  loginAs(page: Page, who: Who, channel: ChannelName): Promise<void>;
+  loginViaUi(page: Page, user: UiUser, channel: ChannelName): Promise<void>;
+}
+
+export const test = base.extend<Fixtures>({
+  state: async ({}, use) => {
+    await use(readState());
+  },
+
+  expectedStatuses: [[], { option: true }],
+
+  // Every test ends with no console error (CSP violations included). A failed /api/ request whose
+  // status the test declared in `expectedStatuses` is the one exception (F06).
+  consoleErrors: [
+    async ({ context, expectedStatuses }, use) => {
+      const errors: string[] = [];
+      context.on("console", (msg) => {
+        if (msg.type() !== "error") return;
+        const failed = FAILED_RESOURCE.exec(msg.text());
+        const url = msg.location().url;
+        if (failed && url && new URL(url).pathname.startsWith("/api/") && expectedStatuses.includes(Number(failed[1]))) return;
+        errors.push(`${msg.text()} @ ${url}`);
+      });
+      context.on("weberror", (err) => errors.push(`uncaught: ${err.error().message}`));
+      await use(errors);
+      expect(errors, "console errors").toEqual([]);
+    },
+    { auto: true },
+  ],
+
+  loginAs: async ({ state }, use) => {
+    await use(async (page, who, channel) => {
+      const { cookie } = readSession(who, channel);
+      await page.context().addCookies([
+        { name: cookie.name, value: cookie.value, domain: "127.0.0.1", path: "/", httpOnly: true, sameSite: "Strict" },
+      ]);
+      await page.goto(`${urlFor(state, channel)}/admin`);
+      await expect(page.getByRole("navigation", { name: copy.nav.label })).toBeVisible();
+    });
+  },
+
+  loginViaUi: async ({ state }, use) => {
+    await use(async (page, user, channel) => {
+      const base = urlFor(state, channel);
+      await page.goto(`${base}/admin/login`);
+      await page.getByLabel(copy.login.email).fill(UI_USERS[user].email);
+      await page.getByRole("button", { name: copy.login.sendCode }).click();
+      await page.getByRole("group", { name: copy.login.codeGroup }).locator("input").first().fill(DEV_OTP_CODE);
+      await expect(page).toHaveURL(`${base}/admin`);
+    });
+  },
+});
+
+export interface AdminApi {
+  get(path: string): Promise<APIResponse>;
+  post(path: string, data?: unknown): Promise<APIResponse>;
+  put(path: string, data: unknown): Promise<APIResponse>;
+}
+
+/** Calls the Local API as `who` with the session and CSRF token globalSetup saved (no login). */
+export async function adminApi(request: APIRequestContext, s: BackendState, who: Who = "admin"): Promise<AdminApi> {
+  const { cookie, csrf } = readSession(who, "local");
+  const headers = { Cookie: `${cookie.name}=${cookie.value}`, "X-CSRF-Token": csrf };
+  return {
+    get: (path) => request.get(`${s.localUrl}${path}`, { headers }),
+    post: (path, data) => request.post(`${s.localUrl}${path}`, { headers, data }),
+    put: (path, data) => request.put(`${s.localUrl}${path}`, { headers, data }),
+  };
+}

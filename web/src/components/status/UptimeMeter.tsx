@@ -8,7 +8,8 @@ import { cn } from "@/lib/utils";
 export function UptimeMeter({ value, className }: { value: number | null; className?: string }) {
   if (value === null) return <span className={cn("text-base font-medium text-fg-muted", className)}>{copy.board.noRecord}</span>;
   return (
-    <data value={value} className={className}>
+    // data-volatile: the ratio moves with every check (screenshot mask)
+    <data value={value} className={className} data-volatile="">
       {copy.common.units.percent((value * 100).toFixed(1))}
     </data>
   );

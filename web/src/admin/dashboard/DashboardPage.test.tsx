@@ -60,6 +60,7 @@ it("lists the newest ten issues and actions in KST, skipping recoveries to healt
   const table = await within(card(copy.dashboard.recentActivity)).findByRole("table");
   const rows = within(table).getAllByRole("row").slice(1); // header row first
   expect(rows).toHaveLength(10);
+  expect(table).toHaveAttribute("data-volatile"); // rows depend on earlier history: masked in visual baselines (F32)
   const [first, second] = rows as [HTMLElement, HTMLElement];
   expect(within(first).getByText("files")).toBeInTheDocument();
   expect(within(first).getByText("2026-11-04 13:59:00")).toBeInTheDocument();

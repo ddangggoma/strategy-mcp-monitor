@@ -120,6 +120,8 @@ describe("UptimeMeter", () => {
     expect(screen.getByText("92.5%")).toBeInTheDocument();
     rerender(<UptimeMeter value={1} />);
     expect(screen.getByText("100.0%")).toBeInTheDocument();
+    // the ratio moves with every check: masked in the visual baselines (F32)
+    expect(screen.getByText("100.0%")).toHaveAttribute("data-volatile");
   });
 
   it("says 기록 없음 without checks", () => {

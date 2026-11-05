@@ -139,7 +139,8 @@ function RecentActivity() {
   if (rows.length === 0) return <p className="text-sm text-fg-muted">{copy.dashboard.noActivity}</p>;
 
   return (
-    <Table>
+    // data-volatile: rows depend on what happened before (screenshot mask, F32)
+    <Table data-volatile="">
       <TableHeader>
         <TableRow className="hover:bg-transparent">
           {/* w-px: time and name take their content width, the event column the rest */}

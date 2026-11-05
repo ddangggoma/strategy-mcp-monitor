@@ -23,7 +23,6 @@
     "vitest.budget.config.ts",
     "playwright.config.ts",
     "scripts",
-    "tests/budget",
-    "e2e"
+    "tests/budget"
   ]
 }

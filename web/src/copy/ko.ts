@@ -54,7 +54,8 @@ export const copy = {
     logout: "로그아웃",
     adminHome: "관리 화면",
     boardHome: "상태 보드",
-    accountMenu: (name: string) => `계정 메뉴(${name})`,
+    // starts with the visible name (WCAG 2.5.3 Label in Name)
+    accountMenu: (name: string) => `${name} 계정 메뉴`,
     skipToContent: "본문으로 건너뛰기",
     commandTitle: "빠른 이동",
     commandHint: "이동할 화면이나 MCP 이름을 입력하세요.",

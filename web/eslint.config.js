@@ -19,4 +19,12 @@ export default tseslint.config(
     files: ["scripts/**", "tests/budget/**", "e2e/**", "*.config.{js,ts}"],
     languageOptions: { globals: globals.node },
   },
+  {
+    // Playwright fixtures: `async ({}, use) => …` is the fixture API, not a React hook
+    files: ["e2e/**"],
+    rules: {
+      "react-hooks/rules-of-hooks": "off",
+      "no-empty-pattern": ["error", { allowObjectPatternsAsParameters: true }],
+    },
+  },
 );
