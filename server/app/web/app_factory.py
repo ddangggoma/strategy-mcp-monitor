@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import traceback
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -14,6 +15,7 @@ from app.services import Services
 from app.web import local_api, mcp_local, mcp_shared, shared_api
 from app.web.channels import Channel
 from app.web.deps import ApiError, api_error_handler
+from app.web.static import HTML_PAGES, static_router
 
 # 3 maximal scripts (65_536 B each, JSON-escaped) plus the rest of POST /api/mcps must fit.
 MAX_BODY_BYTES = 524_288
@@ -135,7 +137,7 @@ class BodySizeLimit:
                 raise
 
 
-def create_app(channel: Channel, services: Services) -> FastAPI:
+def create_app(channel: Channel, services: Services, static_dir: Path | None = None) -> FastAPI:
     app = FastAPI(title=f"MCP Monitor ({channel})", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.channel = channel
     app.state.services = services
@@ -152,4 +154,8 @@ def create_app(channel: Channel, services: Services) -> FastAPI:
         app.add_middleware(LocalHostGuard)
         app.include_router(local_api.router)
         app.include_router(mcp_local.router)
+    if static_dir is not None and (static_dir / HTML_PAGES["board"]).is_file():
+        # After the API routers, so an API path can never be shadowed by a page. /notice is a
+        # Local-channel page only.
+        app.include_router(static_router(static_dir, notice=channel == "local"))
     return app

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import signal
+import sys
 import threading
 from collections.abc import Iterator, Sequence
 from pathlib import Path
@@ -20,13 +21,14 @@ def server_configs(
     external_app: FastAPI,
     local_port: int = 8700,
     external_port: int = 8701,
+    external_host: str = "0.0.0.0",
 ) -> list[uvicorn.Config]:
     # proxy_headers=False: no reverse proxy by design, so X-Forwarded-For must never
     # override request.client.host (audit ip, OTP per-IP limit).
     common: dict[str, Any] = {"log_level": "info", "proxy_headers": False, "timeout_graceful_shutdown": 10}
     return [
         uvicorn.Config(local_app, host="127.0.0.1", port=local_port, **common),
-        uvicorn.Config(external_app, host="0.0.0.0", port=external_port, **common),
+        uvicorn.Config(external_app, host=external_host, port=external_port, **common),
     ]
 
 
@@ -67,17 +69,30 @@ def _stop_on_signals(servers: Sequence[uvicorn.Server]) -> Iterator[None]:
             signal.signal(s, h)
 
 
-async def serve(root: Path, local_port: int = 8700, external_port: int = 8701) -> None:
-    services = build_services(root)
+async def serve(
+    root: Path,
+    local_port: int = 8700,
+    external_port: int = 8701,
+    *,
+    external_host: str = "0.0.0.0",
+    static_dir: Path | None = None,
+    dev_otp_code: str | None = None,
+) -> None:
+    if dev_otp_code is not None:
+        print("WARNING: dev OTP code enabled", file=sys.stderr, flush=True)
+    if static_dir is not None and not (static_dir / "board.html").is_file():
+        print(f"WARNING: no built web app in {static_dir}; serving the API only", file=sys.stderr, flush=True)
+    services = build_services(root, dev_fixed_code=dev_otp_code)
     await services.log.start()
     try:
         await services.monitor.start()
         try:
             configs = server_configs(
-                create_app("local", services),
-                create_app("external", services),
+                create_app("local", services, static_dir),
+                create_app("external", services, static_dir),
                 local_port,
                 external_port,
+                external_host,
             )
             servers = [_Server(cfg) for cfg in configs]
             with _stop_on_signals(servers):
