@@ -54,6 +54,13 @@ export function formatDuration(ms: number | null): string {
   return s > 0 ? `${minutes(m)} ${seconds(s)}` : minutes(m);
 }
 
+/** Whole seconds for clocks that tick once a second: "42초", "2분 5초", "1시간 2분"; "—" when unknown. */
+export function formatSeconds(sec: number | null): string {
+  if (sec === null) return "—";
+  const s = Math.max(0, Math.floor(sec));
+  return s < 60 ? copy.common.units.seconds(s) : formatDuration(s * 1000);
+}
+
 const BYTE_UNITS = ["KB", "MB", "GB", "TB"] as const;
 
 /** Binary units with one decimal: "12.3 MB"; whole bytes below 1 KB. */

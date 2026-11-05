@@ -42,6 +42,9 @@ export default defineConfig({
   build: {
     manifest: true,
     sourcemap: false,
+    // CSP is font-src 'self': a small font subset inlined as data: would be blocked, so fonts are
+    // always emitted as files (other small assets keep Vite's default inlining)
+    assetsInlineLimit: (file) => (/\.(woff2?|ttf|otf)$/.test(file) ? false : undefined),
     target: ["chrome123", "edge123", "firefox128", "safari17.5"],
     rollupOptions: {
       input: { board: "board.html", admin: "admin.html", notice: "notice.html" },

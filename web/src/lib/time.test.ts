@@ -1,4 +1,4 @@
-import { formatBytes, formatDuration, formatKst, formatKstShort, relativeKo } from "./time";
+import { formatBytes, formatDuration, formatSeconds, formatKst, formatKstShort, relativeKo } from "./time";
 
 it("formats in KST regardless of the host time zone", () => {
   expect(formatKst("2026-11-04T05:03:22.418+00:00")).toBe("2026-11-04 14:03:22");
@@ -37,4 +37,13 @@ it("covers duration and byte edges", () => {
   expect(formatBytes(1023)).toBe("1023 B");
   expect(formatBytes(1536)).toBe("1.5 KB");
   expect(formatBytes(5 * 1024 ** 3)).toBe("5.0 GB");
+});
+
+it("formats ticking seconds without decimals", () => {
+  expect(formatSeconds(null)).toBe("—");
+  expect(formatSeconds(0)).toBe("0초");
+  expect(formatSeconds(59.9)).toBe("59초");
+  expect(formatSeconds(65)).toBe("1분 5초");
+  expect(formatSeconds(3725)).toBe("1시간 2분");
+  expect(formatSeconds(-3)).toBe("0초"); // a client clock slightly behind the server never shows a negative age
 });

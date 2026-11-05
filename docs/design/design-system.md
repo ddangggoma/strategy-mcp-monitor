@@ -30,7 +30,7 @@ Task 6 산출물(`design:design-system` 스킬). 방향과 근거는 `docs/desig
 | `--color-border` | steel-200 `oklch(0.9 0.009 255)` | steel-800 `oklch(0.31 0.015 255)` | 장식 헤어라인(묶기). 3:1 대상 아님 |
 | `--color-border-strong` | steel-500 `oklch(0.6 0.018 255)` | steel-500 | 입력칸·outline 버튼·스위치 트랙(3:1) |
 | `--color-fg` | steel-950 | steel-50 | 본문 |
-| `--color-fg-muted` | steel-600 `oklch(0.49 0.018 255)` | steel-400 `oklch(0.72 0.016 255)` | 보조 글자, placeholder, 표 머리 |
+| `--color-fg-muted` | steel-600 `oklch(0.49 0.018 255)` | steel-400 `oklch(0.735 0.016 255)` | 보조 글자, placeholder, 표 머리. 보드 문제 카드(soft 채움) 위에서도 4.5:1 (Task 8에서 0.72 → 0.735) |
 | `--color-accent` | steel-900 | steel-100 `oklch(0.945 0.006 255)` | 주 버튼·켜진 스위치(반전 채움) |
 | `--color-accent-fg` | steel-0 | steel-950 | accent 위 글자 |
 | `--color-hover` | `color-mix(in oklch, fg 7%, transparent)` | 같음 | hover 채움 |

@@ -31,7 +31,7 @@ export function item(id: number, state: McpState, name = "mcp" + id): BoardItem 
     issue: healthy ? null : "PROCESS_DOWN",
     latency_ms: healthy ? 12 : null,
     sparkline: healthy ? [10, 12, 11, 13, 12] : [10, 12, null, null, null],
-    uptime_24h: healthy ? 100 : 92.5,
+    uptime_24h: healthy ? 1 : 0.925, // a ratio (server History.uptime: ok / total), not a percent
     last_check_at: NOW,
     action_due_at: null,
     action_in_sec: null,

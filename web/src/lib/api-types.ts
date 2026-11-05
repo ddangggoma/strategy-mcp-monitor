@@ -32,6 +32,7 @@ export interface BoardItem {
   issue: Issue | null;
   latency_ms: number | null;
   sparkline: (number | null)[];
+  /** Share of ok checks in the last 24 h, 0–1 (not a percent); null without checks. */
   uptime_24h: number | null;
   last_check_at: string | null;
   action_due_at: string | null;

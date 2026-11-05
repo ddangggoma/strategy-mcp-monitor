@@ -1,0 +1,36 @@
+/* Countdown gauge: one linear scaleX animation from the start ratio to empty (U25, transform only).
+   linear is right here: the bar is a clock, its length is time. */
+@property --gauge-from {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+
+@layer components {
+  .countdown-gauge {
+    background-color: var(--color-state-suspect);
+    transform-origin: left center;
+    transform: scaleX(0);
+    animation-name: countdown-drain;
+    animation-timing-function: linear;
+    animation-fill-mode: both;
+    will-change: transform;
+  }
+
+  @keyframes countdown-drain {
+    from {
+      transform: scaleX(var(--gauge-from));
+    }
+    to {
+      transform: scaleX(0);
+    }
+  }
+
+  /* hold at the start ratio; the number beside it keeps counting */
+  @media (prefers-reduced-motion: reduce) {
+    .countdown-gauge {
+      animation: none;
+      transform: scaleX(var(--gauge-from));
+    }
+  }
+}

@@ -73,3 +73,14 @@ it("composites like a browser: half-transparent black over white is mid grey", (
 it("rejects unknown tokens instead of measuring nothing", () => {
   expect(() => contrastPairs("dark", "no-such-token", "bg")).toThrow(/no-such-token/);
 });
+
+// Board problem cards (McpCard.css) paint state-*-soft over the surface and keep ordinary text,
+// muted labels and the state-colored sparkline/gauge on top of it.
+it.each(THEMES)("text and state strokes stay readable on a soft problem card in %s", (theme) => {
+  for (const s of ["suspect", "action", "recovering", "failed"]) {
+    const soft = `state-${s}-soft`;
+    expect(contrastPairs(theme, "fg", soft, "surface"), `fg on ${soft}`).toBeGreaterThanOrEqual(4.5);
+    expect(contrastPairs(theme, "fg-muted", soft, "surface"), `fg-muted on ${soft}`).toBeGreaterThanOrEqual(4.5);
+    expect(contrastPairs(theme, `state-${s}`, soft, "surface"), `state-${s} on ${soft}`).toBeGreaterThanOrEqual(3);
+  }
+});
