@@ -24,13 +24,18 @@ def test_default_is_version_zero(db, clock):
 
 
 def test_default_text_is_the_built_in_notice():
-    assert DEFAULT_NOTICE.title == "행동 감사 안내" and DEFAULT_NOTICE.button_text == "확인"
+    # Task 6 ux-copy wording; web/src/copy/ko.ts notice.builtIn mirrors it (checked by ko.test.ts)
+    assert DEFAULT_NOTICE.title == "원격 접속 행동 감사 안내" and DEFAULT_NOTICE.button_text == "확인"
     assert DEFAULT_NOTICE.body.splitlines() == [
-        "이 PC의 원격 접속 세션은 보안 감사를 위해 기록됩니다.",
+        "**이 원격 데스크톱 연결에서 하는 작업은 보안 감사를 위해 기록됩니다.**",
         "",
-        "- 접속 정보(사용자, 접속 IP, 시각)",
+        "기록하는 내용은 다음과 같습니다.",
+        "",
+        "- 접속 정보: 사용자, 접속한 PC 이름과 IP 주소, 연결 시각",
         "- 실행한 프로그램과 명령",
         "- 창 전환 기록",
+        "",
+        "이 안내는 연결할 때마다 표시됩니다. 확인을 누르면 작업을 계속할 수 있습니다.",
     ]
 
 

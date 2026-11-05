@@ -1,4 +1,5 @@
 import { fileURLToPath } from "node:url";
+import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 import { moduleMap } from "./scripts/vite-module-map.ts";
@@ -29,7 +30,7 @@ function spaFallback(): Plugin {
 
 export default defineConfig({
   base: "/",
-  plugins: [react(), spaFallback(), moduleMap()],
+  plugins: [react(), tailwindcss(), spaFallback(), moduleMap()],
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
