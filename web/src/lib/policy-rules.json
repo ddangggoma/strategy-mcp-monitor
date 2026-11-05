@@ -1,0 +1,19 @@
+{
+  "view_board": { "min_role": null, "local_only": false, "owner": "none" },
+  "view_mcp_history": { "min_role": "developer", "local_only": false, "owner": "none" },
+  "view_session_history": { "min_role": "developer", "local_only": false, "owner": "none" },
+  "view_logs": { "min_role": "developer", "local_only": false, "owner": "none" },
+  "export_logs": { "min_role": "developer", "local_only": false, "owner": "none" },
+  "view_audit": { "min_role": "developer", "local_only": false, "owner": "none" },
+  "edit_mcp_settings": { "min_role": "developer", "local_only": false, "owner": "none" },
+  "mcp_manual_action": { "min_role": "developer", "local_only": false, "owner": "none" },
+  "create_mcp": { "min_role": "developer", "local_only": true, "owner": "none" },
+  "delete_mcp": { "min_role": "developer", "local_only": true, "owner": "developer_only" },
+  "view_scripts": { "min_role": "developer", "local_only": true, "owner": "none" },
+  "edit_scripts": { "min_role": "developer", "local_only": true, "owner": "always" },
+  "transfer_ownership": { "min_role": "admin", "local_only": true, "owner": "none" },
+  "manage_users": { "min_role": "admin", "local_only": true, "owner": "none" },
+  "edit_global_settings": { "min_role": "admin", "local_only": true, "owner": "none" },
+  "edit_retention": { "min_role": "admin", "local_only": true, "owner": "none" },
+  "edit_notice": { "min_role": "admin", "local_only": true, "owner": "none" }
+}

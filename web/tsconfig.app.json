@@ -11,6 +11,7 @@
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
     "noEmit": true,
+    "resolveJsonModule": true,
     "jsx": "react-jsx",
     "strict": true,
     "noUncheckedIndexedAccess": true,
@@ -19,6 +20,6 @@
     "noFallthroughCasesInSwitch": true,
     "paths": { "@/*": ["./src/*"] }
   },
-  "include": ["src", "tests/setup.ts"],
+  "include": ["src", "tests"],
   "exclude": ["tests/budget"]
 }

@@ -71,6 +71,7 @@ export const copy = {
       ms: (n: number | string) => `${n}ms`,
       seconds: (n: number | string) => `${n}초`,
       minutes: (n: number | string) => `${n}분`,
+      hours: (n: number | string) => `${n}시간`,
       days: (n: number | string) => `${n}일`,
       percent: (n: number | string) => `${n}%`,
     },
