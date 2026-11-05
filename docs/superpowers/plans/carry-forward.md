@@ -77,3 +77,27 @@ Every later plan reads this file before it is written and checks off the items i
 
 ### Later (real OTP provider)
 - [ ] A `provider.send` failure distinguishes registered emails (enumeration), and sending inline creates a timing difference. Move sending off the request path, and make failures behave the same either way.
+
+## From the Plan 2 whole-plan review
+
+### Plan 3 (Web UI)
+- [ ] An SSE stream's auth level is fixed at connect time, so a logout does not cut a live stream. The UI should reconnect the stream on login and logout. The server could also re-check the auth level periodically.
+- [ ] A client that loses the race for the last stream slot gets an empty 200 instead of 503. Make the UI's EventSource reconnect with backoff.
+- [ ] The per-IP stream cap is 5, and on the local channel every browser on the PC shares 127.0.0.1. Keep each tab to one stream, and consider raising the cap for loopback.
+- [ ] MCP detail always includes `config_error` (true/false), and an invalid row has `live: null`. Show an "invalid config — rename or delete" state.
+- [ ] MCP names are now allowlisted: Unicode letters and digits, space, `.`, `_`, `-`. Explain this in the form's validation text.
+- [ ] Manual action returns 202 `{run_id}`, and the result arrives as an SSE `action` event that only authenticated users receive. A concurrent request returns 409 `action_in_progress`.
+
+### Plan 5 (log viewer, retention, packaging)
+- [ ] FAILED status and the auto-action budget reset on service restart. Decide whether to persist them.
+- [ ] The runner path where a timeout kill fails is untested. The next run can start while the old script is still alive. Log it, and add a test.
+- [ ] BodySizeLimit: log the exception it swallows after rejecting a request, and fill the test gaps (bad_host combined with oversize, a single 413, websocket passthrough).
+- [ ] The script store calls `os.replace` before COMMIT, so a COMMIT failure leaves the file changed. Use the run-time hash check, or reorder.
+- [ ] At loop shutdown, the script is killed but its children are not. The "Task was destroyed but it is pending" message is cosmetic.
+- [ ] Add retention for the MCP action and transition tables.
+- [ ] If the defensive `_apply` refusal ever fires, it is settled as an error that consumes a budget slot. It is unreachable today. Consider an engine-side cancel.
+
+### Later
+- [ ] E501 is not enforced (about 80 lines over 100 columns), and ruff is pinned to `E4,E7,E9,F,I,UP,B`.
+- [ ] Add a unit test for the `--open-meteo` wiring.
+- [ ] `MCP_ACTOR` (the user email) is not allowlisted for script env vars. Only an admin registers emails, but consider tightening email validation.
