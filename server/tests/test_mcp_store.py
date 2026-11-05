@@ -342,10 +342,13 @@ def test_scripts_table_constraints(db, env):
         db.execute("INSERT INTO mcp_scripts(mcp_id, kind, ext, sha256, version, updated_at) VALUES (999, 'start', '.ps1', 'h', 1, 't')")
 
 
-# ---- I1: shell metacharacters and control characters (MCP_NAME reaches cmd as %MCP_NAME%) ----
+# ---- I1: name allowlist (MCP_NAME reaches cmd as %MCP_NAME%, expanded before parsing) ----
 
 NAME_FORBIDDEN = [*map(chr, range(0x00, 0x20)), "\x7f", *map(chr, range(0x80, 0xA0)),
-                  "%", "^", "&", "|", "<", ">", '"', "!", "`"]
+                  "%", "^", "&", "|", "<", ">", '"', "!", "`",
+                  # parentheses close/open a cmd block; the rest are cmd/PowerShell separators or specials
+                  "(", ")", ",", ";", "=", "'", "@", "$", "#", "*", "?", "[", "]", "{", "}", "~", "/", "\\",
+                  ":", "+", " ", "　", " ", "​", "﻿", "☃", "\U0001f600"]
 
 
 @pytest.mark.parametrize("ch", NAME_FORBIDDEN, ids=lambda c: f"U+{ord(c):04X}")
@@ -364,7 +367,15 @@ def test_expected_process_name_rejects_control_characters(ch):
         cfg(expected_process_name=f"python{ch}.exe")
 
 
-@pytest.mark.parametrize("name", ["서울 날씨", "calc (v2)", "my_mcp-1.0", "a.b", "Ünïcödé ☀"])
+@pytest.mark.parametrize("name", [
+    "calc (v2)", "a ) else ( echo X", "a)b", "a(b", "a,b", "a;b", "a=b", "a'b", "a@b", "a\tb",
+])
+def test_name_rejects_non_allowlisted_text(name):
+    with pytest.raises(ValidationError):
+        cfg(name=name)
+
+
+@pytest.mark.parametrize("name", ["서울 날씨", "calc-v2.1_test", "my_mcp-1.0", "a.b", "Ünïcödé", "x" * 64, "날씨 2"])
 def test_name_accepts_plain_text(name):
     assert cfg(name=name).name == name
 
@@ -376,4 +387,9 @@ def test_injected_name_cannot_be_stored(env):
         store.create(cfg(name="calc & echo X", port=9200), owner.id)
     with pytest.raises(ValidationError):
         store.update(m.id, {"name": "calc & echo X"})
+    for bad in ("a ) else ( echo X", "a)b"):
+        with pytest.raises(ValidationError):
+            store.create(cfg(name=bad, port=9201), owner.id)
+        with pytest.raises(ValidationError):
+            store.update(m.id, {"name": bad})
     assert [x.config.name for x in store.list()] == ["calc"]

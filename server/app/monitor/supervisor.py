@@ -439,10 +439,15 @@ class Monitor:
             result = _result("error", "missing")
         else:
             pid = self._pids.get(mcp_id)
-            # Script env contract: only validated values. cmd expands %VAR% before parsing a line,
-            # so MCP_NAME never holds control or shell metacharacters (McpConfig rejects them),
-            # MCP_HOST is a hostname/IP literal and the rest are fixed values. MCP_ACTOR is a
-            # registered email (registration is localhost-admin only).
+            # Script env contract (cmd expands %VAR% before it parses a line or a parenthesized
+            # block, so these values must carry no cmd syntax):
+            # - MCP_NAME: only Unicode letters/digits, space, "." "_" "-" (McpConfig allowlist;
+            #   1-64 chars, no leading/trailing space).
+            # - MCP_HOST: a lowercase hostname, IPv4 or canonical IPv6 literal (may contain ":").
+            # - MCP_ID, MCP_PORT, MCP_PID: decimal digits (MCP_PID may be empty).
+            # - MCP_REASON, MCP_TRIGGER: fixed identifiers (issue code or "manual"; auto/manual/boot).
+            # - MCP_ACTOR: "system" or a registered user's email. Not restricted by this allowlist
+            #   (users/store.py permits "&" in emails); only a localhost admin can register users.
             env = {
                 "MCP_ID": str(mcp_id),
                 "MCP_NAME": config.name,

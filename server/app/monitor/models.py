@@ -53,17 +53,18 @@ def _normalize_host(value: str) -> str:
     raise ValueError("host must be a hostname, IPv4 or IPv6 address")
 
 
-# C0 controls, DEL and C1 controls: never valid in a name a script or a log line receives.
+# C0 controls, DEL and C1 controls: never valid in a process name a log line receives.
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
-# The name reaches scripts as MCP_NAME. cmd expands %MCP_NAME% before it parses the line, so these
-# characters would inject commands into a .bat/.cmd (& | < > ^ " and % ! for nested expansion);
-# the backtick is PowerShell's escape character.
-_NAME_FORBIDDEN_RE = re.compile(r"[\x00-\x1f\x7f-\x9f%^&|<>\"!`]")
+# The name reaches scripts as MCP_NAME, and cmd expands %MCP_NAME% before it parses a line or a
+# parenthesized block, so any cmd syntax character in it ( & | < > ^ " % ! ( ) , ; = ...) injects
+# commands. An allowlist, not a blocklist: Unicode letters and digits (str.isalnum, which covers
+# Korean), space, "." "_" "-". Leading/trailing spaces are already stripped.
+_NAME_EXTRA = frozenset(" ._-")
 
 
 def _check_name(value: str) -> str:
-    if _NAME_FORBIDDEN_RE.search(value):
-        raise ValueError('name must not contain control characters or any of % ^ & | < > " ! `')
+    if not all(c.isalnum() or c in _NAME_EXTRA for c in value):
+        raise ValueError("name may contain only letters, digits, spaces and . _ -")
     return value
 
 

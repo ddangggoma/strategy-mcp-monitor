@@ -532,21 +532,31 @@ async def test_script_hash_captured_inside_the_slot(services):
 
 @win_only
 async def test_real_bat_gets_validated_name(services):
-    """I1 regression: a Korean name with spaces reaches a .bat intact; an injected one cannot be stored."""
+    """I1 regression: an allowed name (Korean, spaces) reaches a .bat intact, also inside a
+    parenthesized block; the names that would inject (``&``, ``) else (``) cannot be stored."""
     from pydantic import ValidationError
 
     from app.monitor.runner import ScriptRunner
     try: "서울 날씨".encode("oem")
     except UnicodeEncodeError: pytest.skip("OEM code page cannot encode Korean")
     owner = make_user(services, "o@x.com")
-    scripts = {"start": ScriptUpload(".bat", "@echo off\necho [%MCP_NAME%]\nexit /b 0"), "stop": ScriptUpload(".bat", "exit /b 0")}
+    bat = ('@echo off\necho [%MCP_NAME%]\nif exist "nonexistent" (\necho never %MCP_NAME%\n)\n'
+           'if not exist "nonexistent" (\necho block %MCP_NAME%\n)\nexit /b 0')
+    scripts = {"start": ScriptUpload(".bat", bat), "stop": ScriptUpload(".bat", "exit /b 0")}
     m = seed_mcp(services, owner, scripts=scripts, name="서울 날씨"); mon = services.monitor
-    mon._runner = ScriptRunner()
+    runner = mon._runner = ScriptRunner()
     mon.manual_action(m.id, "start", owner); await mon.wait_idle()
     a = services.history.actions(m.id)[0]
-    assert (a.result.status, a.result.stdout.strip()) == ("ok", "[서울 날씨]")
-    with pytest.raises(ValidationError):
-        services.mcps.update(m.id, {"name": "calc & echo INJECTED"})
+    assert (a.result.status, a.result.stdout.splitlines()) == ("ok", ["[서울 날씨]", "block 서울 날씨"])
+    # The script really is injectable by these names (run directly, bypassing the model) ...
+    info = services.scripts.get(m.id, "start")
+    for injected in ("calc & echo INJECTED", "a ) else ( echo INJECTED"):
+        r = await runner.run(info.path, expected_sha256=info.sha256, timeout_sec=10,
+                             env={"MCP_NAME": injected}, lock_key=m.id)
+        assert "INJECTED" in r.stdout.replace("echo INJECTED", ""), injected
+        # ... but no such name can be stored, so MCP_NAME never carries one.
+        with pytest.raises(ValidationError):
+            services.mcps.update(m.id, {"name": injected})
     assert services.mcps.get(m.id).config.name == "서울 날씨"
 
 

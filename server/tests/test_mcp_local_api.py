@@ -362,10 +362,11 @@ async def test_denied_mutation_audited_without_effect(local_client, services):
 async def test_create_rejects_shell_metacharacters_in_name(local_client, services):
     """I1: an injected name is refused at create time and nothing is stored."""
     _, h = await as_user(local_client, services, "dev@x.com")
-    r = await local_client.post("/api/mcps", json={**BODY, "name": "calc & echo X"}, headers=h)
-    assert (r.status_code, r.json()) == (422, {"error": "validation"})
+    for bad in ("calc & echo X", "a ) else ( echo X"):
+        r = await local_client.post("/api/mcps", json={**BODY, "name": bad}, headers=h)
+        assert (r.status_code, r.json()) == (422, {"error": "validation"}), bad
     assert services.mcps.list() == [] and not list(services.paths.scripts_dir.iterdir())
-    assert [e["target"]["error"] for e in await admin_events(services, "mcp_create")] == ["validation"]
+    assert [e["target"]["error"] for e in await admin_events(services, "mcp_create")] == ["validation"] * 2
 
 
 def _failing_replace(*_args, **_kwargs):
