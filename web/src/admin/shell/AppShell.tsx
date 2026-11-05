@@ -1,12 +1,15 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { Outlet, useRouter } from "@tanstack/react-router";
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TopBar } from "@/components/app/TopBar";
+import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
 import { copy } from "@/copy/ko";
-import { logout } from "@/lib/endpoints";
+import { ActionTracker } from "@/lib/action-tracker";
+import { logout, mcpHistory } from "@/lib/endpoints";
 import { clearSession, refreshSession, session, useSession } from "@/lib/session";
-import { useLive, useStreamStatus } from "../live";
+import { LiveProvider, useLive, useStreamStatus } from "../live";
+import { sonnerActionToasts } from "../mcps/action-toasts";
 import { Nav } from "./Nav";
 
 const loadPalette = () => import("./CommandPalette");
@@ -30,7 +33,11 @@ export function AppShell() {
   const me = useSession();
   const router = useRouter();
   const qc = useQueryClient();
-  const { store, stream } = useLive();
+  const live = useLive();
+  const { store, stream } = live;
+  // one tracker per logged-in tab: toasts for the manual actions started here (U29)
+  const [tracker] = useState(() => new ActionTracker({ toasts: sonnerActionToasts(), fetchHistory: (id) => mcpHistory(id, 1) }));
+  const shellLive = useMemo(() => ({ ...live, tracker }), [live, tracker]);
   const status = useStreamStatus(store);
   const [palette, setPalette] = useState({ open: false, mounted: false });
   const leaving = useRef(false);
@@ -52,6 +59,19 @@ export function AppShell() {
       if (session.onUnauthorized === handler) session.onUnauthorized = null;
     };
   }, [router, stream]);
+
+  useEffect(() => {
+    const offAction = store.onAction(tracker.handle);
+    const offReconnected = store.onReconnected(() => void tracker.reconcile()); // events may have been missed
+    return () => {
+      offAction();
+      offReconnected();
+      tracker.dispose();
+      // Sonner keeps toasts globally and replays them to the next Toaster: a pending toast nobody
+      // tracks any more would spin forever after logging in again
+      toast.dismiss();
+    };
+  }, [store, tracker]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -80,7 +100,7 @@ export function AppShell() {
   if (!me?.user) return null; // between a 401 and the login page
 
   return (
-    <>
+    <LiveProvider value={shellLive}>
       <a
         href="#main"
         className="sr-only rounded-md bg-accent px-3 py-2 text-sm font-medium text-accent-fg focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-(--z-tooltip)"
@@ -100,6 +120,6 @@ export function AppShell() {
         </Suspense>
       ) : null}
       <Toaster position="bottom-right" />
-    </>
+    </LiveProvider>
   );
 }

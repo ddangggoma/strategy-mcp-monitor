@@ -220,6 +220,12 @@ export const copy = {
     loginFailures: "로그인 실패 추이",
     bypassEvents: "우회 탐지 이벤트",
     viewAll: "모두 보기",
+    summaryAll: "전체",
+    noMcp: "등록된 MCP가 없어요.",
+    activityError: "최근 기록을 불러오지 못했어요. 새로 고친 뒤 다시 시도하세요.",
+    columns: { at: "시각", mcp: "MCP", event: "내용" },
+    /** "자동 다시 시작": who started it, then what ran. */
+    actionLine: (trigger: string, kind: ActionKind) => `${trigger} ${actionKind[kind]}`,
   },
 
   mcp: {
@@ -244,6 +250,27 @@ export const copy = {
     tabs: { settings: "설정", scripts: "스크립트", history: "이력", latency: "지연 차트" },
     noHistory: "선택한 기간에 기록된 이슈나 조치가 없어요.",
     hostPort: "호스트:포트",
+    listLabel: "MCP 목록",
+    listEmpty: "등록된 MCP가 없어요. MCP를 등록하면 여기서 상태를 보고 직접 시작하거나 종료할 수 있어요.",
+    listError: "MCP 목록을 불러오지 못했어요. 새로 고친 뒤 다시 시도하세요.",
+    filterLabel: "상태로 거르기",
+    filterAll: "전체",
+    filterEmpty: (state: string) => `지금 ${state} 상태인 MCP가 없어요.`,
+    clearFilter: "모든 MCP 보기",
+    configErrorBadge: "설정 오류",
+    noLive: "상태 기록 없음",
+    columns: {
+      state: "상태",
+      name: "이름",
+      hostPort: "호스트:포트",
+      latency: "지연(ms)",
+      uptime: "24시간 가동률",
+      owner: "소유자",
+      actions: "조치",
+    },
+    actionsLabel: (name: string) => `${name} 조치`,
+    triggers: { auto: "자동", manual: "수동", boot: "부팅 시" },
+    scriptStatus: { ok: "성공", failed: "실패", timeout: "시간 초과", error: "실행 오류" },
     probes: { mcp_ping: "MCP ping", tcp: "TCP 연결", icmp: "ICMP ping" },
     fields: {
       name: "이름",
@@ -407,6 +434,11 @@ export const copy = {
     failed: (name: string, kind: ActionKind) => `${name} ${actionKind[kind]} 실패`,
     unknown: (name: string) => `${name} 조치 결과를 확인하지 못했어요. 이력에서 확인하세요.`,
     viewHistory: "이력 보기",
+    restartStep: "종료 단계를 마쳤어요. 이어서 시작하는 중이에요.",
+    exitAndDuration: (code: number | string, duration: string) => `종료 코드 ${code}, ${duration} 걸렸어요.`,
+    duration: (duration: string) => `${duration} 걸렸어요.`,
+    timedOut: (duration: string) => `제한 시간을 넘겨 중단했어요. ${duration} 걸렸어요.`,
+    runError: "스크립트를 실행하지 못했어요. 이력에서 원인을 확인하세요.",
   },
 } as const;
 

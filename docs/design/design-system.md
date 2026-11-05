@@ -135,7 +135,9 @@ Tailwind 기본 전환(`transition-colors` 등)도 `--motion-fast` + `--ease-hov
 | `app/TopBar`, `ChannelBadge`, `StreamIndicator`, `AccountMenu` | 8·9 | `data-topbar`(스크롤 그림자는 base.css) |
 | `admin/shell/AppShell`, `Nav`, `CommandPalette`, `PlannedFeature`, `app/WithReason`(`side` 선택) | 9 | 비활성 + 이유(U26). `LocalOnlyPage`는 Task 13 |
 | `admin/auth/OtpInput`, `ResendRing` | 9 | 6칸, 흔들림 피드백, 원형 타이머(U25 예외). docs/design/screens/auth-shell.md |
-| `mcp/McpActions`, `DeleteMcpDialog`, `TransferOwnerDialog`, 차트 | 10·11 | 표에는 애니메이션 없음 |
+| `admin/mcps/McpActions` | **10(완료)** | md = 아이콘 + 글자 버튼, sm(표 행) = 28px 아이콘 버튼 + `aria-label`·툴팁. 비활성 순서 권한 → running → config_error. 종료는 AlertDialog. docs/design/screens/mcp.md |
+| `admin/mcps/McpListPage` 표, `dashboard/DashboardPage` | **10(완료)** | TanStack Table v9, `aria-sort`, 이름 칸 `th scope=row`, 조치 열 sticky, 포인터가 본문에 있으면 행 순서 고정. 표에는 애니메이션 없음 |
+| `DeleteMcpDialog`, `TransferOwnerDialog`, 차트 | 11 | |
 | `scripts/ScriptEditor`, `TextDiff` | 12 | CodeMirror 지연 로드, 읽기 전용은 `<pre>`(sunken) |
 | `notice/NoticeDialog` | 14 | `@starting-style` 진입(360ms), standalone/preview 같은 클래스 |
 

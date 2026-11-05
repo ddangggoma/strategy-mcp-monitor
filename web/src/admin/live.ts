@@ -3,6 +3,7 @@
 // without refetching.
 import type { QueryClient } from "@tanstack/react-query";
 import { createContext, createElement, useContext, useSyncExternalStore, type ReactNode } from "react";
+import type { ActionTracker } from "@/lib/action-tracker";
 import type { BoardItem, McpDetail } from "@/lib/api-types";
 import type { BoardState, BoardStore } from "@/lib/board-store";
 import type { BoardStreamClient, StreamStatus } from "@/lib/board-stream";
@@ -11,8 +12,8 @@ import { qk } from "./query-keys";
 export interface LiveValue {
   store: BoardStore;
   stream: BoardStreamClient;
-  /** Manual-action toasts (Task 10 creates the ActionTracker in AppShell); null until then. */
-  tracker: null;
+  /** Manual-action toasts for this tab: AppShell creates the tracker; null outside the logged-in shell. */
+  tracker: ActionTracker | null;
 }
 
 const LiveContext = createContext<LiveValue | null>(null);
