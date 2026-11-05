@@ -1,8 +1,8 @@
 import "@/styles/app.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { copy } from "@/copy/ko";
 import { applyStoredTheme } from "@/lib/theme";
+import { NoticeApp } from "./NoticeApp";
 
 applyStoredTheme(); // before the first paint of React content; no inline <head> script (CSP)
 
@@ -11,6 +11,6 @@ if (!root) throw new Error("#root not found");
 
 createRoot(root).render(
   <StrictMode>
-    <h1>{copy.notice.title}</h1>
+    <NoticeApp />
   </StrictMode>,
 );
