@@ -15,6 +15,7 @@ from app.services import Services
 from app.web import (
     agent_api,
     local_api,
+    logs_api,
     mcp_local,
     mcp_shared,
     notice_api,
@@ -151,6 +152,7 @@ def create_app(channel: Channel, services: Services, static_dir: Path | None = N
     app = FastAPI(title=f"MCP Monitor ({channel})", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.channel = channel
     app.state.services = services
+    app.state.view_audit_throttle = logs_api.ViewAuditThrottle(services.clock)
     # Starlette types a handler as taking `Exception`; it dispatches by exception class, so the narrower
     # parameter types below are safe (hence the arg-type ignores).
     app.add_exception_handler(ApiError, api_error_handler)  # type: ignore[arg-type]
@@ -161,6 +163,7 @@ def create_app(channel: Channel, services: Services, static_dir: Path | None = N
     app.include_router(mcp_shared.router)
     app.include_router(sessions_api.router)
     app.include_router(tamper_api.router)
+    app.include_router(logs_api.router)
     app.add_middleware(BodySizeLimit)
     if channel == "local":
         app.add_middleware(agent_api.AgentProofMiddleware)

@@ -124,6 +124,7 @@ class LogRow:
     client_ip: str | None
     outcome: str | None
     data: dict[str, Any]
+    raw: str = field(default="", repr=False, compare=False)  # the line as written (JSONL export)
 
 
 @dataclass(frozen=True)
@@ -260,7 +261,7 @@ def page_queries(f: LogFilter, cursor: Cursor | None, limit: int) -> list[tuple[
 
 def _log_row(r: Sequence[Any]) -> LogRow:
     return LogRow(id=r[0], ts_ms=r[1], cat=r[2], event=r[3], user=r[4], session_id=r[5], client_ip=r[6],
-                  outcome=r[7], data=json.loads(r[8]))
+                  outcome=r[7], data=json.loads(r[8]), raw=r[8])
 
 
 def page(conn: sqlite3.Connection, f: LogFilter, cursor: Cursor | None, limit: int) -> Page:

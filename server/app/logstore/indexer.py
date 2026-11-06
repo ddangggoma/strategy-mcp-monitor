@@ -73,6 +73,25 @@ def _summary(conn: sqlite3.Connection) -> IndexSummary:
     return IndexSummary(int(rows), oldest, newest)
 
 
+QUERY_SLOTS = 4
+
+
+async def _outlive_cancel[T](fut: asyncio.Future[T]) -> T:
+    """Await a worker-thread future; when the caller is cancelled, wait until the thread is done (it
+    cannot be interrupted) and then re-raise, so whatever the caller holds is held until then."""
+    try:
+        return await asyncio.shield(fut)
+    except asyncio.CancelledError:
+        while not fut.done():
+            try:
+                await asyncio.wait({fut})
+            except asyncio.CancelledError:
+                continue
+        if not fut.cancelled():
+            fut.exception()  # retrieved: the caller's cancellation wins
+        raise
+
+
 class _Slot:
     """A thread's reader connection and how many calls are using it right now."""
 
@@ -299,6 +318,7 @@ class LogIndex:
         self._backlog_budget = backlog_lines_per_cycle
         self._conn: sqlite3.Connection | None = None
         self._lock = asyncio.Lock()  # run_exclusive: one writer at a time
+        self.query_slots = asyncio.Semaphore(QUERY_SLOTS)  # API reads running at once (see query())
         self._cycle_lock = asyncio.Lock()  # index_once: one cycle at a time
         self._inflight: asyncio.Future[object] | None = None
         self._wake = asyncio.Event()
@@ -400,17 +420,14 @@ class LogIndex:
                 raise RuntimeError("the log index is not open")
             fut: asyncio.Future[T] = asyncio.ensure_future(asyncio.to_thread(fn, conn))
             self._inflight = fut  # type: ignore[assignment]
-            try:
-                return await asyncio.shield(fut)
-            except asyncio.CancelledError:
-                while not fut.done():
-                    try:
-                        await asyncio.wait({fut})
-                    except asyncio.CancelledError:
-                        continue
-                if not fut.cancelled():
-                    fut.exception()  # retrieved: the caller's cancellation wins
-                raise
+            return await _outlive_cancel(fut)
+
+    async def query[T, *Ts](self, fn: Callable[[*Ts], T], *args: *Ts) -> T:
+        """Run the blocking read ``fn(*args)`` (an :class:`IndexReader` method) in a worker thread
+        inside one of the ``query_slots``. A cancelled caller keeps its slot until the thread is done,
+        so at most ``QUERY_SLOTS`` reads ever run at once."""
+        async with self.query_slots:
+            return await _outlive_cancel(asyncio.ensure_future(asyncio.to_thread(fn, *args)))
 
     async def _run(self) -> None:
         while True:
