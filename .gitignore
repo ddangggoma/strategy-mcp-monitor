@@ -10,6 +10,7 @@ node_modules/
 dist/
 dummy-mcps/run/
 dummy-mcps/.pytest_cache/
+agent/.pytest_cache/
 
 # web
 web/test-results/
