@@ -80,7 +80,6 @@ async def otp_request(
     ip = client_ip(request)
     email = _audit_email(body.email)
     user_agent = request.headers.get("user-agent")
-    windows_user = await windows_user_of(request)
     ok = False
     rate_limited: OtpRateLimitError | None = None
     try:
@@ -91,18 +90,11 @@ async def otp_request(
     except OtpRateLimitError as exc:
         rate_limited = exc
     finally:
-        if rate_limited is not None:  # only the first 429 per (event, ip) per window is audited
-            services.audit.auth_rate_limited(
-                event="otp_request",
-                email=email,
-                channel=channel,
-                ip=ip,
-                user_agent=user_agent,
-                now=services.clock.now(),
-                scope=rate_limited.scope,
-                windows_user=windows_user,
-            )
-        else:
+        # Only the first 429 per throttle key per window is audited, and only an audited line pays
+        # for the Windows account lookup (a TCP-table scan, M1).
+        if rate_limited is None or services.audit.claim_rate_limited(
+            "otp_request", email, ip, services.clock.now(), rate_limited.scope
+        ):
             services.audit.auth(
                 event="otp_request",
                 email=email,
@@ -110,7 +102,7 @@ async def otp_request(
                 ip=ip,
                 user_agent=user_agent,
                 ok=ok,
-                windows_user=windows_user,
+                windows_user=await windows_user_of(request),
             )
     if rate_limited is not None:
         raise ApiError(429, "rate_limited", {"Retry-After": str(rate_limited.retry_after)})
@@ -128,9 +120,8 @@ async def otp_verify(
 ) -> dict[str, object]:
     ip = client_ip(request)
     user_agent = request.headers.get("user-agent")
-    windows_user = await windows_user_of(request)
 
-    def audit_login(email: str, ok: bool) -> None:
+    def audit_login(email: str, ok: bool, windows_user: str | None) -> None:
         services.audit.auth(
             event="login",
             email=email,
@@ -144,19 +135,13 @@ async def otp_verify(
     try:
         user = services.otp.verify(body.email, body.code, ip or "unknown")
     except OtpRateLimitError as exc:
-        services.audit.auth_rate_limited(
-            event="login",
-            email=_audit_email(body.email),
-            channel=channel,
-            ip=ip,
-            user_agent=user_agent,
-            now=services.clock.now(),
-            scope=exc.scope,
-            windows_user=windows_user,
-        )
+        email = _audit_email(body.email)
+        if services.audit.claim_rate_limited("login", email, ip, services.clock.now(), exc.scope):
+            audit_login(email, False, await windows_user_of(request))  # M1: audited 429s only
         raise ApiError(429, "rate_limited", {"Retry-After": str(exc.retry_after)}) from None
+    windows_user = await windows_user_of(request)
     if user is None:
-        audit_login(_audit_email(body.email), False)
+        audit_login(_audit_email(body.email), False, windows_user)
         raise ApiError(401, "login_required")
     try:
         old_sid = _live_sid(request)
@@ -165,9 +150,9 @@ async def otp_verify(
         services.users.touch_login(user.id)
         sid, csrf_token = services.sessions.create(user.id, channel, ip, user_agent)
     except Exception:
-        audit_login(user.email, False)
+        audit_login(user.email, False, windows_user)
         raise
-    audit_login(user.email, True)
+    audit_login(user.email, True, windows_user)
     response.set_cookie(session_cookie_name(channel), sid, **_cookie_args(request))
     return {"user": user_json(user), "csrf_token": csrf_token}
 

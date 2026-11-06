@@ -302,3 +302,16 @@ async def test_build_services_adds_the_sessions_component_only_with_a_source(tmp
     finally:
         await svc.log.stop()
         svc.db.close()
+
+
+async def test_reverse_dns_cache_drops_expired_entries_when_it_grows(clock):
+    """M18: the cache is bounded (expired entries go first, then the oldest)."""
+    rdns = ReverseDns(lambda ip: (f"h{ip}", [], [ip]), clock=clock, ttl_sec=60, max_entries=3)
+    for ip in ("10.0.0.1", "10.0.0.2", "10.0.0.3"):
+        await rdns.resolve(ip)
+    clock.advance(61)
+    await rdns.resolve("10.0.0.4")
+    assert sorted(rdns._cache) == ["10.0.0.4"]
+    for ip in ("10.0.0.5", "10.0.0.6", "10.0.0.7"):
+        await rdns.resolve(ip)
+    assert len(rdns._cache) == 3 and "10.0.0.4" not in rdns._cache

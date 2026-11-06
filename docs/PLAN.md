@@ -1,6 +1,6 @@
 # Strategy MCP Monitor — 하이레벨 개발 계획서
 
-- 버전: **v0.7** (2026-11-06)
+- 버전: **v0.7.1** (2026-11-06)
 - 상태: 요구사항 확정. P0–P5 구현 완료(Win 11 Pro 실기기 확인 대기, `docs/verification/win11-pro-p4-p5.md`). 이 문서가 기준이며, 구현에서 달라진 점은 변경 이력에 적습니다.
 - 대상: **Windows 11 Pro**에서 실행되는 MCP 관리 + RDP 접속·행동 감사 웹 애플리케이션
 
@@ -14,6 +14,7 @@
 | v0.5 | **구현 정합 (P1–P2):** §4.3 스크립트 **조회**(읽기 전용) 행 추가(MCP 개발자 이상, Local), §4.4 `can(user, action, channel, owner_id)`, §5.8 조회/편집 권한 구분, §8 `PATCH /api/users/{id}`와 MCP·스크립트·스트림 엔드포인트 보강(수동 조치는 202 + `run_id`, 외부 채널에서 Local 전용 경로는 405가 아니라 404) |
 | v0.6 | 구현 정합 (P3): 채널별 세션 쿠키(mcpmon_sid_local/_ext), /api/auth/me otp_provider, 보드 action_delay_sec, action 이벤트 requested, 응답의 사용자 요약(actor/author/updated_by_user)·owned_mcps, GET /api/mcp-activity, GET /api/settings/retention/preview(retention_cutoff = today−(days−1)), 고지 API(versions·revert, 버전 0 = 기본 문구), 정적 라우트(/, /admin/*, /notice, /assets/*)와 CSP, loopback 스트림 상한 20, CLI --static-dir/--dev-otp-code |
 | v0.7 | 구현 정합 (P4–P5): 에이전트↔서비스는 Named Pipe 대신 Local 채널 HTTP(X-Agent-Token + TCP 피어 → 세션 ID 검증, V4), 고지 창은 pywebview 대신 Edge --app 창(같은 Chromium/WebView2 엔진, V3; 640×600, 화면 중앙 최상위, 확인 전에 닫으면 1초 뒤 다시 표시), WTS 0.5초 폴링 + nudge(V6), 보드 sessions·SSE sessions/tamper, GET /api/sessions/{current,history,collectors}, GET /api/tamper/recent, POST /api/notice/display/{open,ack}(Local, 토큰), /api/agent/*(Local), 마이그레이션 6·7(rdp_connections, rdp_logon_failures, notice_displays), pywin32 312, CLI --session-source/--collect-console/--activity/--agent-launcher/--agent-dialog/--agent-dir. 그 밖에: 고지 표시는 에이전트가 세션 이벤트를 직접 받는 대신 서버 세션 추적기가 연결을 열 때 에이전트에 `show_notice`를 보냄(§5.5, 결과 같음), 수집 스레드 → 루프 큐는 소스별 1만 개 상한에서 오래된 것부터 버리고 `collector.dropped`로 남김(§7 "유실 0"은 이 상한 안의 목표, V11), SSE `tamper`는 로그인한 MCP 개발자 이상에게만, `GET /api/tamper/recent`는 `view_logs`(MCP 개발자 이상), 익명 보드의 접속자 정보에 `connection_id`·`client_build`·`protocol`·`first_seen_ip`·`first_seen_device`도 포함(§4.3 "접속자 정보") |
+| v0.7.1 | Plan 4 전체 리뷰 수정: 에이전트가 **서비스를 검증**함(실행마다 토큰과 함께 받는 서버 키, 요청마다 새 nonce → 응답 `X-Server-Proof` = HMAC-SHA256; 증명 못 하는 상대면 곧바로 종료 코드 5, 창 제목 이벤트는 증명된 응답 뒤에만 보냄, `<서버>/notice#…` 주소만 엶), 서비스는 두 포트를 수집기·에이전트 기동 **전에** 독점(`SO_EXCLUSIVEADDRUSE`)으로 엶. 고지 토큰은 로그에 남기지 않음(명령줄·4688·창 제목의 `/notice#…t=` 값 → `<redacted>`). 요청 피어를 찾지 못하면 잠깐 다시 찾고 그래도 없으면 503 `unavailable`(우회 탐지 아님, 에이전트·고지 페이지가 재시도). `agent_impersonation`·`notice_token_misuse`는 같은 키당 1분에 한 번(`suppressed` 개수). 4625 중복 판정 = (source, record_id, 이벤트 시각)(마이그레이션 8, 로그 지운 뒤 재사용된 record_id). WTS 세션 하나를 일시적으로 못 읽으면 이전 상태 유지(로그오프 아님). 이벤트 로그 북마크는 감시 스레드가 읽은 시점에 전진(수집 큐 초과·서버 비정상 종료로 버려진 레코드는 다시 읽지 않음: 최대 한 번 전달, `collector.dropped`로 남음). 고지 페이지는 토큰을 주소창에서 지우지만 창이 닫힐 때까지 `history.state`에 둠(F5 대비; 확인 뒤 토큰은 쓸모없음) |
 
 ---
 
@@ -372,8 +373,8 @@
 | `GET /api/mcp-activity?limit=` (모든 MCP의 최근 상태 전이·조치, 대시보드용) | ✗ | ✓ | ✓ | 둘 다 |
 | `GET /api/sessions/current`, `GET /api/sessions/history?days=1..90&limit&before_id` (연결 이력 + 로그인 실패), `GET /api/sessions/collectors` (수집기 상태) — 세션 화면 | ✗ | ✓ | ✓ | 둘 다 |
 | `GET /api/tamper/recent?limit=1..200` (최근 우회 탐지 이벤트, 대시보드용, 로그 조회 권한) | ✗ | ✓ | ✓ | 둘 다 |
-| `POST /api/notice/display/open`, `POST /api/notice/display/ack` (고지 창 페이지 전용: `X-Notice-Token` + 요청 피어의 세션 = 표시 건의 세션, 문제는 모두 404) | 토큰 | 토큰 | 토큰 | **Local만** |
-| `POST /api/agent/hello`, `GET /api/agent/next`, `POST /api/agent/heartbeat`, `POST /api/agent/events`, `POST /api/agent/notice/{display_id}/closed` (세션 에이전트 전용: `X-Agent-Token` + 요청 피어의 세션 = 에이전트 슬롯의 세션) | 토큰 | 토큰 | 토큰 | **Local만** |
+| `POST /api/notice/display/open`, `POST /api/notice/display/ack` (고지 창 페이지 전용: `X-Notice-Token` + 요청 피어의 세션 = 표시 건의 세션, 문제는 모두 404, 피어를 못 찾으면 503) | 토큰 | 토큰 | 토큰 | **Local만** |
+| `POST /api/agent/hello`, `GET /api/agent/next`, `POST /api/agent/heartbeat`, `POST /api/agent/events`, `POST /api/agent/notice/{display_id}/closed` (세션 에이전트 전용: `X-Agent-Token` + 요청 피어의 세션 = 에이전트 슬롯의 세션, 응답마다 `X-Server-Proof`로 서비스가 자신을 증명) | 토큰 | 토큰 | 토큰 | **Local만** |
 | `GET /api/logs?from&to&users&cat&q&cursor`, `GET /api/logs/histogram`, `GET /api/logs/export` | ✗ | ✓ | ✓ | 둘 다 |
 | `PUT /api/mcps/{id}`, `POST /api/mcps/{id}/actions/{start\|restart\|stop}` (**202 + `run_id`**: 결과는 `action` 이벤트와 이력으로 확인) | ✗ | ✓ | ✓ | 둘 다 |
 | `POST /api/mcps`, `DELETE /api/mcps/{id}` | ✗ | 등록: ✓ / 삭제: 소유자 | ✓ | **Local만** |

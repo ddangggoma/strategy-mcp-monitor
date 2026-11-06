@@ -135,11 +135,17 @@ class NoticeDisplays:
         self._issued: dict[str, _Issued] = {}  # sha256(token) -> issued ticket
         self._digest_of: dict[int, str] = {}  # display id -> its current token's sha256
         self._listeners: list[Callable[[DisplayEvent, Display], None]] = []
+        self._started = False
 
     # --- lifecycle -------------------------------------------------------------------------
 
     def start(self) -> int:
-        """Close the displays a previous run left open (``service_restart``); returns the count."""
+        """Close the displays a previous run left open (``service_restart``); returns the count.
+        Only the first call does anything (the sessions component and, without a session source,
+        a collector task both call it; M12)."""
+        if self._started:
+            return 0
+        self._started = True
         closed = self._close_where("closed_reason IS NULL", (), "service_restart")
         return len(closed)
 

@@ -96,3 +96,17 @@ async def test_resolver_error_is_recorded_as_null(local_client, services):
     await bootstrap(local_client); await login(local_client, services)
     events = await audit_events(services, "auth")
     assert events and all(e["windows_user"] is None for e in events)
+
+
+async def test_repeated_rate_limited_auth_requests_cost_no_peer_lookup(local_client, services):
+    """M1: a client hammering the OTP routes while throttled gets no connection-table scan per
+    request; the one audited 429 per window still records the Windows account."""
+    services.peers = FakePeerResolver(HONG)
+    await bootstrap(local_client); await login(local_client, services)
+    before = len(services.peers.calls)
+    for _ in range(5):
+        r = await local_client.post("/api/auth/otp/request", json={"email": "admin@x.com"})
+        assert r.status_code == 429
+    assert len(services.peers.calls) == before + 1  # only for the audited (first) 429
+    limited = [e for e in await audit_events(services, "auth") if e["event"] == "otp_request" and not e["ok"]]
+    assert len(limited) == 1 and limited[0]["windows_user"] == "CORP\\hong"

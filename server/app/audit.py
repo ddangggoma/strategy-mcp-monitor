@@ -34,6 +34,34 @@ class AuditLogger:
     def throttle_size(self) -> int:
         return len(self._throttle)
 
+    def claim_rate_limited(
+        self,
+        event: str,
+        email: str,
+        ip: str | None,
+        now: datetime,
+        scope: Literal["ip", "email"] = "ip",
+    ) -> bool:
+        """Whether this 429 is the one to audit for its throttle key in this window (and claim it).
+
+        Lets a route skip work that only the audit line needs (the Windows account's TCP-table
+        scan, M1) for the 429s that are not audited."""
+        window = timedelta(seconds=_THROTTLE_WINDOW_SEC)
+        key: tuple[str, ...] = (event, ip or "unknown")
+        if scope == "email":
+            digest = hashlib.sha256(email.encode("utf-8", "surrogatepass")).hexdigest()[:16]
+            key += (digest,)
+        last = self._throttle.get(key)
+        if last is not None and now - last < window:
+            return False
+        self._throttle.pop(key, None)
+        if len(self._throttle) >= _THROTTLE_PURGE_AT:
+            self._throttle = {k: t for k, t in self._throttle.items() if now - t < window}
+        while len(self._throttle) >= _THROTTLE_MAX:  # still full: evict the oldest entries
+            del self._throttle[next(iter(self._throttle))]
+        self._throttle[key] = now
+        return True
+
     def auth_rate_limited(
         self,
         event: str,
@@ -52,20 +80,8 @@ class AuditLogger:
         the IP's other targets. Keeps a client that is already being rejected from flooding
         the log.
         """
-        window = timedelta(seconds=_THROTTLE_WINDOW_SEC)
-        key: tuple[str, ...] = (event, ip or "unknown")
-        if scope == "email":
-            digest = hashlib.sha256(email.encode("utf-8", "surrogatepass")).hexdigest()[:16]
-            key += (digest,)
-        last = self._throttle.get(key)
-        if last is not None and now - last < window:
+        if not self.claim_rate_limited(event, email, ip, now, scope):
             return
-        self._throttle.pop(key, None)
-        if len(self._throttle) >= _THROTTLE_PURGE_AT:
-            self._throttle = {k: t for k, t in self._throttle.items() if now - t < window}
-        while len(self._throttle) >= _THROTTLE_MAX:  # still full: evict the oldest entries
-            del self._throttle[next(iter(self._throttle))]
-        self._throttle[key] = now
         self.auth(
             event=event,
             email=email,
