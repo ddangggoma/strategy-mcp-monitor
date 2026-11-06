@@ -23,6 +23,7 @@ from app.monitor.store import McpStore
 from app.monitor.supervisor import Monitor, ProberLike, ScriptRunnerLike
 from app.notice.store import NoticeStore
 from app.paths import AppPaths
+from app.sessions.eventmap import SessionEventHandler
 from app.sessions.history import SessionHistory
 from app.sessions.rdns import ReverseDns
 from app.sessions.tracker import SessionTracker
@@ -134,6 +135,9 @@ def build_services(
             config_collectors.bookmarks_path or paths.data_dir / "collector-state.json"
         )
         eventlog = EventLogComponent(config_collectors.event_log, bookmarks, manager, clock)
+        session_events = SessionEventHandler(rdp_history, log)
+        for channel in ("eventlog:security", "eventlog:lsm", "eventlog:rcm"):
+            eventlog.on(channel, session_events)
         manager.add(eventlog)
     return Services(
         paths=paths,
