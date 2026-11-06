@@ -39,6 +39,12 @@ export function LogDetail({
       {item ? (
         <DialogContent
           aria-describedby={undefined}
+          // the panel itself, not its first focusable (the raw JSON): a screen reader announces the
+          // title instead of reading the whole event; the JSON is one Tab away
+          onOpenAutoFocus={(e) => {
+            e.preventDefault();
+            (e.currentTarget as HTMLElement).focus();
+          }}
           onCloseAutoFocus={onCloseAutoFocus}
           className="flex max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-32px)] flex-col overflow-hidden sm:max-w-2xl"
         >

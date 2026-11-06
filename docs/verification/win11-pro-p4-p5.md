@@ -3,6 +3,7 @@
 - 대상: `docs/PLAN.md` v0.7 §11 P4·P5 완료 기준, Plan 4(`docs/superpowers/plans/2026-11-07-plan4-windows-collection.md`) 부록 A V1–V33
 - 작성: Plan 4 Task 20 (2026-11-06). 개발 PC는 **Windows 11 Home, 관리자 아님**이라 RDP 접속, Security 로그, `CreateProcessAsUser`, 감사 정책 변경을 실행할 수 없습니다. 그래서 **모든 결과 칸은 `대기`**입니다.
 - 자동 테스트가 이미 확인한 것: 가짜·녹화 픽스처로 같은 코드 경로 전체(트래커·표시·감독·실제 에이전트·실제 TCP 피어 검증), 이 PC에서 관리자 없이 부를 수 있는 Windows API(`winlive`), 실제 프로세스 통합(`integration`), 웹 E2E(`--session-source json:`). 이 점검표는 그 밖에 남은 것, 곧 **실제 RDP·관리자·SYSTEM이 있어야 하는 확인**입니다.
+- **Plan 5 이후(2026-11-07):** 이 점검표는 `install.ps1`로 설치한 서비스 상태에서 다시 수행합니다. 바꿔 읽을 것(감사 정책은 `install.ps1`/`install\audit-policy.ps1 -Enable`, 실행 방식 A·B 대신 서비스 `mcp-monitor`, 데이터 폴더 `C:\ProgramData\MCP Monitor`, 에이전트 `mcp-agent.exe`, P5-12 기준값 저장)은 `docs/verification/win11-pro-p6-p7.md` §3에 있습니다.
 - 결과를 채우는 법: `결과` 칸에 `통과` / `실패` / `해당 없음`과 날짜를 적고, 실패면 `비고`에 서버 로그(`C:\mcpmon\logs\<날짜>.jsonl`의 해당 줄)와 화면을 남깁니다. 실패 항목은 `docs/superpowers/plans/carry-forward.md`에 새 항목으로 옮깁니다.
 
 ## 1. 준비
@@ -83,7 +84,7 @@
 | P5-9 | 창 전환·최소화·복원·제목 바뀌는 앱(브라우저 탭 전환) | `activity.window` `foreground`/`minimize`/`restore`/`title`, 병합되어 과도하지 않음(전경 300ms·제목 1초) | 대기 | Task 16: 실제 RDP에서 `GetForegroundWindow`가 0이 아닌지, 제목이 엉뚱한 창에 붙지 않는지 |
 | P5-10 | 5분 동안 입력 없음 → 마우스 움직임 | `activity.idle` `idle` → `active` | 대기 | V26 |
 | P5-11 | 관리자 PowerShell: `auditpol /set /subcategory:"Process Creation" /success:disable`, `wevtutil cl Application`, 레지스트리 `ProcessCreationIncludeCmdLine_Enabled`를 0으로 | `tamper` `audit_policy_changed`(4719), `log_cleared`(System 104), 60초 안에 `audit_config_changed`. 끝나면 셋 다 되돌림 | 대기 | Task 14: 실제 4719/1102/104와 `install.ps1` 뒤 레지스트리 값. 리뷰 M17: 도메인 PC에서 그룹 정책 새로 고침(`gpupdate /force`, 약 90분 주기) 때 주체가 컴퓨터 계정/SYSTEM인 4719가 잡음처럼 뜨는지 기록 — 뜨면 실제 정책이 안 바뀐 S-1-5-18 4719를 거름 |
-| P5-12 | `C:\mcpmon\scripts\<id>\start.ps1` 직접 수정, `C:\mcpmon\logs\<어제>.jsonl` 뒷부분 잘라내기 | 60초 안에 `script_file_changed`, `log_file_truncated` | 대기 | 우회 탐지 기준값은 메모리에만 있음 → 서버가 꺼진 동안의 변경은 잡지 못함(Plan 5 carry) |
+| P5-12 | `C:\mcpmon\scripts\<id>\start.ps1` 직접 수정, `C:\mcpmon\logs\<어제>.jsonl` 뒷부분 잘라내기 | 60초 안에 `script_file_changed`, `log_file_truncated` | 대기 | Plan 5 Task 7부터 기준값이 `data\tamper-baseline.json`에 저장되어 서버가 꺼진 동안의 변경도 다음 시작 때 `while_stopped: true`로 잡음(`win11-pro-p6-p7.md` X7-5) |
 | P5-13 | 성능: 접속 1명, 유휴 60초 평균 `Get-Counter '\Process(python*)\% Processor Time' -SampleInterval 1 -MaxSamples 60`. 창을 빠르게 30번 전환 | 서비스 CPU < 2%, 에이전트 CPU < 1%. `activity.window` 줄이 병합됨(30줄보다 훨씬 적음) | 대기 | `% Processor Time`은 코어 합산이라 논리 코어 수로 나눔 |
 | P5-14 | 서비스(방식 B는 `schtasks /end` 후 `/run`) 재시작, `hong`은 접속 중 | 재시작 뒤 `existing` 연결과 고지(V8), 이전 미확인 고지는 `notice_unacknowledged` `service_restart`, 이전 연결은 `service_stop`으로 닫힘 | 대기 | 강제 종료면 에이전트가 `exit`를 못 받아 이전 Edge 고지 창이 남을 수 있음(아래 X-3) |
 

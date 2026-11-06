@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { copy } from "@/copy/ko";
 import type { LogQuery } from "@/lib/api-types";
 import { denyReason } from "@/lib/permissions";
@@ -70,6 +70,15 @@ export function LogsPage() {
   const [rootRef, width] = useElementWidth<HTMLDivElement>();
   const buckets = width > 0 ? bucketsFor(width) : 0; // nothing is asked before the width is known
   const view = search.view ?? "table";
+  // a timeline cell opens the table: the focused lane goes away with the timeline, so focus moves
+  // to the pressed 표 toggle instead of falling to <body>
+  const tableToggle = useRef<HTMLButtonElement>(null);
+  const focusTableToggle = useRef(false);
+  useEffect(() => {
+    if (view !== "table" || !focusTableToggle.current) return;
+    focusTableToggle.current = false;
+    tableToggle.current?.focus();
+  }, [view]);
 
   const onQuickRange = (r: QuickRange) => {
     setRefreshed(Date.now());
@@ -88,7 +97,7 @@ export function LogsPage() {
           <HistogramPanel query={query} buckets={buckets} onSelect={(from, to) => go({ from, to, range: undefined })} />
           <ToggleGroup label={copy.logs.viewLabel}>
             {(["table", "timeline"] as const).map((v) => (
-              <Toggle key={v} pressed={view === v} onClick={() => go({ view: v })}>
+              <Toggle key={v} ref={v === "table" ? tableToggle : undefined} pressed={view === v} onClick={() => go({ view: v })}>
                 {copy.logs.view[v]}
               </Toggle>
             ))}
@@ -97,7 +106,10 @@ export function LogsPage() {
             <UserTimeline
               query={query}
               buckets={buckets}
-              onOpen={(user, from, to) => go({ users: [user], from, to, range: undefined, view: "table" })}
+              onOpen={(user, from, to) => {
+                focusTableToggle.current = true;
+                go({ users: [user], from, to, range: undefined, view: "table" });
+              }}
             />
           ) : (
             <LogTable query={query} onFilterUser={(u) => go({ users: [u] })} onFilterSession={(id) => go({ session: id })} />

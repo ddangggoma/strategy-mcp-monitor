@@ -52,6 +52,13 @@ const columns = helper.columns([
   }),
   helper.display({ id: "user", header: c.user, meta: { width: "11rem" }, cell: ({ row: { original: r } }) => r.user ?? <Dash /> }),
   helper.display({
+    id: "event",
+    header: c.event,
+    meta: { width: "11rem", className: "font-mono text-xs" },
+    cell: ({ row: { original: r } }) => r.event ?? <Dash />,
+  }),
+  helper.display({ id: "summary", header: c.summary, cell: ({ row: { original: r } }) => summarize(r) }),
+  helper.display({
     id: "session",
     header: c.session,
     meta: { width: "4.5rem", className: "font-mono" },
@@ -63,13 +70,6 @@ const columns = helper.columns([
     meta: { width: "9rem", className: "font-mono" },
     cell: ({ row: { original: r } }) => r.client_ip ?? <Dash />,
   }),
-  helper.display({
-    id: "event",
-    header: c.event,
-    meta: { width: "11rem", className: "font-mono text-xs" },
-    cell: ({ row: { original: r } }) => r.event ?? <Dash />,
-  }),
-  helper.display({ id: "summary", header: c.summary, cell: ({ row: { original: r } }) => summarize(r) }),
 ]);
 
 /** The scroller takes the rest of the window below it, never less than half the window or MIN_HEIGHT. */

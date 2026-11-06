@@ -45,6 +45,9 @@ def test_bundle_metadata_and_files():
     assert not (B / "web" / ".vite").exists()
     for name in ("install.ps1", "uninstall.ps1", "audit-policy.ps1"):
         assert (B / "install" / name).read_bytes().startswith(b"\xef\xbb\xbf"), name  # UTF-8 with BOM (PowerShell 5.1)
+    # The operations guide ships as the repo has it (a stale bundle fails here: rebuild it).
+    ops = Path(__file__).resolve().parents[2] / "docs" / "ops" / "OPERATIONS.md"
+    assert (B / "docs" / "OPERATIONS.md").read_bytes() == ops.read_bytes()
 
 
 def test_bundle_install_scripts_plan_from_the_bundle(tmp_path):

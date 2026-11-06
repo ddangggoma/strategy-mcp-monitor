@@ -43,40 +43,46 @@ Every later plan reads this file before it is written and checks off the items i
 - [x] (From Plan 2) Add `sessions` to `GET /api/board` and to the SSE board events. (Plan 4 Task 5)
 
 ### Plan 5 (log viewer, retention, packaging)
-- [ ] Reader and indexer:
+- [x] Reader and indexer:
   - split JSONL on `\n` only, because U+2028/2029 can appear raw inside a line;
   - tolerate duplicate lines from a mid-batch retry that spans two days.
-- [ ] Retention job:
+  (Plan 5 Task 2 `split_lines`, Task 3 `(day, line_hash)` unique index, W5)
+- [x] Retention job:
   - purge expired `auth_sessions` rows;
   - purge `otp_codes` rows for unknown emails;
   - purge old `otp_failures` and `otp_verify_ip` rows.
   - Note the timestamp formats differ: `users` and `auth_sessions` store UTC microseconds, the OTP tables store KST milliseconds.
-- [ ] `LogWriter.stop()`: warn about discarded events on a failing disk, handle cancellation safely, and bound the queue during an outage.
-- [ ] Windows service host:
+  (Plan 5 Task 6 `RetentionJob._purge_db`, W16)
+- [x] `LogWriter.stop()`: warn about discarded events on a failing disk, handle cancellation safely, and bound the queue during an outage. (Plan 5 Task 1)
+- [x] Windows service host:
   - `serve()` needs an Event-based stop hook when it runs off the main thread;
   - a busy port currently exits with code 3 plus a CancelledError traceback, so exit cleanly;
   - pin the root path explicitly (the service's cwd is System32);
   - `build_services` leaks the DB handle when startup fails.
-- [ ] Database upgrade story:
+  (Plan 5 Task 8: `ServeControl`, exit codes 3/4/5 with no traceback, `--root` in the service command line + working folder = data root, W22–W24)
+- [x] Database upgrade story:
   - reject a database newer than the code;
   - read `user_version` inside the transaction;
   - verify WAL mode is active.
+  (Plan 5 Task 1: `DatabaseTooNewError`, `BEGIN IMMEDIATE` + `PRAGMA user_version`, WAL check)
 - [x] Packaging:
   - pin `.python-version` to the exact patch;
   - add PyInstaller hiddenimports for httptools, websockets and watchfiles;
   - switch back to `uvicorn[standard]` once pyyaml has a cp315 wheel.
   (Plan 5 Task 1 pinned 3.15.2; Task 13 spike chose PyInstaller: `install/pyinstaller/mcp-monitor.spec` adds httptools, websockets and the pywin32 service modules, and excludes watchfiles (no reload, W27); `build.ps1` warns when pyyaml gets a cp315 wheel.)
 - [x] e2e test: assert `lp != ep`, assert the POST statuses, and set `stdin=DEVNULL`. (Plan 5 Task 7)
-- [ ] (From Plan 2) ACL on `scripts/` (SYSTEM + Administrators only; spec §5.8).
-- [ ] (From Plan 2) Retention purge for `mcp_actions` and `mcp_transitions` (`mcp_minutes` already has an hourly purge).
-- [ ] (From Plan 2) Apply the service start type (auto, delayed) from the global settings.
+- [x] (From Plan 2) ACL on `scripts/` (SYSTEM + Administrators only; spec §5.8). (Plan 5 Task 14 `acl_*` steps on the whole data root by SID, W30; the real `icacls` run is checklist P7-4)
+- [x] (From Plan 2) Retention purge for `mcp_actions` and `mcp_transitions` (`mcp_minutes` already has an hourly purge). (Plan 5 Task 6, D3: they follow the log retention days)
+- [x] (From Plan 2) Apply the service start type (auto, delayed) from the global settings. (Plan 5 Task 8 `StartTypeManager`, Task 12 settings line, W25; the real SCM run is checklist P7-3, X7-6)
 - [x] (From Plan 2) Service stop: `Monitor.stop()` abandons a still-running script after 10 s (the script process keeps running); decide whether the service host should wait longer or kill the tree. (Plan 5 Task 7: kill the tree, W21 — `Monitor.stop(kill_abandoned=True)` → `ScriptRunner.kill_all()`; `serve(kill_scripts_on_stop=True)` passes it in Task 8)
 
 ### Later
+_Still open after Plan 5; each item and its reason are under "After Plan 5 (추후)" at the end._
 - [ ] (From Plan 2) `Alert` effects (alert-only issues, FAILED) only write an `mcp.health` log line; a notification channel (spec §14) is needed.
 - [ ] (From Plan 2) `E501` is not enforced (about 80 app lines exceed the configured 100 columns); enforce it or run `ruff format` once.
 
 ### Later (real OTP provider)
+_Still open after Plan 5; see "After Plan 5 (추후)"._
 - [ ] A `provider.send` failure distinguishes registered emails (enumeration), and sending inline creates a timing difference. Move sending off the request path, and make failures behave the same either way.
 
 ## From the Plan 2 whole-plan review
@@ -90,15 +96,16 @@ Every later plan reads this file before it is written and checks off the items i
 - [x] Manual action returns 202 `{run_id}`, and the result arrives as an SSE `action` event that only authenticated users receive. A concurrent request returns 409 `action_in_progress`. (Plan 3 Task 10)
 
 ### Plan 5 (log viewer, retention, packaging)
-- [ ] FAILED status and the auto-action budget reset on service restart. Decide whether to persist them.
+- [x] FAILED status and the auto-action budget reset on service restart. Decide whether to persist them. (Plan 5 W17: 유지 — not persisted, written in `docs/ops/OPERATIONS.md` ⑨)
 - [x] The runner path where a timeout kill fails is untested. The next run can start while the old script is still alive. Log it, and add a test. (Plan 5 Task 7: `error="kill_failed"`, MCP lock held up to 30 s, `system` `monitor.kill_failed`; W20)
 - [x] BodySizeLimit: log the exception it swallows after rejecting a request, and fill the test gaps (bad_host combined with oversize, a single 413, websocket passthrough). (Plan 5 Task 7)
 - [x] The script store calls `os.replace` before COMMIT, so a COMMIT failure leaves the file changed. Use the run-time hash check, or reorder. (Plan 5 Task 7: run-time hash check kept as the safety net and pinned by a test, W19)
 - [x] At loop shutdown, the script is killed but its children are not. The "Task was destroyed but it is pending" message is cosmetic. (Plan 5 Task 7: `kill_all` kills each tree, `ScriptRunner.aclose()` collects the detached tasks)
-- [ ] Add retention for the MCP action and transition tables.
-- [ ] If the defensive `_apply` refusal ever fires, it is settled as an error that consumes a budget slot. It is unreachable today. Consider an engine-side cancel.
+- [x] Add retention for the MCP action and transition tables. (Plan 5 Task 6)
+- [x] If the defensive `_apply` refusal ever fires, it is settled as an error that consumes a budget slot. It is unreachable today. Consider an engine-side cancel. (Plan 5 W18: 추후 — listed under "After Plan 5")
 
 ### Later
+_Still open after Plan 5; each item and its reason are under "After Plan 5 (추후)" at the end._
 - [ ] E501 is not enforced (about 80 lines over 100 columns), and ruff is pinned to `E4,E7,E9,F,I,UP,B`.
 - [x] Add a unit test for the `--open-meteo` wiring. (Plan 5 Task 7)
 - [x] `MCP_ACTOR` (the user email) is not allowlisted for script env vars. Only an admin registers emails, but consider tightening email validation. (Plan 5 Task 7: `safe_actor` — the email only when it matches `[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+`, else `user-<id>`; W37)
@@ -112,33 +119,35 @@ Every later plan reads this file before it is written and checks off the items i
 - [x] The dashboard "현재 세션" card uses the same sessions data. (Plan 4 Task 18)
 
 ### Plan 5 (log viewer, retention, packaging)
-- [ ] The retention purge must use `app.logstore.retention.retention_cutoff`, so it matches the settings preview.
+- [x] The retention purge must use `app.logstore.retention.retention_cutoff`, so it matches the settings preview. (Plan 5 Task 6 `test_purge_matches_the_preview`)
 - [x] Fill the sessions navigation item and the dashboard "우회 탐지 이벤트" card. (Plan 4 Task 18)
 - [x] Fill the logs and audit-log navigation items and the dashboard "로그인 실패 추이" card (still `PlannedFeature`). (Plan 5 Task 10 nav, Task 11 logs page, Task 12 audit page + `LoginFailuresCard`)
-- [ ] The log table uses TanStack Virtual and no animation.
+- [x] The log table uses TanStack Virtual and no animation. (Plan 5 Task 10 `@tanstack/react-virtual` 3.14.26, Task 11 `LogTable`, W32)
 - [x] PyInstaller packaging: change the `--static-dir` default (now `<repo>/web/dist`) to a path relative to the executable. (Plan 5 Task 9 `default_static_dir`; Task 13 `test_bundle_serves_the_built_board` checks the frozen exe serves `<bundle>/web` with no `--static-dir`)
 
 ### Later
+_Still open after Plan 5; each item and its reason are under "After Plan 5 (추후)" at the end._
 - [ ] Server 422 responses carry no field information, so forms rely on client validation (U27).
 - [ ] Script `PUT` has no optimistic locking (`If-Match`).
 
 ## From the Plan 3 whole-plan review
 
 ### Plan 5 (log viewer, retention, packaging)
-- [ ] Every SSE `action` event refetches all of that MCP's active history windows (1 h, 24 h, 7 d), because the history response carries buckets, transitions and actions together. Add an actions-only history read (or an `actions` field the client can merge), then refetch only the action list.
+- [x] Every SSE `action` event refetches all of that MCP's active history windows (1 h, 24 h, 7 d), because the history response carries buckets, transitions and actions together. Add an actions-only history read (or an `actions` field the client can merge), then refetch only the action list. (Plan 5 W36: 추후 — listed under "After Plan 5")
 - [x] After a `session_changed` error (another tab switched the shared cookie to another user), the editors (`ScriptEditor`, `NoticeEditorPage`, `McpCreatePage`) keep the previous user's edits on screen. The next change stores them as the new user's draft, and a second Save writes as the new user. Treat `session_changed` like a user switch: `clearAllDrafts()`, `qc.clear()`, then navigate to `/admin` with `ignoreBlocker: true` (or reload). (Plan 5 Task 12: `session.onSessionChanged` from the API client; the shell drops every draft, restarts the stream, toasts the reason, navigates to `/admin` past the blocker and resets every query)
-- [ ] Dependency allowlist wording: name the implied toolchain packages (`@types/node`, `@types/react*`, `@vitejs/plugin-react`, `@tailwindcss/vite`, `vite`, `typescript`). If Chromium 123 is a real target, verify the computed colour of the `-soft` tokens there (`light-dark()` inside `color-mix()`).
+- [x] Dependency allowlist wording: name the implied toolchain packages (`@types/node`, `@types/react*`, `@vitejs/plugin-react`, `@tailwindcss/vite`, `vite`, `typescript`). If Chromium 123 is a real target, verify the computed colour of the `-soft` tokens there (`light-dark()` inside `color-mix()`). (Plan 5 W36: 추후 — listed under "After Plan 5")
 - [x] `server/tests/test_e2e_serve.py::test_two_channels_live` is load-sensitive: it failed once with "server did not become ready" while vitest ran at the same time, and passes alone. Raise its 10 s readiness deadline, or run the two suites one after the other in CI. (Plan 5 Task 7: 30 s for every spawned server in that file)
 
 ### Later
+_Still open after Plan 5; each item and its reason are under "After Plan 5 (추후)" at the end._
 - [ ] Some web unit tests still sleep 30–50 ms before asserting that something does *not* arrive (no toast later in `mcps.test`, no tooltip on a wide window in `shell.test`, an older refetch in `scripts.test`, `status.test`). There is no signal to wait on; replace them if one appears.
 
 ## From Plan 4 (Windows collection)
 
 ### Plan 5 (log viewer, retention, packaging)
-- [ ] Retention purge also covers `rdp_connections`, `rdp_logon_failures` and `notice_displays` (V29). Before deleting a log file, call `TamperScanner.expect_log_removed(name)`; otherwise the scanner reports a `log_file_removed` tamper event.
-- [ ] The Windows service host calls `SessionCollector.nudge()` (reachable as `SessionsComponent.nudge()` in `app/collect/manager.py`) on `SERVICE_CONTROL_SESSIONCHANGE`, so a session change is picked up at once instead of at the next 0.5 s poll (V6).
-- [ ] The Windows service stop must go through `ShutdownSequence.request` (`server/app/main.py`), like Ctrl+C does today: the collectors stop first, so the agent supervisor can still deliver `exit` over the Local channel and each agent closes its Edge notice window, and only then the HTTP servers.
+- [x] Retention purge also covers `rdp_connections`, `rdp_logon_failures` and `notice_displays` (V29). Before deleting a log file, call `TamperScanner.expect_log_removed(name)`; otherwise the scanner reports a `log_file_removed` tamper event. (Plan 5 Task 6 `test_removals_are_announced_to_the_tamper_scanner`, `test_purges_expired_rows_in_every_table`)
+- [x] The Windows service host calls `SessionCollector.nudge()` (reachable as `SessionsComponent.nudge()` in `app/collect/manager.py`) on `SERVICE_CONTROL_SESSIONCHANGE`, so a session change is picked up at once instead of at the next 0.5 s poll (V6). (Plan 5 Task 8 `SvcOtherEx` SESSIONCHANGE → `nudge_sessions`; the real 2-second check is checklist P7-7)
+- [x] The Windows service stop must go through `ShutdownSequence.request` (`server/app/main.py`), like Ctrl+C does today: the collectors stop first, so the agent supervisor can still deliver `exit` over the Local channel and each agent closes its Edge notice window, and only then the HTTP servers. (Plan 5 Task 8, F01; the real SCM stop is checklist X7-1)
 - [x] Packaging the agent: if PyInstaller builds `mcp-agent.exe`, set `AgentOptions.python` and the launch `argv` to that executable (instead of `<python> -m mcp_agent` with `PYTHONPATH`). Whatever runs the agent must be readable by every user session: today `AgentOptions.python` is the server venv's base interpreter, which uv installs under the installing user's `%APPDATA%\uv\python`, out of reach of a standard user's session under `WtsLauncher`. Every agent launch must pass both `MCPMON_AGENT_TOKEN` and `MCPMON_AGENT_SERVER_KEY` (32-byte hex) in the environment (the agent removes both at once); an agent started by hand without the key exits at argument parsing (exit 2). (Plan 5 Task 9: done for the launch — `AgentOptions.command` from `app.bundle.agent_command` (`bin\agent\mcp-agent.exe` or `runtime\python.exe -m mcp_agent`), no `PYTHONPATH` with a bundle, both keys via `agent_env`; dev mode keeps the base interpreter. Open: the bundle under Program Files, readable by users — Task 13/14. Task 13: the bundle carries `bin\agent\mcp-agent.exe` (PyInstaller, no console) and `agent/pyproject.toml` is 1.0.0; installing it under Program Files is Task 14. Task 14: `install.ps1` copies the bundle to `%ProgramFiles%\MCP Monitor` by default (Program Files ACL: users read and run, W30) and warns when `-InstallDir` is outside Program Files; the real install is a Task 16 check.)
 - [x] `install.ps1` enables the audit policy and registry values the collectors need: `auditpol` Process Creation (success), Logon (success, failure), Logoff (success), Other Logon/Logoff Events (success), Audit Policy Change (success); `ProcessCreationIncludeCmdLine_Enabled = 1`; `EnableScriptBlockLogging = 1` (commands in `docs/verification/win11-pro-p4-p5.md` §1). (Plan 5 Task 14: install steps 9–15 by subcategory GUID, one `auditpol /backup` before the first change, Security/PowerShell log sizes; alone as `install\audit-policy.ps1 -Enable` / `-Restore <backup>`. DryRun-tested only; the real run is a Task 16 check.)
 - [x] Uninstall removes `data/collector-state.json` and each user's Edge notice profile folder (`%LOCALAPPDATA%\mcp-monitor\notice-edge`). (Plan 5 Task 14: `uninstall.ps1 -RemoveData` removes the whole data root — logs, `config.db`, scripts, `data/collector-state.json`, `data/tamper-baseline.json` — and `<Users>\*\AppData\Local\mcp-monitor`; without `-RemoveData` the data stays, W31.)
@@ -149,6 +158,7 @@ Every later plan reads this file before it is written and checks off the items i
 - [x] Report the agent's dropped window events: `EventSender.dropped` (buffer overflow, batches the server refused) never reaches the server. Send the count with the next batch, or as a `collector.dropped`-style line (needs an events-schema change; review M13, the part the fix wave left). (Plan 5 Task 9: optional `dropped` (int ≥ 0) in `POST /api/agent/events`, sent with the next batch until a batch carrying it is accepted; the server logs `system` `collector.dropped {source: "agent", count, session_id, user}`)
 
 ### Later
+_Still open after Plan 5; each item and its reason are under "After Plan 5 (추후)" at the end._
 - [ ] A notification channel for tamper events (toast, mail, webhook; spec §14). Today they are logged, shown on the dashboard card and sent as SSE `tamper` to signed-in developers.
 - [ ] GeoIP for client IPs (spec §5.3, optional).
 - [ ] Apply the notice text to the Windows pre-logon legal notice (`legalnoticecaption`/`legalnoticetext`; spec §5.5 optional, V33).
@@ -160,3 +170,38 @@ Every later plan reads this file before it is written and checks off the items i
 
 ### Win 11 Pro real-machine check
 - [ ] Every `대기` item in `docs/verification/win11-pro-p4-p5.md`: P4-1–P4-13, P5-1–P5-14, X-1–X-10. Move each failure here as its own item.
+- [ ] Every `대기` item in `docs/verification/win11-pro-p6-p7.md`: P7-1–P7-10, P6-1–P6-3, X7-1–X7-10, and the re-run of the Plan 4 checklist with the service installed (§3 there). Move each failure here as its own item. (Plan 5 Task 16, W38)
+
+## After Plan 5 (추후)
+
+Plan 5 is the last plan. Every unchecked "Later" item above is still open. The list below collects them all, with the reason each one waits (Plan 5 W36 and the item notes).
+
+### Product (spec §14 and options)
+- [ ] Notification channel for `Alert` effects, FAILED and tamper events (toast, mail, webhook; spec §14). Today these are logged, shown on the dashboard and sent over SSE. Reason: out of the P6/P7 scope (W36).
+- [ ] Real OTP provider, and sending off the request path with the same failure behaviour for registered and unknown emails (Later "real OTP provider"). Reason: the provider is still Dummy; codes go to `data\dev\otp-outbox.log` (operations guide ⑨).
+- [ ] HTTPS option for the external channel (spec §2 #5, §14). Reason: W36; 8701 stays plain HTTP, written in the operations guide ⑧.
+- [ ] Settings backup and import (MCP settings and scripts; spec §14). Reason: W36; the manual backup procedure is in the operations guide ⑦.
+- [ ] Log hash chain (spec §5.6, optional). Reason: W36.
+- [ ] syslog/SIEM forwarding and GeoIP (spec §14, §5.3, optional). Reason: W36.
+- [ ] Pre-logon legal notice text (`legalnoticecaption`/`legalnoticetext`; spec §5.5 optional, V33). Reason: W36.
+- [ ] True modal notice window (WebView2 host instead of Edge `--app`, Plan 4 V3). Reason: W36.
+- [ ] WTS session-notification window next to the 0.5 s poll (Plan 4 V6). Do it only if the real machine misses the 2-second target in P4-1/P7-7.
+- [ ] Code signing for `mcp-monitor.exe` and `mcp-agent.exe` (W26). Reason: no certificate. If Smart App Control blocks the unsigned exe on the target PC (P7-8), build layout B (python.org embeddable + `._pth`).
+
+### Engineering
+- [ ] Enforce E501, or run `ruff format` once. Reason: a bulk re-wrap would clash with parallel work (W36). `ruff format` stays forbidden until then.
+- [ ] Engine-side cancel for the defensive `_apply` refusal (W18). Reason: the path is unreachable today.
+- [ ] Wide keyword search speed (W9). A keyword that matches many rows is slow: 40% of 1M rows takes about 300 ms (`docs/verification/perf-p6.md` §4). Options: cap keyword hits, or narrow the time range first. Reason: outside the P6 criterion by definition.
+- [ ] Actions-only history read, so an SSE `action` event refetches only the action list (Plan 3 review). Reason: W36 deferral (preflight F07).
+- [ ] Dependency-allowlist wording: name the implied toolchain packages. Also check the `-soft` tokens on Chromium 123, if that is a target (Plan 3 review). Reason: W36 deferral (preflight F07).
+- [ ] Server 422 responses with field information (U27), and `If-Match` on script `PUT` (Plan 3 Later). Reason: forms rely on client validation, and only one editor is expected per script.
+- [ ] Replace the sleep-based "nothing arrives" waits in four web unit tests once a signal exists (Plan 3 review Later). Reason: there is no signal to wait on.
+- [ ] Window events: proof and data on one keep-alive connection (Plan 4 re-review R2), a visible `tamper` for a wildcard port squatter (R1), and session tracker edge cases (R6). Reason: Plan 4 Later; the risk is bounded by the HMAC proof.
+- [ ] `install\audit-policy.ps1 -Enable` used on its own does not record the registry values from before the change. So `-Restore` puts registry values back only when an install state file exists (Plan 5 Task 14). Reason: the plan's step ids leave no room for a state write; real-machine check X7-7.
+- [ ] A reinstall with a different `-ExternalPort` leaves the old firewall rule, and uninstall removes only the rule for the port it recorded (Plan 5 Task 14, checklist X7-8). Reason: low risk, documented in the operations guide ④.
+
+### Web UI (Plan 5 Task 16 review: `docs/design/a11y-review-p5.md` §5, `docs/design/critique-p5.md`)
+- [ ] At 640×600 the filter bar fills the first screen: fold the less-used conditions behind "조건 더 보기".
+- [ ] Show the keyword help where sighted keyboard users can read it (today it is a `title` plus a screen-reader description).
+- [ ] Add one representative field to the summary of system and admin lines (for example the deleted file count of `retention.run`).
+- [ ] Listen once with a real screen reader (Narrator or NVDA) to the histogram selection and the log detail dialog. Reason: not available in automated runs; do it during P6-1.

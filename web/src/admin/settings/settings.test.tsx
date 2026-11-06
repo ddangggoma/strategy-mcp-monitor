@@ -297,6 +297,11 @@ it("the retention confirm leaves out the row count while the index cannot tell",
   expect(dialog).not.toHaveTextContent(new RegExp(copy.settings.retentionDeleteEvents(1).replace("1", "[\\d,]+")));
   expect(dialog).toHaveTextContent(copy.settings.retentionRunsSoon);
 });
+it("announces a failed service status read", async () => {
+  server.use(http.get("/api/service", () => HttpResponse.json({ error: "unavailable" }, { status: 503 })));
+  await renderSettings(settingsFixture());
+  expect(await screen.findByRole("alert")).toHaveTextContent(copy.settings.service.loadError);
+});
 it("shows the installed service start type and a mismatch", async () => {
   server.use(http.get("/api/service", () => HttpResponse.json(serviceStatusFixture({ installed: true, start_type: "auto", desired: "delayed-auto", in_sync: false }))));
   await renderSettings(settingsFixture());

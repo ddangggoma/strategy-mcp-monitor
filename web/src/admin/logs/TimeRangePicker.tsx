@@ -1,4 +1,4 @@
-import { useId, useState, type FormEvent, type ReactNode } from "react";
+import { useId, useState, type FormEvent, type ReactNode, type Ref } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { copy } from "@/copy/ko";
@@ -14,9 +14,10 @@ const toLocal = (kst: string) => kst.slice(0, 16);
 const toKst = (local: string) => `${local}:00.000+09:00`;
 
 /** An `aria-pressed` toggle in the shape of the sessions period buttons (no transition: log area). */
-export function Toggle({ pressed, onClick, children }: { pressed: boolean; onClick(): void; children: string }) {
+export function Toggle({ pressed, onClick, children, ref }: { pressed: boolean; onClick(): void; children: string; ref?: Ref<HTMLButtonElement> }) {
   return (
     <button
+      ref={ref}
       type="button"
       aria-pressed={pressed}
       onClick={onClick}
@@ -72,10 +73,16 @@ function CustomRange({ from, to, onApply }: { from: string; to: string; onApply(
   const [b, setB] = useState(() => toLocal(to));
   const [error, setError] = useState<string | null>(null);
 
+  // a blocked Apply moves focus to the field to fix (the alert says why)
+  const fail = (message: string, key: "from" | "to") => {
+    setError(message);
+    document.getElementById(`${id}-${key}`)?.focus();
+  };
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (!LOCAL_MINUTE.test(a) || !LOCAL_MINUTE.test(b)) return setError(copy.logs.incompleteRange);
-    if (a >= b) return setError(copy.logs.invertedRange); // same-format strings order like the times
+    if (!LOCAL_MINUTE.test(a)) return fail(copy.logs.incompleteRange, "from");
+    if (!LOCAL_MINUTE.test(b)) return fail(copy.logs.incompleteRange, "to");
+    if (a >= b) return fail(copy.logs.invertedRange, "to"); // same-format strings order like the times
     setError(null);
     onApply(toKst(a), toKst(b));
   };
@@ -96,7 +103,7 @@ function CustomRange({ from, to, onApply }: { from: string; to: string; onApply(
           set(e.target.value);
           setError(null);
         }}
-        className="w-[min(100%,13.5rem)] tabular-nums"
+        className="w-[min(100%,13.5rem)] tabular-nums max-[25rem]:px-1.5"
       />
     </div>
   );

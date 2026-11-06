@@ -404,7 +404,8 @@ export const copy = {
     resendIn: (sec: number) => `${sec}초 뒤에 다시 받을 수 있어요`,
     changeEmail: "다른 이메일로 로그인",
     devBadge: "개발용 OTP 모드",
-    devHint: "개발용 OTP: 서비스 콘솔을 확인하세요.",
+    // a service has no console: the Dummy provider appends every code to <root>/data/dev/otp-outbox.log
+    devHint: "개발용 OTP: 코드는 서버 PC의 data\\dev\\otp-outbox.log 파일(콘솔로 실행했다면 콘솔)에 남아요.",
     unknownEmailNote: "코드가 오지 않으면 Admin에게 이메일 등록을 요청하세요.",
   },
 

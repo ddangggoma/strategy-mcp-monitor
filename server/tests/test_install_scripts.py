@@ -74,6 +74,19 @@ def test_scripts_parse(name):
 
 
 @pytest.mark.parametrize("name", ["install.ps1", "uninstall.ps1", "audit-policy.ps1"])
+def test_operations_guide_documents_every_parameter(name):
+    # docs/ops/OPERATIONS.md ships in the bundle (Task 16): a new or renamed script parameter must
+    # show up in it, as `-Name` in a table row or a command
+    text = (INSTALL / name).read_text("utf-8-sig")
+    block = re.search(r"^param\((.*?)^\)", text, re.S | re.M)
+    assert block, name
+    params = re.findall(r"\$([A-Za-z]+)\s*(?:=|,|$)", block.group(1), re.M)
+    assert params, name
+    guide = (REPO / "docs" / "ops" / "OPERATIONS.md").read_text("utf-8")
+    assert [p for p in params if f"-{p}" not in guide] == [], name
+
+
+@pytest.mark.parametrize("name", ["install.ps1", "uninstall.ps1", "audit-policy.ps1"])
 def test_scripts_are_utf8_with_bom(name):
     # Windows PowerShell 5.1 reads a BOM-less script in the ANSI code page (949): Korean text would break.
     raw = (INSTALL / name).read_bytes()

@@ -30,6 +30,14 @@ it("writes the selection to the URL and drops the quick range", async () => {
   await waitFor(() => expect(router.state.location.search).toMatchObject({ from: "2026-11-04T13:10:00.000+09:00", to: "2026-11-04T13:20:00.000+09:00" }));
   expect(router.state.location.search).not.toHaveProperty("range");
 });
+it("puts the summary before session and IP, so a 1280 window shows it without scrolling (Task 16 critique)", async () => {
+  server.use(http.get("/api/logs", () => HttpResponse.json(logPage([logItem({ id: 2, cat: "activity.command", data: { text: "Get-Process" } })]))));
+  renderWithProviders(null, { me: ME, route: "/admin/logs?range=1h" });
+  const table = await screen.findByRole("table", { name: copy.logs.title });
+  await within(table).findByText("Get-Process");
+  const c = copy.logs.columns;
+  expect(within(table).getAllByRole("columnheader").map((h) => h.textContent)).toEqual([c.ts, c.cat, c.user, c.event, c.summary, c.session, c.ip]);
+});
 it("toggles a category chip into the URL and the request", async () => {
   const tracker = trackRequests();
   const { router } = renderWithProviders(null, { me: ME, route: "/admin/logs" });
@@ -75,6 +83,17 @@ it("timeline lanes link to a filtered table", async () => {
   await userEvent.keyboard("{ArrowRight}{Enter}");
   await waitFor(() => expect(router.state.location.search).toMatchObject({ users: ["CORP\\hong"], view: "table",
     from: "2026-11-04T13:10:00.000+09:00", to: "2026-11-04T13:20:00.000+09:00" }));
+  // the lane is gone with the timeline: focus lands on the pressed 표 toggle, not on <body> (Task 16 a11y)
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: copy.logs.view.table, pressed: true })));
+});
+it("the detail dialog takes focus itself, not its raw JSON", async () => {
+  server.use(http.get("/api/logs", () => HttpResponse.json(logPage([logItem({ id: 7, data: { text: "secret-cmd" } })]))));
+  renderWithProviders(null, { me: ME, route: "/admin/logs" });
+  (await screen.findByText("secret-cmd")).closest("tr")!.focus(); await userEvent.keyboard("{Enter}");
+  const dialog = await screen.findByRole("dialog", { name: copy.logs.detail });
+  await waitFor(() => expect(document.activeElement).toBe(dialog));
+  await userEvent.tab();
+  expect(document.activeElement?.tagName).toBe("PRE"); // the long event stays one Tab away
 });
 it("export links carry the current filters", async () => {
   renderWithProviders(null, { me: ME, route: `/admin/logs?cat=${encodeURIComponent(JSON.stringify(["auth"]))}` });
@@ -147,8 +166,17 @@ it("blocks an inverted custom range", async () => {
   await userEvent.clear(to); await userEvent.type(to, "2026-11-03T11:00");
   await userEvent.click(screen.getByRole("button", { name: copy.logs.apply }));
   expect(await screen.findByRole("alert")).toHaveTextContent(copy.logs.invertedRange);
+  expect(document.activeElement).toBe(to); // the field to fix, not the Apply button (Task 16 review)
   expect(router.state.location.search).toMatchObject({ range: "today" });
   expect(router.state.location.search).not.toHaveProperty("from");
+});
+it("an incomplete custom range moves focus to the empty field", async () => {
+  renderWithProviders(null, { me: ME, route: "/admin/logs?range=today" });
+  const from = await screen.findByLabelText(copy.logs.from);
+  await userEvent.clear(from);
+  await userEvent.click(screen.getByRole("button", { name: copy.logs.apply }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(copy.logs.incompleteRange);
+  expect(document.activeElement).toBe(from);
 });
 
 it("a quick range replaces custom bounds", async () => {

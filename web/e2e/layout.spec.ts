@@ -121,4 +121,12 @@ test("reflows at 400% zoom (320 CSS px) without horizontal page scroll", async (
     await expect(page.locator("[role='status'] .sr-only", { hasText: copy.common.loading })).toHaveCount(0);
     expect(await overflow(), path).toBeLessThanOrEqual(0);
   }
+  // 640×600 at 200% is this width too: the custom range fields keep room for their whole KST
+  // minute ("2026-11-07 오전 12:00" + the picker icon needs about 205 px) instead of clipping it
+  for (const path of ["/admin/logs?range=today", "/admin/audit?range=today"]) {
+    await page.goto(`${state.localUrl}${path}`);
+    const fields = page.locator("input[type='datetime-local']");
+    await expect(fields).toHaveCount(2);
+    for (const w of await fields.evaluateAll((els) => els.map((e) => e.getBoundingClientRect().width))) expect(w, path).toBeGreaterThanOrEqual(205);
+  }
 });

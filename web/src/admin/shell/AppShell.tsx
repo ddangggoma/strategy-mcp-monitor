@@ -160,7 +160,7 @@ export function AppShell() {
       <TopBar me={me} streamStatus={status} onLogout={onLogout} />
       <div className="grid grid-cols-[var(--size-sidebar)_minmax(0,1fr)] max-lg:grid-cols-[var(--size-rail)_minmax(0,1fr)]">
         <Nav me={me} onOpenPalette={openPalette} onPreloadPalette={() => void loadPalette()} shortcut={copy.common.commandShortcut(IS_MAC)} />
-        <main id="main" tabIndex={-1} className="flex min-w-0 flex-col gap-6 px-6 py-6 outline-none">
+        <main id="main" tabIndex={-1} className="flex min-w-0 flex-col gap-6 px-6 py-6 outline-none max-[25rem]:px-3">
           <Outlet />
         </main>
       </div>

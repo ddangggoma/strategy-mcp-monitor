@@ -21,7 +21,7 @@ export function ServiceSection() {
   const { data, isPending, isError } = useServiceStatus();
   let body;
   if (isPending) body = <p role="status">{copy.common.loading}</p>;
-  else if (isError) body = <p>{copy.settings.service.loadError}</p>;
+  else if (isError) body = <p role="alert">{copy.settings.service.loadError}</p>;
   else {
     body = statusLines(data).map((l) =>
       l.warn ? (

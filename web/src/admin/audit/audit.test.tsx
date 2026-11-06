@@ -34,6 +34,14 @@ it("lists admin actions with channel and result", async () => {
   expect(row).toHaveTextContent("a@x.com"); expect(row).toHaveTextContent(copy.channel.local);
   expect(row).toHaveTextContent(copy.audit.results.denied); expect(row).toHaveTextContent("email=b@x.com");
 });
+it("puts the result right after the action, before the free-width target (Task 16 critique)", async () => {
+  server.use(http.get("/api/audit", () => HttpResponse.json(logPage([logItem({ cat: "admin.audit", event: "user_create" })]))));
+  renderWithProviders(null, { me: ME, route: "/admin/audit" });
+  const table = await screen.findByRole("table", { name: copy.audit.title });
+  await within(table).findByText("user_create");
+  const c = copy.audit.columns;
+  expect(within(table).getAllByRole("columnheader").map((h) => h.textContent)).toEqual([c.ts, c.actor, c.channel, c.ip, c.action, c.result, c.target]);
+});
 it("switching to the login tab requests kind=auth", async () => {
   const tracker = trackRequests();
   const { router } = renderWithProviders(null, { me: ME, route: "/admin/audit" });

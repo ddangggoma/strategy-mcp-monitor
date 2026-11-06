@@ -108,11 +108,11 @@ const columns = helper.columns([
       </time>
     ),
   }),
-  helper.display({ id: "actor", header: c.actor, meta: { width: "13rem" }, cell: ({ row: { original: r } }) => r.user ?? <Dash /> }),
+  helper.display({ id: "actor", header: c.actor, meta: { width: "11rem" }, cell: ({ row: { original: r } }) => r.user ?? <Dash /> }),
   helper.display({
     id: "channel",
     header: c.channel,
-    meta: { width: "8rem" },
+    meta: { width: "7rem" },
     cell: ({ row: { original: r } }) => {
       const ch = r.data.channel;
       return ch === "local" || ch === "external" ? copy.channel[ch] : <Dash />;
@@ -122,11 +122,11 @@ const columns = helper.columns([
   helper.display({
     id: "action",
     header: c.action,
-    meta: { width: "14.5rem", className: "font-mono text-xs" },
+    meta: { width: "13.5rem", className: "font-mono text-xs" },
     cell: ({ row: { original: r } }) => r.event ?? <Dash />,
   }),
-  helper.display({ id: "target", header: c.target, cell: ({ row: { original: r } }) => auditTarget(r) || <Dash /> }),
   helper.display({ id: "result", header: c.result, meta: { width: "6.5rem" }, cell: ({ row: { original: r } }) => <ResultMark result={r.outcome} /> }),
+  helper.display({ id: "target", header: c.target, cell: ({ row: { original: r } }) => auditTarget(r) || <Dash /> }),
 ]);
 
 /** The API query for the URL state at `now`: minute bounds, kind always sent, empty filters left out. */
@@ -163,7 +163,7 @@ function AuditFilters({
   const filtered = !!search.users?.length || !!search.result?.length || !!search.channel || !!search.q;
 
   return (
-    <div className="@container/filters flex min-w-0 flex-col gap-3 rounded-md border bg-surface p-3">
+    <div className="@container/filters flex min-w-0 flex-col gap-3 rounded-md border bg-surface p-3 max-[25rem]:p-2">
       <TimeRangePicker
         range={search.range ?? DEFAULT_RANGE}
         custom={search.from !== undefined && search.to !== undefined}

@@ -115,7 +115,7 @@ export function FilterBar({
     !!search.users?.length || !!search.cat?.length || extra.length > 0 || search.session !== undefined || !!search.ip || !!search.q;
 
   return (
-    <div className="@container/filters flex min-w-0 flex-col gap-3 rounded-md border bg-surface p-3">
+    <div className="@container/filters flex min-w-0 flex-col gap-3 rounded-md border bg-surface p-3 max-[25rem]:p-2">
       <TimeRangePicker
         range={search.range ?? "1h"}
         custom={search.from !== undefined && search.to !== undefined}
