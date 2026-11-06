@@ -2,7 +2,7 @@
 // (server code is the source); later tasks override per test with server.use(...).
 import type {
   ActionDetail, ActionRecord, AdminUser, Board, BoardItem, Channel, McpActivity, McpDetail, McpHistory, McpState,
-  Me, Notice, NoticeVersionSummary, RdpSession, RetentionPreview, Role, ScriptContent, ScriptKind, ScriptListItem,
+  Me, Notice, NoticeDisplayContent, NoticeVersionSummary, RdpSession, RetentionPreview, Role, ScriptContent, ScriptKind, ScriptListItem,
   ScriptVersion, Settings, UserSummary,
 } from "@/lib/api-types";
 import type { SseEvent } from "@/lib/sse";
@@ -50,7 +50,10 @@ export function boardEvent(b: Partial<Board>): SseEvent {
   return { event: "board", data: JSON.stringify({ now: NOW, mcps: [], ...b }) };
 }
 
-/** RDP session row (Plan 4 contract). Named rdpSession to stay clear of the `session` store (F17). */
+/**
+ * RDP session row (Plan 4 contract). Named rdpSession to stay clear of the `session` store (F17).
+ * notice_acknowledged defaults to true (preflight F03): a quiet card unless a test asks otherwise.
+ */
 export function rdpSession(p: Partial<RdpSession> = {}): RdpSession {
   return {
     session_id: 2,
@@ -61,10 +64,15 @@ export function rdpSession(p: Partial<RdpSession> = {}): RdpSession {
     reverse_dns: null,
     logon_at: NOW,
     connected_at: NOW,
-    state: "Active",
+    state: "active",
     idle_sec: 0,
-    resolution: "1920x1080",
+    resolution: "1920x1080@32",
     notice_acknowledged: true,
+    connection_id: 1,
+    client_build: 26100,
+    protocol: "rdp",
+    first_seen_ip: false,
+    first_seen_device: false,
     ...p,
   };
 }
@@ -218,6 +226,11 @@ export function previewFixture(p: Partial<RetentionPreview> = {}): RetentionPrev
     delete_to: "2026-05-08",
     ...p,
   };
+}
+
+/** POST /api/notice/display/open: the notice page in display mode. */
+export function noticeDisplayFixture(p: Partial<NoticeDisplayContent> = {}): NoticeDisplayContent {
+  return { display_id: 12, version: 3, title: "원격 접속 안내", body: "이 연결의 작업은 기록됩니다.", button_text: "확인", ...p };
 }
 
 export function noticeFixture(p: Partial<Notice> = {}): Notice {

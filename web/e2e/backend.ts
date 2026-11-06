@@ -240,6 +240,9 @@ export async function startBackend(): Promise<{ state: BackendState; adminLocal:
       "--external-host", "127.0.0.1",
       "--dev-otp-code", DEV_OTP_CODE,
       "--static-dir", DIST_DIR,
+      // no RDP session collection (Plan 4 default: wts): the board's session banner must not depend
+      // on this PC's sessions. Plan 4 Task 19 replaces this with a json: dev session file.
+      "--session-source", "none",
     ],
     {
       cwd: SERVER_DIR,

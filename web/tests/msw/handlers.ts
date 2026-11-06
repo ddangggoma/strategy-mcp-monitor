@@ -4,7 +4,7 @@ import { http, HttpResponse } from "msw";
 import type { McpConfig, McpCreate, NoticeContent, ScriptKind, ScriptUpload, Settings, UserCreate, UserPatch } from "@/lib/api-types";
 import {
   actionDetailFixture, activityFixture, adminUser, boardFixture, historyFixture, mcpDetailFixture, meFixture,
-  noticeFixture, noticeVersionFixture, previewFixture, scriptFixture, scriptListFixture, scriptVersionFixture,
+  noticeDisplayFixture, noticeFixture, noticeVersionFixture, previewFixture, scriptFixture, scriptListFixture, scriptVersionFixture,
   settingsFixture,
 } from "./fixtures";
 
@@ -112,4 +112,8 @@ export const handlers = [
   http.post("/api/notice/versions/:v/revert", ({ params }) =>
     HttpResponse.json(noticeFixture({ version: 2, reverted_from: id(params.v) })),
   ),
+
+  // notice page, display mode (Local only; the X-Notice-Token header is the credential)
+  http.post("/api/notice/display/open", () => HttpResponse.json(noticeDisplayFixture())),
+  http.post("/api/notice/display/ack", noContent),
 ];

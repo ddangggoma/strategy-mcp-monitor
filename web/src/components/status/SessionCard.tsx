@@ -1,3 +1,4 @@
+import { GlobeIcon, MonitorIcon, TriangleAlertIcon, type LucideIcon } from "lucide-react";
 import { useId, type ReactNode } from "react";
 import { copy } from "@/copy/ko";
 import type { RdpSession } from "@/lib/api-types";
@@ -6,7 +7,7 @@ import { formatKst, formatSeconds } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
 const DASH = "—";
-const f = copy.board.session.fields;
+const f = copy.sessions.fields;
 
 function Field({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
   return (
@@ -19,20 +20,54 @@ function Field({ label, children, className }: { label: string; children: ReactN
 
 const or = (v: string | null) => v ?? DASH;
 
-function noticeText(ack: boolean | null): string {
-  if (ack === null) return DASH;
-  return ack ? copy.board.session.noticeYes : copy.board.session.noticeNo;
+const RESOLUTION = /^(\d+)x(\d+)(?:@(\d+))?$/;
+
+/** `"1920x1080@32"` (or without `@bits`) in words; any other form is shown as it came. */
+function formatResolution(value: string | null): string {
+  if (value === null) return DASH;
+  const m = RESOLUTION.exec(value);
+  if (!m) return value;
+  return copy.sessions.resolution(Number(m[1]), Number(m[2]), m[3] === undefined ? null : Number(m[3]));
+}
+
+/** Whole minutes from one minute; the server resends idle time only when the minute changes (V10). */
+function formatIdle(sec: number | null): string {
+  return sec === null || sec < 60 ? DASH : copy.sessions.idle(Math.floor(sec / 60));
+}
+
+/** A fact worth a second look (first time this IP / device was seen): icon + words, neutral ink. */
+function Badge({ icon: Icon, children }: { icon: LucideIcon; children: string }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-sm border border-border-strong px-1.5 text-xs font-medium leading-5">
+      <Icon aria-hidden="true" className="size-3.5 shrink-0" />
+      {children}
+    </span>
+  );
+}
+
+function Notice({ ack }: { ack: boolean | null }) {
+  if (ack === null) return <span className="text-fg-muted">{copy.sessions.noticeUnknown}</span>;
+  if (ack) return <>{copy.sessions.noticeAcked}</>;
+  // not acknowledged yet: the one caution on the card (amber = the suspect hue, the house warning colour)
+  return (
+    <span className="inline-flex items-center gap-1 font-medium text-state-suspect-fg">
+      <TriangleAlertIcon aria-hidden="true" className="size-3.5 shrink-0 text-state-suspect" />
+      {copy.sessions.noticePending}
+    </span>
+  );
 }
 
 /**
  * One remote desktop session (§6.2): every field, the client IP in full (a machine value, mono),
- * "—" for anything not reported. Elapsed time counts on the shared 1 s clock.
+ * "—" for anything not reported. Elapsed time counts on the shared 1 s clock; idle time is the
+ * server's whole minutes. First-seen IP/device badges sit next to the user's name.
  */
 export function SessionCard({ session, className }: { session: RdpSession; className?: string }) {
   const id = useId();
   const { wall } = useClock();
   const since = session.connected_at ?? session.logon_at;
   const elapsed = since === null ? null : (wall - Date.parse(since)) / 1000;
+  const badges = session.first_seen_ip || session.first_seen_device;
 
   return (
     <article
@@ -40,11 +75,20 @@ export function SessionCard({ session, className }: { session: RdpSession; class
       className={cn("@container rounded-md border border-border bg-surface p-4", className)}
     >
       <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm @md:grid-cols-3">
-        <Field label={f.user} className="col-span-full">
-          <span id={id} className="text-lg font-semibold">
-            {session.user}
-          </span>
-        </Field>
+        <div className="col-span-full min-w-0">
+          <dt className="text-xs text-fg-muted">{f.user}</dt>
+          <dd className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+            <span id={id} className="min-w-0 truncate text-lg font-semibold">
+              {session.user}
+            </span>
+            {badges ? (
+              <span className="flex flex-wrap gap-1.5">
+                {session.first_seen_ip ? <Badge icon={GlobeIcon}>{copy.sessions.firstSeenIp}</Badge> : null}
+                {session.first_seen_device ? <Badge icon={MonitorIcon}>{copy.sessions.firstSeenDevice}</Badge> : null}
+              </span>
+            ) : null}
+          </dd>
+        </div>
         <Field label={f.domain}>{or(session.domain)}</Field>
         <Field label={f.clientName}>{or(session.client_name)}</Field>
         <Field label={f.clientIp}>
@@ -61,14 +105,18 @@ export function SessionCard({ session, className }: { session: RdpSession; class
             {formatSeconds(elapsed)}
           </span>
         </Field>
-        <Field label={f.state}>{session.state}</Field>
+        <Field label={f.state}>{copy.sessions.state[session.state]}</Field>
         <Field label={f.idle}>
-          <span data-volatile="" data-numeric="">
-            {formatSeconds(session.idle_sec)}
+          <span data-testid="session-idle" data-volatile="" data-numeric="">
+            {formatIdle(session.idle_sec)}
           </span>
         </Field>
-        <Field label={f.resolution}>{or(session.resolution)}</Field>
-        <Field label={f.notice}>{noticeText(session.notice_acknowledged)}</Field>
+        <Field label={f.resolution}>
+          <span data-testid="session-resolution">{formatResolution(session.resolution)}</span>
+        </Field>
+        <Field label={f.notice}>
+          <Notice ack={session.notice_acknowledged} />
+        </Field>
       </dl>
     </article>
   );

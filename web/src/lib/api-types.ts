@@ -53,10 +53,19 @@ export interface RdpSession {
   reverse_dns: string | null;
   logon_at: string | null;
   connected_at: string | null;
-  state: string;
+  /** Board sessions are active ones only (locked included, V7). */
+  state: "active" | "locked";
+  /** Server-computed from WTS LastInputTime; resent only when the whole minute changes (V10). */
   idle_sec: number | null;
+  /** "1920x1080@32" (width x height @ colour depth). */
   resolution: string | null;
+  /** null: no notice display for this connection. */
   notice_acknowledged: boolean | null;
+  connection_id: number;
+  client_build: number | null;
+  protocol: "rdp" | "console" | "other";
+  first_seen_ip: boolean;
+  first_seen_device: boolean;
 }
 export interface Board {
   now: string;
@@ -206,6 +215,11 @@ export interface NoticeContent {
   title: string;
   body: string;
   button_text: string;
+}
+/** POST /api/notice/display/open (Local only, X-Notice-Token header): the version pinned when the display was made (V15). */
+export interface NoticeDisplayContent extends NoticeContent {
+  display_id: number;
+  version: number;
 }
 /** Version 0 is the built-in text: `created_at` and `author` are null. */
 export interface Notice extends NoticeContent {

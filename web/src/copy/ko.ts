@@ -139,7 +139,7 @@ export const copy = {
     noMcpHint: "로컬 관리 모드에서 Admin이 MCP를 등록하면 여기에 바로 나타나요.",
     connected: "접속 중",
     noSession: "접속자 없음",
-    sessionsNotReady: "원격 접속 정보는 다음 업데이트부터 표시돼요.",
+    sessionsNotReady: "원격 접속 정보를 아직 받지 못했어요.",
     latency: "지연",
     uptime24h: "24시간 가동률",
     lastCheck: "마지막 점검",
@@ -154,22 +154,93 @@ export const copy = {
     sessionsTitle: "원격 접속",
     setupHint: "아직 Admin이 없어요. 이 PC에서 첫 Admin을 만들면 관리 기능을 쓸 수 있어요.",
     setupLink: "초기 설정 시작",
-    session: {
-      fields: {
-        user: "사용자",
-        domain: "로그온 도메인",
-        clientName: "클라이언트 PC",
-        clientIp: "IP 주소",
-        reverseDns: "역방향 DNS",
-        connectedAt: "접속 시각",
-        elapsed: "경과 시간",
-        state: "상태",
-        idle: "유휴 시간",
-        resolution: "해상도",
-        notice: "고지 확인",
-      },
-      noticeYes: "확인함",
-      noticeNo: "확인 안 함",
+  },
+
+  /** Remote desktop sessions: the board's session card and the sessions screen (one namespace, F16). */
+  sessions: {
+    title: "세션",
+    current: "현재 세션",
+    history: "접속 이력",
+    failures: "로그인 실패",
+    collectors: "수집 상태",
+    fields: {
+      user: "사용자",
+      domain: "로그온 도메인",
+      clientName: "클라이언트 PC",
+      clientIp: "IP 주소",
+      reverseDns: "역방향 DNS",
+      connectedAt: "접속 시각",
+      elapsed: "경과 시간",
+      state: "상태",
+      idle: "유휴 시간",
+      resolution: "해상도",
+      notice: "사전 고지",
+    },
+    /** WTS session states: `connected` is a client at the logon screen, not yet signed in. */
+    state: {
+      active: "사용 중",
+      locked: "잠김",
+      disconnected: "연결 끊김",
+      connected: "로그온 전",
+    },
+    firstSeenIp: "처음 보는 IP",
+    firstSeenDevice: "처음 보는 기기",
+    noticeAcked: "확인함",
+    noticePending: "확인 전",
+    noticeUnknown: "알 수 없음",
+    /** Whole minutes (the server resends idle time when the minute changes, V10). */
+    idle: (min: number) => {
+      const h = Math.floor(min / 60);
+      const m = min % 60;
+      if (h === 0) return `${m}분`;
+      return m === 0 ? `${h}시간` : `${h}시간 ${m}분`;
+    },
+    /** "1920x1080@32" from the server; the colour depth may be missing. */
+    resolution: (w: number, h: number, bits: number | null) => (bits ? `${w}×${h}, ${bits}비트` : `${w}×${h}`),
+    kinds: {
+      logon: "새 로그온",
+      reconnect: "다시 연결",
+      existing: "서비스 시작 때 접속 중",
+    },
+    endReasons: {
+      disconnect: "연결 끊김",
+      logoff: "로그오프",
+      reconnected: "다시 연결됨",
+      service_stop: "서비스 중지",
+    },
+    ongoing: "접속 중",
+    /** Time from the notice's last showing to the button. */
+    ackIn: (ms: number) => {
+      const s = Math.round(ms / 1000);
+      if (s < 1) return "1초 안에 확인";
+      return s < 60 ? `${s}초 만에 확인` : `${Math.floor(s / 60)}분 ${s % 60}초 만에 확인`;
+    },
+    unacked: "확인 안 함",
+    more: "더 보기",
+    days: (n: number) => `최근 ${n}일`,
+    empty: "이 기간에는 접속 기록이 없어요.",
+    failuresEmpty: "이 기간에는 로그인 실패가 없어요.",
+    collectorOk: "수집 중",
+    collectorDown: (error: string) => `수집 중단: ${error}`,
+  },
+
+  /** Bypass detection (Global Constraints `tamper` events); the dashboard card is `dashboard.bypassEvents`. */
+  tamper: {
+    empty: "최근 우회 탐지 이벤트가 없어요.",
+    events: {
+      agent_exited: "세션 에이전트 종료",
+      agent_unresponsive: "세션 에이전트 응답 없음",
+      agent_restart_storm: "세션 에이전트 반복 종료",
+      agent_impersonation: "세션 에이전트 사칭 시도",
+      notice_token_misuse: "다른 세션에서 고지 토큰 사용",
+      script_hash_mismatch: "스크립트 해시 불일치",
+      script_file_changed: "스크립트 파일 변경",
+      script_file_missing: "스크립트 파일 없음",
+      log_file_removed: "로그 파일 삭제",
+      log_file_truncated: "로그 파일 내용 잘림",
+      audit_policy_changed: "감사 정책 변경",
+      log_cleared: "Windows 이벤트 로그 지움",
+      audit_config_changed: "감사 설정 레지스트리 변경",
     },
   },
 
@@ -576,6 +647,11 @@ export const copy = {
     unchanged: "바뀐 내용이 없어 새 버전을 만들지 않았어요.",
     acknowledged: "확인했어요. 이 창을 닫아도 돼요.",
     loadFailed: "고지 내용을 불러오지 못했어요. 새로 고친 뒤 다시 시도하세요.",
+    /** The notice window (display mode): the token left the address bar, so a reload cannot help. */
+    loadFailedRetry: "고지 내용을 불러오지 못했어요. 다시 시도하세요.",
+    displayExpired: "이 고지는 이미 확인했거나 새 고지로 바뀌었어요. 이 창을 닫아도 돼요.",
+    ackFailed: "확인한 사실을 서버에 남기지 못했어요. 다시 시도하세요.",
+    retry: "다시 시도",
     /** Version 0: must equal server/app/notice/defaults.py DEFAULT_NOTICE (ko.test.ts checks). */
     builtIn: {
       title: "원격 접속 행동 감사 안내",

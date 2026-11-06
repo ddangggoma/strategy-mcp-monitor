@@ -9,6 +9,8 @@ export interface NoticeDialogProps {
   /** `standalone`: the real notice, a native modal dialog. `preview`: the same panel, drawn in place. */
   mode: "standalone" | "preview";
   onAcknowledge?: () => void;
+  /** Standalone: the acknowledgement is on its way — the button says so (aria-busy) and ignores presses. */
+  busy?: boolean;
 }
 
 /**
@@ -20,7 +22,7 @@ export interface NoticeDialogProps {
  * close gets through anyway (Chromium lets a repeated Escape close a dialog whose `cancel` was
  * already refused) it opens again. Only the button acknowledges.
  */
-export function NoticeDialog({ content, mode, onAcknowledge }: NoticeDialogProps) {
+export function NoticeDialog({ content, mode, onAcknowledge, busy = false }: NoticeDialogProps) {
   const ids = { title: useId(), body: useId() };
   const body = useMemo(() => renderNoticeMarkup(parseNoticeMarkup(content.body)), [content.body]);
   const standalone = mode === "standalone";
@@ -48,7 +50,9 @@ export function NoticeDialog({ content, mode, onAcknowledge }: NoticeDialogProps
           // screen reader hears it is unavailable (its look is not dimmed: the preview shows the real one)
           tabIndex={standalone ? undefined : -1}
           aria-disabled={standalone ? undefined : true}
-          onClick={standalone ? onAcknowledge : undefined}
+          // never `disabled` while busy: the focus stays on the button
+          aria-busy={standalone && busy ? true : undefined}
+          onClick={standalone && !busy ? onAcknowledge : undefined}
         >
           {content.button_text}
         </button>

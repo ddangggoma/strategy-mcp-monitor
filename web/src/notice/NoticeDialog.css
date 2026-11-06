@@ -98,6 +98,17 @@
     transform: scale(0.98);
   }
 
+  /* the acknowledgement is on its way (up to 3 s with retries): presses are ignored, so say so */
+  .notice-button[aria-busy="true"],
+  .notice-button[aria-busy="true"]:hover {
+    cursor: progress;
+    background-color: color-mix(in oklch, var(--color-accent) 70%, transparent);
+  }
+
+  .notice-button[aria-busy="true"]:active {
+    transform: none;
+  }
+
   /* ---- standalone: the native modal dialog ---- */
 
   .notice-dialog {
@@ -151,6 +162,14 @@
     place-items: center;
     min-height: 100dvh;
     padding: calc(var(--spacing) * 4);
+  }
+
+  /* the lines after the button (acknowledged, expired, a failure + retry): one centred column */
+  .notice-page-content {
+    display: grid;
+    justify-items: center;
+    gap: calc(var(--spacing) * 4);
+    text-align: center;
   }
 
   .notice-page-message {

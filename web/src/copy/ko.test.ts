@@ -48,7 +48,44 @@ it("pins the fixed terms", () => {
 
 it("has every top-level section the screens import", () => {
   expect(Object.keys(copy).sort()).toEqual(["board", "channel", "common", "dashboard", "deny", "diff", "errors", "issues", "login",
-    "mcp", "nav", "notice", "roles", "scripts", "settings", "setup", "states", "stream", "toasts", "users"].sort());
+    "mcp", "nav", "notice", "roles", "scripts", "sessions", "settings", "setup", "states", "stream", "tamper", "toasts", "users"].sort());
+});
+
+it("names every tamper event", () => {
+  const names = ["agent_exited", "agent_unresponsive", "agent_restart_storm", "agent_impersonation", "notice_token_misuse",
+    "script_hash_mismatch", "script_file_changed", "script_file_missing", "log_file_removed", "log_file_truncated",
+    "audit_policy_changed", "log_cleared", "audit_config_changed"];
+  for (const n of names) expect(copy.tamper.events[n as keyof typeof copy.tamper.events]).toMatch(/\S/);
+  expect(Object.keys(copy.tamper.events).sort()).toEqual([...names].sort()); // exactly the Global Constraints list
+});
+
+it("names every session state, connection kind and end reason the server sends", () => {
+  expect(Object.keys(copy.sessions.state).sort()).toEqual(["active", "connected", "disconnected", "locked"]);
+  expect(Object.keys(copy.sessions.kinds).sort()).toEqual(["existing", "logon", "reconnect"]);
+  expect(Object.keys(copy.sessions.endReasons).sort()).toEqual(["disconnect", "logoff", "reconnected", "service_stop"]);
+  // one place for the session card's words (F16): the board no longer has its own copy
+  expect(copy.board).not.toHaveProperty("session");
+  expect(copy.dashboard).not.toHaveProperty("tamperTitle");
+});
+
+it("formats session numbers in words", () => {
+  expect(copy.sessions.idle(1)).toBe("1분");
+  expect(copy.sessions.idle(60)).toBe("1시간");
+  expect(copy.sessions.idle(61)).toBe("1시간 1분");
+  expect(copy.sessions.resolution(1920, 1080, 32)).toBe("1920×1080, 32비트");
+  expect(copy.sessions.resolution(1920, 1080, null)).toBe("1920×1080");
+  expect(copy.sessions.ackIn(2000)).toBe("2초 만에 확인");
+  expect(copy.sessions.ackIn(400)).toBe("1초 안에 확인");
+  expect(copy.sessions.ackIn(125_000)).toBe("2분 5초 만에 확인");
+  expect(copy.sessions.days(30)).toContain("30일");
+  expect(copy.sessions.collectorDown("access denied")).toContain("access denied");
+});
+
+it("tells the notice window what happened in display mode", () => {
+  expect(copy.board.sessionsNotReady).toBe("원격 접속 정보를 아직 받지 못했어요.");
+  for (const k of ["displayExpired", "ackFailed", "retry", "loadFailedRetry"] as const) expect(copy.notice[k]).toMatch(/\S/);
+  // the token left the address bar, so a reload cannot help: the retry button is the way back
+  expect(copy.notice.loadFailedRetry).not.toMatch(/새로 고/);
 });
 
 it("states the login lock and code rules with numbers", () => {

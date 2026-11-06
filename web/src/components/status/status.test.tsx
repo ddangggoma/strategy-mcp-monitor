@@ -249,20 +249,91 @@ describe("ConnectionBanner", () => {
 describe("SessionCard", () => {
   it("shows every §6.2 field, the full IP and a dash for missing values", () => {
     render(<SessionCard session={rdpSession({ client_ip: "10.0.3.21", reverse_dns: null, idle_sec: 125, notice_acknowledged: false })} />);
-    const card = screen.getByRole("article");
+    const card = screen.getByRole("article", { name: "hong" });
     expect(within(card).getByText("hong")).toBeInTheDocument();
     expect(within(card).getByText("CORP")).toBeInTheDocument();
     expect(within(card).getByText("HONG-PC")).toBeInTheDocument();
     expect(within(card).getByText("10.0.3.21")).toBeInTheDocument();
-    expect(within(card).getByText("Active")).toBeInTheDocument();
-    expect(within(card).getByText("1920x1080")).toBeInTheDocument();
-    expect(within(card).getByText("2분 5초")).toBeInTheDocument();
-    expect(within(card).getByText(copy.board.session.noticeNo)).toBeInTheDocument();
+    expect(within(card).getByText(copy.sessions.state.active)).toBeInTheDocument();
+    expect(within(card).getByText(copy.sessions.resolution(1920, 1080, 32))).toBeInTheDocument();
+    expect(within(card).getByText(copy.sessions.idle(2))).toBeInTheDocument();
+    expect(within(card).getByText(copy.sessions.noticePending)).toBeInTheDocument();
     expect(within(card).getByText(formatKst(NOW))).toBeInTheDocument();
-    const labels = Object.values(copy.board.session.fields);
+    const labels = Object.values(copy.sessions.fields);
     for (const label of labels) expect(within(card).getByText(label)).toBeInTheDocument();
     // reverse DNS is null
     expect(within(card).getAllByText("—").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("SessionCard shows first-seen badges, lock state, idle minutes and a pending notice", () => {
+    render(<SessionCard session={rdpSession({ first_seen_ip: true, first_seen_device: false, state: "locked", notice_acknowledged: false, idle_sec: 125, resolution: "1920x1080@32" })} />);
+    expect(screen.getByText(copy.sessions.firstSeenIp)).toBeInTheDocument();
+    expect(screen.queryByText(copy.sessions.firstSeenDevice)).toBeNull();
+    expect(screen.getByText(copy.sessions.state.locked)).toBeInTheDocument();
+    expect(screen.getByText(copy.sessions.idle(2))).toBeInTheDocument();
+    expect(screen.getByText(copy.sessions.noticePending)).toBeInTheDocument();
+    expect(screen.getByText(copy.sessions.resolution(1920, 1080, 32))).toBeInTheDocument();
+  });
+
+  it.each([[true, "noticeAcked"], [null, "noticeUnknown"]] as const)("SessionCard notice state %s", (value, key) => {
+    render(<SessionCard session={rdpSession({ notice_acknowledged: value })} />);
+    expect(screen.getByText(copy.sessions[key])).toBeInTheDocument();
+  });
+
+  it("marks badges and the pending notice with an icon as well as words", () => {
+    render(<SessionCard session={rdpSession({ first_seen_ip: true, first_seen_device: true, notice_acknowledged: false })} />);
+    for (const word of [copy.sessions.firstSeenIp, copy.sessions.firstSeenDevice, copy.sessions.noticePending]) {
+      const el = screen.getByText(word);
+      expect(el.querySelector("svg[aria-hidden='true']"), word).not.toBeNull();
+    }
+    expect(screen.getByText(copy.sessions.noticePending)).toHaveClass("text-state-suspect-fg");
+    // the badges belong to the card's name area, readable in order after the user
+    const card = screen.getByRole("article", { name: "hong" });
+    expect(card.textContent?.indexOf(copy.sessions.firstSeenIp)).toBeGreaterThan(card.textContent?.indexOf("hong") ?? -1);
+  });
+
+  it("shows idle time in whole minutes from one minute, a dash below that", () => {
+    const idleOf = (idle_sec: number | null) => {
+      const { unmount } = render(<SessionCard session={rdpSession({ idle_sec })} />);
+      const text = screen.getByTestId("session-idle").textContent;
+      unmount();
+      return text;
+    };
+    expect(idleOf(null)).toBe("—");
+    expect(idleOf(0)).toBe("—");
+    expect(idleOf(59)).toBe("—");
+    expect(idleOf(60)).toBe(copy.sessions.idle(1));
+    expect(idleOf(119)).toBe(copy.sessions.idle(1));
+    expect(idleOf(3_725)).toBe(copy.sessions.idle(62));
+    expect(copy.sessions.idle(62)).toBe("1시간 2분");
+    expect(copy.sessions.idle(120)).toBe("2시간");
+  });
+
+  it("does not count idle time on the client (the server sends it when the minute changes, V10)", () => {
+    vi.useFakeTimers({ now: new Date(NOW).getTime() });
+    render(<SessionCard session={rdpSession({ idle_sec: 125 })} />);
+    act(() => vi.advanceTimersByTime(120_000));
+    expect(screen.getByTestId("session-idle")).toHaveTextContent(copy.sessions.idle(2));
+  });
+
+  it("reads the resolution with or without the colour depth, and keeps an unknown form as it is", () => {
+    const resOf = (resolution: string | null) => {
+      const { unmount } = render(<SessionCard session={rdpSession({ resolution })} />);
+      const text = screen.getByTestId("session-resolution").textContent;
+      unmount();
+      return text;
+    };
+    expect(resOf("1920x1080@32")).toBe(copy.sessions.resolution(1920, 1080, 32));
+    expect(resOf("1280x720")).toBe(copy.sessions.resolution(1280, 720, null));
+    expect(resOf("odd")).toBe("odd");
+    expect(resOf(null)).toBe("—");
+    expect(copy.sessions.resolution(1920, 1080, 32)).toBe("1920×1080, 32비트");
+    expect(copy.sessions.resolution(1280, 720, null)).toBe("1280×720");
+  });
+
+  it.each(["active", "locked"] as const)("names the %s state in words", (state) => {
+    render(<SessionCard session={rdpSession({ state })} />);
+    expect(screen.getByText(copy.sessions.state[state])).toBeInTheDocument();
   });
 
   it("counts the connected time every second", () => {

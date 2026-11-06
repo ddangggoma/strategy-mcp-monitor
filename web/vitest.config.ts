@@ -7,12 +7,14 @@ export default defineConfig({
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
-  // ko.test.ts reads the server's built-in notice text to catch drift between the two copies
+  // ko.test.ts reads the server's built-in notice text, NoticeApp.test.tsx the agent's notice window
+  // title, to catch drift between the copies
   server: {
     fs: {
       allow: [
         fileURLToPath(new URL(".", import.meta.url)),
         fileURLToPath(new URL("../server/app/notice/", import.meta.url)),
+        fileURLToPath(new URL("../agent/mcp_agent/", import.meta.url)),
       ],
     },
   },
