@@ -2,11 +2,11 @@
 // policy mirror allows them (`can(me, action)`): on the external channel they are never requested,
 // so a 404 there is never mistaken for "nothing here" (Global Constraints).
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { McpConfig, McpDetail, ScriptKind } from "@/lib/api-types";
+import type { AuditQuery, LogQuery, McpConfig, McpDetail, ScriptKind } from "@/lib/api-types";
 import * as ep from "@/lib/endpoints";
 import { can, type Action } from "@/lib/permissions";
 import { useSession } from "@/lib/session";
-import { TAMPER_LIMIT, qk } from "./query-keys";
+import { TAMPER_LIMIT, qk, type HistogramGroup } from "./query-keys";
 
 export interface QueryGate {
   /** Extra condition from the caller (a dialog is open, a tab is selected…); default true. */
@@ -95,7 +95,73 @@ export function useTamperRecent(gate: QueryGate = {}) {
   });
 }
 
+// ---- logs and audit (both channels, any signed-in user) -------------------------------
+
+/** How often the index status is re-read while the index is still being built. */
+export const LOG_STATUS_POLL_MS = 5000;
+
+/**
+ * Log lines newest first, one page per "더 보기" (cursor `next_cursor`). A new filter set keeps the
+ * previous lines on screen until its first page arrives (no empty flash between filters).
+ */
+export function useLogPages(q: LogQuery, gate: QueryGate = {}) {
+  return useInfiniteQuery({
+    queryKey: qk.logs(q),
+    queryFn: ({ pageParam }) => ep.logs(q, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (p) => p.next_cursor ?? undefined,
+    enabled: useAllowed("view_logs", gate),
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** `buckets` 10–200 (the server rejects fewer). */
+export function useLogHistogram(q: LogQuery, group: HistogramGroup, buckets: number, gate: QueryGate = {}) {
+  return useQuery({
+    queryKey: qk.logHistogram(q, group, buckets),
+    queryFn: () => ep.logHistogram(q, { buckets, group }),
+    enabled: useAllowed("view_logs", gate),
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useLogUsers(q: LogQuery, gate: QueryGate = {}) {
+  return useQuery({
+    queryKey: qk.logUsers(q),
+    queryFn: () => ep.logUsers(q),
+    enabled: useAllowed("view_logs", gate),
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** Re-read every 5 s while the index is not ready (results may be partial); stops once it is. */
+export function useLogStatus(gate: QueryGate = {}) {
+  return useQuery({
+    queryKey: qk.logStatus,
+    queryFn: ep.logStatus,
+    enabled: useAllowed("view_logs", gate),
+    refetchInterval: (query) => (query.state.data?.ready === false ? LOG_STATUS_POLL_MS : false),
+  });
+}
+
+/** Admin actions and/or login attempts (`q.kind`), paged like useLogPages. */
+export function useAuditPages(q: AuditQuery, gate: QueryGate = {}) {
+  return useInfiniteQuery({
+    queryKey: qk.audit(q),
+    queryFn: ({ pageParam }) => ep.audit(q, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (p) => p.next_cursor ?? undefined,
+    enabled: useAllowed("view_audit", gate),
+    placeholderData: keepPreviousData,
+  });
+}
+
 // ---- Local only ----------------------------------------------------------------------
+
+/** The Windows service's start type next to the setting (never asked on the external channel). */
+export function useServiceStatus(gate: QueryGate = {}) {
+  return useQuery({ queryKey: qk.service, queryFn: ep.serviceStatus, enabled: useAllowed("edit_global_settings", gate) });
+}
 
 export function useScripts(id: number, gate: QueryGate = {}) {
   return useQuery({ queryKey: qk.scripts(id), queryFn: () => ep.scripts(id), enabled: useAllowed("view_scripts", gate) });

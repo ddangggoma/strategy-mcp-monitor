@@ -18,6 +18,8 @@ const chunks = {
   settings: () => import("@/admin/settings/SettingsPage"),
   notice: () => import("@/admin/notice/NoticeEditorPage"),
   palette: () => import("@/admin/shell/CommandPalette"),
+  logs: () => import("@/admin/logs/LogsPage"),
+  audit: () => import("@/admin/audit/AuditPage"),
 } as const;
 
 export type Chunk = keyof typeof chunks;

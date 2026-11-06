@@ -1,9 +1,10 @@
 // Typed response builders shared by every component test. Values follow web/src/lib/api-types.ts
 // (server code is the source); later tasks override per test with server.use(...).
 import type {
-  ActionDetail, ActionRecord, AdminUser, Board, BoardItem, Channel, CollectorStatus, CurrentSession, LogonFailure, McpActivity, McpDetail, McpHistory, McpState,
-  Me, Notice, NoticeDisplayContent, NoticeVersionSummary, RdpSession, RetentionPreview, Role, ScriptContent, ScriptKind, ScriptListItem,
-  ScriptVersion, SessionConnection, SessionsHistory, Settings, TamperEvent, UserSummary,
+  ActionDetail, ActionRecord, AdminUser, Board, BoardItem, Channel, CollectorStatus, CurrentSession, LogHistogram, LogIndexStatus,
+  LogItem, LogonFailure, LogPage, LogUserCount, McpActivity, McpDetail, McpHistory, McpState, Me, Notice, NoticeDisplayContent,
+  NoticeVersionSummary, RdpSession, RetentionPreview, Role, ScriptContent, ScriptKind, ScriptListItem, ScriptVersion, ServiceStatus,
+  SessionConnection, SessionsHistory, Settings, TamperEvent, UserSummary,
 } from "@/lib/api-types";
 import type { SseEvent } from "@/lib/sse";
 
@@ -298,8 +299,73 @@ export function previewFixture(p: Partial<RetentionPreview> = {}): RetentionPrev
     delete_bytes: 1_048_576,
     delete_from: "2026-04-01",
     delete_to: "2026-05-08",
+    delete_events: 0,
     ...p,
   };
+}
+
+/** One indexed line: a PowerShell command by CORP\hong in session 2 (override per test). */
+export function logItem(p: Partial<LogItem> = {}): LogItem {
+  return {
+    id: 1,
+    ts: NOW,
+    cat: "activity.command",
+    event: null,
+    user: "CORP\\hong",
+    session_id: 2,
+    client_ip: "10.0.3.21",
+    outcome: null,
+    data: { text: "Get-Process", shell: "powershell" },
+    ...p,
+  };
+}
+
+export function logPage(items: LogItem[], next: string | null = null): LogPage {
+  return { items, next_cursor: next, index: { ready: true } };
+}
+
+/** 13:00–14:00 KST in six 600 s bars (13:00, 13:10, …, 13:50), counts [1, 2, 3, 0, 0, 4], one category. */
+export function histogramFixture(p: Partial<LogHistogram> = {}): LogHistogram {
+  const starts = Array.from({ length: 6 }, (_, i) => `2026-11-04T13:${i}0:00.000+09:00`);
+  return {
+    from: "2026-11-04T13:00:00.000+09:00",
+    to: "2026-11-04T14:00:00.000+09:00",
+    bucket_sec: 600,
+    starts,
+    series: [{ key: "activity.command", counts: [1, 2, 3, 0, 0, 4] }],
+    total: 10,
+    source: "rollup",
+    ...p,
+  };
+}
+
+export function userCounts(): LogUserCount[] {
+  return [
+    { user: "CORP\\hong", count: 42 },
+    { user: "user1@example.com", count: 7 },
+  ];
+}
+
+/** A ready index over two days of logs. */
+export function logStatusFixture(p: Partial<LogIndexStatus> = {}): LogIndexStatus {
+  return {
+    ready: true,
+    rebuilding: false,
+    files: 2,
+    pending_files: 0,
+    pending_bytes: 0,
+    rows: 1200,
+    bad_lines: 0,
+    oldest_day: "2026-11-03",
+    newest_day: "2026-11-04",
+    last_indexed_at: NOW,
+    ...p,
+  };
+}
+
+/** Installed and in step with the setting (`delayed-auto`, as settingsFixture). */
+export function serviceStatusFixture(p: Partial<ServiceStatus> = {}): ServiceStatus {
+  return { installed: true, running_as_service: true, start_type: "delayed-auto", desired: "delayed-auto", in_sync: true, ...p };
 }
 
 /** POST /api/notice/display/open: the notice page in display mode. */

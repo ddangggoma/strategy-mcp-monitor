@@ -29,6 +29,13 @@ export function formatKst(iso: string): string {
   return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`;
 }
 
+/** `YYYY-MM-DD HH:mm:ss.SSS` in KST (log lines: same-second events stay in order). */
+export function formatKstMs(iso: string): string {
+  // milliseconds are the same in every time zone (offsets are whole minutes)
+  const ms = String(new Date(iso).getUTCMilliseconds()).padStart(3, "0");
+  return `${formatKst(iso)}.${ms}`;
+}
+
 /** `MM-DD HH:mm` in KST. */
 export function formatKstShort(iso: string): string {
   const p = kstParts(iso);

@@ -20,6 +20,7 @@ import { bootstrapStatus } from "@/lib/endpoints";
 import { session } from "@/lib/session";
 import { AppShell } from "./shell/AppShell";
 import { LiveProvider, type LiveValue } from "./live";
+import { parseAuditSearch, parseLogSearch, type AuditSearch, type LogSearch } from "./logs/search";
 import { qk } from "./query-keys";
 import { parseDays, type SessionDays } from "./sessions/period";
 
@@ -163,6 +164,21 @@ const sessionsRoute = createRoute({
   component: lazyRouteComponent(() => import("./sessions/SessionsPage"), "SessionsPage"),
 });
 
+/** Filters live only in the URL (W34); malformed values are dropped by the parsers. */
+const logsRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: "/admin/logs",
+  validateSearch: (s: Record<string, unknown>): LogSearch => parseLogSearch(s),
+  component: lazyRouteComponent(() => import("./logs/LogsPage"), "LogsPage"),
+});
+
+const auditRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: "/admin/audit",
+  validateSearch: (s: Record<string, unknown>): AuditSearch => parseAuditSearch(s),
+  component: lazyRouteComponent(() => import("./audit/AuditPage"), "AuditPage"),
+});
+
 const usersRoute = createRoute({
   getParentRoute: () => authedRoute,
   path: "/admin/users",
@@ -190,6 +206,8 @@ const routeTree = rootRoute.addChildren([
     mcpCreateRoute,
     mcpDetailRoute,
     sessionsRoute,
+    logsRoute,
+    auditRoute,
     usersRoute,
     settingsRoute,
     noticeRoute,

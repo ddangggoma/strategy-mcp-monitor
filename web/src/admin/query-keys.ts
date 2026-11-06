@@ -1,6 +1,6 @@
 // React Query keys (plan Appendix B). Everything about one MCP sits under ["mcp", id], so
 // invalidating qk.mcp(id) also refreshes its history, actions and scripts.
-import type { ScriptKind } from "@/lib/api-types";
+import type { AuditQuery, LogQuery, ScriptKind } from "@/lib/api-types";
 
 /** Recent tamper events kept in the cache (the dashboard card shows the newest 10). */
 export const TAMPER_LIMIT = 50;
@@ -29,4 +29,13 @@ export const qk = {
   sessionsHistory: (days: number) => ["sessions", "history", days] as const,
   collectors: ["sessions", "collectors"],
   tamper: ["tamper"],
+  /** Pages of one filter set (infinite query); every log read sits under ["logs"]. */
+  logs: (q: LogQuery) => ["logs", "page", q] as const,
+  logHistogram: (q: LogQuery, group: HistogramGroup, buckets: number) => ["logs", "histogram", q, group, buckets] as const,
+  logUsers: (q: LogQuery) => ["logs", "users", q] as const,
+  logStatus: ["logs", "status"],
+  audit: (q: AuditQuery) => ["audit", q] as const,
+  service: ["service"],
 } as const;
+
+export type HistogramGroup = "none" | "cat" | "user";

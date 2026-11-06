@@ -18,7 +18,7 @@ import { NAV_ITEMS, navReason } from "./Nav";
 import { PlannedFeature } from "./PlannedFeature";
 import { warmChunks } from "../../../tests/warm";
 
-warmChunks("dashboard", "mcpList", "mcpDetail", "chart", "login", "settings", "palette");
+warmChunks("dashboard", "mcpList", "mcpDetail", "chart", "login", "settings", "palette", "logs", "audit");
 
 /** The admin app at `route` with `me` logged in; waits until the shell's navigation is there. */
 async function renderShell(me: Me, route = "/admin") {
@@ -34,8 +34,6 @@ const navLink = (name: string) =>
 it("shows planned and forbidden nav items disabled with reasons", async () => {
   await renderShell(meFixture("developer", "external"));
   const blocked: [string, DisabledReason][] = [
-    [copy.nav.logs, "planned_logs"],
-    [copy.nav.audit, "planned_audit"],
     [copy.nav.users, "local_only"],
     [copy.nav.notice, "local_only"],
     [copy.nav.settings, "local_only"],
@@ -63,6 +61,51 @@ it("opens the sessions nav item for developers on both channels and gates it for
   expect(navReason(meFixture(null, "external"), sessions)).toBe("login");
   expect(navReason(meFixture(null, "local"), sessions)).toBe("login");
   expect(sessions.planned).toBeNull();
+});
+
+it("opens the logs and audit nav for signed-in users on both channels", async () => {
+  for (const channel of ["local", "external"] as const) {
+    const { unmount } = await renderShell(meFixture("developer", channel));
+    for (const name of [copy.nav.logs, copy.nav.audit])
+      expect(screen.getByRole("link", { name })).not.toHaveAttribute("aria-disabled");
+    expect(navLink(copy.nav.logs)).toHaveAttribute("href", "/admin/logs");
+    expect(navLink(copy.nav.audit)).toHaveAttribute("href", "/admin/audit");
+    unmount();
+  }
+  for (const key of ["logs", "audit"] as const) {
+    const item = NAV_ITEMS.find((i) => i.key === key);
+    if (!item) throw new Error(`no ${key} nav item`);
+    expect(item.planned).toBeNull();
+    expect(navReason(meFixture(null, "external"), item)).toBe("login");
+  }
+  // no screen is "planned" any more; the reasons stay for the copy deck (like planned_sessions)
+  expect(NAV_ITEMS.filter((i) => i.planned !== null)).toEqual([]);
+});
+
+it("opens the logs and audit pages with a heading, from the nav and from the palette", async () => {
+  const { router } = await renderShell(meFixture("developer", "external"));
+  await userEvent.click(navLink(copy.nav.logs));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/admin/logs"));
+  expect(await screen.findByRole("heading", { level: 1, name: copy.logs.title }, { timeout: 5000 })).toBeInTheDocument();
+  expect(navLink(copy.nav.logs)).toHaveAttribute("aria-current", "page");
+  await userEvent.click(screen.getByRole("button", { name: new RegExp(copy.common.commandTitle) }));
+  const dialog = await screen.findByRole("dialog", { name: copy.common.commandTitle });
+  const audit = within(dialog).getByRole("option", { name: new RegExp(copy.nav.audit) });
+  expect(audit).not.toHaveAttribute("aria-disabled", "true");
+  await userEvent.click(audit);
+  await waitFor(() => expect(router.state.location.pathname).toBe("/admin/audit"));
+  expect(await screen.findByRole("heading", { level: 1, name: copy.audit.title }, { timeout: 5000 })).toBeInTheDocument();
+});
+
+it("keeps valid log and audit filters in the URL and drops the rest", async () => {
+  const route = '/admin/logs?range=%227d%22&cat=%5B%22auth%22%2C%22nope%22%5D&session=-1&q=notepad';
+  const { router } = await renderShell(meFixture("developer", "local"), route);
+  await screen.findByRole("heading", { level: 1, name: copy.logs.title }, { timeout: 5000 });
+  expect(router.state.location.search).toEqual({ range: "7d", cat: ["auth"], q: "notepad" });
+  expect(router.state.location.search).not.toHaveProperty("session", -1);
+  await router.navigate({ to: "/admin/audit", search: { kind: "auth", result: ["fail"], channel: "external" } });
+  await screen.findByRole("heading", { level: 1, name: copy.audit.title }, { timeout: 5000 });
+  expect(router.state.location.search).toEqual({ kind: "auth", result: ["fail"], channel: "external" });
 });
 
 it("gives a local developer the admin-only reason and a local admin every link", async () => {

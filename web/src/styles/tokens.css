@@ -61,6 +61,17 @@
     --slate-600: oklch(0.53 0.04 255);
     --slate-800: oklch(0.37 0.035 255);
 
+    /* ── Primitives: log category hues (W32). Chosen away from the state hues
+          above, so a category colour never reads as an MCP state. 400 = dark, 600 = light. */
+    --blue-400: oklch(0.74 0.12 245);
+    --blue-600: oklch(0.55 0.15 250);
+    --violet-400: oklch(0.75 0.13 300);
+    --violet-600: oklch(0.55 0.17 300);
+    --teal-400: oklch(0.78 0.11 180);
+    --teal-600: oklch(0.56 0.095 185);
+    --magenta-400: oklch(0.74 0.15 355);
+    --magenta-600: oklch(0.56 0.19 355);
+
     /* ── Roles: surfaces and text ─────────────────────────────────────── */
     --color-bg: light-dark(var(--steel-50), var(--steel-950));
     --color-surface: light-dark(var(--steel-0), var(--steel-900));
@@ -111,6 +122,14 @@
     /* Text diff rows (TextDiff): a tint of the healthy/failed hues under ordinary text; the +/− sign carries the meaning too */
     --color-diff-add: color-mix(in oklch, var(--color-state-healthy) 14%, transparent);
     --color-diff-del: color-mix(in oklch, var(--color-state-failed) 14%, transparent);
+
+    /* ── Roles: log category groups (histogram bars, timeline marks, chip dots; non-text,
+          3:1 on every surface). Twelve categories fold into these five (categories.ts). */
+    --color-cat-session: light-dark(var(--blue-600), var(--blue-400));
+    --color-cat-activity: light-dark(var(--violet-600), var(--violet-400));
+    --color-cat-mcp: light-dark(var(--teal-600), var(--teal-400));
+    --color-cat-security: light-dark(var(--magenta-600), var(--magenta-400));
+    --color-cat-system: light-dark(var(--steel-600), var(--steel-400));
 
     /* ── Type ─────────────────────────────────────────────────────────── */
     --font-sans: "Pretendard Variable", Pretendard, "Segoe UI Variable Text", "Segoe UI", "Malgun Gothic",

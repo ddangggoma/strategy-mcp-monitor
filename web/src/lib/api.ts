@@ -25,13 +25,22 @@ export interface ApiInit {
   method?: Method;
   body?: unknown;
   signal?: AbortSignal;
-  query?: Record<string, string | number>;
+  query?: Query;
 }
 
+/** Query parameters: an array repeats its key (`?cat=a&cat=b`); undefined, `[]` and `""` are left out. */
+export type Query = Record<string, string | number | readonly (string | number)[] | undefined>;
+
 /** Absolute same-origin URL: Node's fetch (tests) rejects relative ones, browsers accept both (F14). */
-export function apiUrl(path: string, query?: Record<string, string | number>): string {
+export function apiUrl(path: string, query?: Query): string {
   const url = new URL(path, location.origin);
-  if (query) for (const [k, v] of Object.entries(query)) url.searchParams.set(k, String(v));
+  if (query) {
+    for (const [k, v] of Object.entries(query)) {
+      if (v === undefined || v === "") continue;
+      if (typeof v === "string" || typeof v === "number") url.searchParams.append(k, String(v));
+      else for (const each of v) if (each !== "") url.searchParams.append(k, String(each));
+    }
+  }
   return url.toString();
 }
 

@@ -295,6 +295,85 @@ export interface RetentionPreview {
   delete_bytes: number;
   delete_from: string | null;
   delete_to: string | null;
+  /** Indexed log lines in the deleted days; null while the index cannot tell. */
+  delete_events: number | null;
+}
+
+// ---- logs and audit (both channels, view_logs / view_audit / export_logs) ------------
+
+/** The 12 fixed categories (spec §5.6). */
+export type LogCategory = "session" | "notice" | "activity.process" | "activity.command" | "activity.window" | "activity.idle"
+  | "tamper" | "mcp.health" | "mcp.action" | "auth" | "admin.audit" | "system";
+export type LogOutcome = "ok" | "fail" | "denied" | "error" | "failed" | "timeout";
+/** One indexed line; `data` is the whole original event. */
+export interface LogItem {
+  id: number;
+  ts: string;
+  cat: LogCategory;
+  event: string | null;
+  user: string | null;
+  session_id: number | null;
+  client_ip: string | null;
+  outcome: LogOutcome | null;
+  data: Record<string, unknown>;
+}
+/** Newest first; `next_cursor` null on the last page. */
+export interface LogPage {
+  items: LogItem[];
+  next_cursor: string | null;
+  index: { ready: boolean };
+}
+/** Bars from `starts[i]` for `bucket_sec`; one series per group key (`null` key: no grouping). */
+export interface LogHistogram {
+  from: string;
+  to: string;
+  bucket_sec: number;
+  starts: string[];
+  series: { key: string | null; counts: number[] }[];
+  total: number;
+  source: "rollup" | "scan";
+}
+export interface LogUserCount {
+  user: string;
+  count: number;
+}
+export interface LogIndexStatus {
+  ready: boolean;
+  rebuilding: boolean;
+  files: number;
+  pending_files: number;
+  pending_bytes: number;
+  rows: number;
+  bad_lines: number;
+  oldest_day: string | null;
+  newest_day: string | null;
+  last_indexed_at: string | null;
+}
+/** Filters of /api/logs and its histogram, users and export routes (array fields repeat the parameter). */
+export interface LogQuery {
+  from: string;
+  to: string;
+  users?: string[];
+  cat?: LogCategory[];
+  event?: string[];
+  outcome?: LogOutcome[];
+  session?: number;
+  ip?: string;
+  q?: string;
+}
+export interface AuditQuery extends Omit<LogQuery, "cat" | "event" | "outcome" | "session" | "ip"> {
+  kind?: "admin" | "auth" | "all";
+  result?: LogOutcome[];
+  channel?: Channel;
+}
+
+/** GET /api/service (Local, edit_global_settings): the Windows service's start type vs the setting. */
+export interface ServiceStatus {
+  installed: boolean;
+  running_as_service: boolean;
+  start_type: Settings["service_start_type"] | null;
+  desired: Settings["service_start_type"];
+  in_sync: boolean;
 }
 
 export interface NoticeContent {

@@ -1,9 +1,14 @@
 import { http, HttpResponse } from "msw";
-import { meFixture } from "../../tests/msw/fixtures";
+import { logPage, meFixture } from "../../tests/msw/fixtures";
 import { server } from "../../tests/msw/server";
 import { ApiError, api, apiUrl } from "./api";
+import type { LogQuery } from "./api-types";
 import * as endpoints from "./endpoints";
 import { session } from "./session";
+
+/** A minimal log query and its encoded form (both bounds are required by the API). */
+const LQ = { from: "2026-11-04T13:00:00.000+09:00", to: "2026-11-04T14:00:00.000+09:00" } satisfies LogQuery;
+const LQS = new URLSearchParams(LQ).toString();
 
 it("builds absolute same-origin URLs with a query string", () => {
   expect(apiUrl("/api/mcps/1/history", { hours: 24 })).toBe(`${location.origin}/api/mcps/1/history?hours=24`);
@@ -239,6 +244,13 @@ it("every endpoint calls its Appendix B method and path", async () => {
     [() => endpoints.collectorsStatus(), "GET /api/sessions/collectors"],
     [() => endpoints.tamperRecent(), "GET /api/tamper/recent"],
     [() => endpoints.tamperRecent(50), "GET /api/tamper/recent?limit=50"],
+    [() => endpoints.logs(LQ), `GET /api/logs?${LQS}&limit=200`],
+    [() => endpoints.logs(LQ, "c1", 50), `GET /api/logs?${LQS}&cursor=c1&limit=50`],
+    [() => endpoints.logHistogram(LQ, { buckets: 60, group: "cat" }), `GET /api/logs/histogram?${LQS}&buckets=60&group=cat`],
+    [() => endpoints.logUsers(LQ), `GET /api/logs/users?${LQS}`],
+    [() => endpoints.logStatus(), "GET /api/logs/status"],
+    [() => endpoints.audit({ ...LQ, kind: "auth" }), `GET /api/audit?${LQS}&kind=auth&limit=200`],
+    [() => endpoints.serviceStatus(), "GET /api/service"],
     [() => endpoints.updateMcp(2, { maintenance: true }), "PUT /api/mcps/2"],
     [() => endpoints.manualAction(2, "restart"), "POST /api/mcps/2/actions/restart"],
     [
@@ -272,5 +284,40 @@ it("every endpoint calls its Appendix B method and path", async () => {
     expect(seen).toEqual([expected]);
   }
   // nothing exported is left untested
-  expect(Object.keys(endpoints).length).toBe(calls.length - 2); // two endpoints are called twice (with and without the optional argument)
+  // three endpoints are called twice (with and without the optional argument); the two export URL
+  // builders make no request and are tested on their own below
+  expect(Object.keys(endpoints).length).toBe(calls.length - 3 + 2);
+});
+
+it("encodes repeated filter params and skips empty ones", async () => {
+  const seen: string[] = [];
+  server.use(http.get("/api/logs", ({ request }) => { seen.push(new URL(request.url).search); return HttpResponse.json(logPage([])); }));
+  await endpoints.logs({ from: "2026-11-04T13:00:00.000+09:00", to: "2026-11-04T14:00:00.000+09:00", users: ["CORP\\hong", "a@x.com"],
+    cat: ["auth"], event: [], q: "" }, undefined, 200);
+  const p = new URLSearchParams(seen[0]);
+  expect(p.getAll("users")).toEqual(["CORP\\hong", "a@x.com"]); expect(p.getAll("cat")).toEqual(["auth"]);
+  expect(p.get("from")).toBe("2026-11-04T13:00:00.000+09:00"); expect(p.get("limit")).toBe("200");
+  expect(p.has("event")).toBe(false); expect(p.has("q")).toBe(false);
+});
+
+it("builds export URLs with the same params", () => {
+  const u = new URL(endpoints.logExportUrl({ from: "2026-11-04T13:00:00.000+09:00", to: "2026-11-04T14:00:00.000+09:00", cat: ["auth"] }, "csv"), "http://x");
+  expect(u.pathname).toBe("/api/logs/export"); expect(u.searchParams.get("format")).toBe("csv"); expect(u.searchParams.getAll("cat")).toEqual(["auth"]);
+});
+
+it("builds the audit export URL with kind, results and channel", () => {
+  const u = new URL(endpoints.auditExportUrl({ ...LQ, kind: "all", result: ["denied", "error"], channel: "local", users: ["a@x.com"] }, "jsonl"));
+  expect(u.origin).toBe(location.origin);
+  expect(u.pathname).toBe("/api/audit/export");
+  expect(u.searchParams.get("format")).toBe("jsonl");
+  expect(u.searchParams.get("kind")).toBe("all");
+  expect(u.searchParams.getAll("result")).toEqual(["denied", "error"]);
+  expect(u.searchParams.get("channel")).toBe("local");
+  expect(u.searchParams.getAll("users")).toEqual(["a@x.com"]);
+  expect(u.searchParams.get("from")).toBe(LQ.from);
+});
+
+it("apiUrl repeats array values, keeps zero and drops undefined, empty arrays and empty strings", () => {
+  const u = new URL(apiUrl("/api/x", { a: ["1", 2], b: [], c: "", d: undefined, e: 0, f: "v" }));
+  expect([...u.searchParams.entries()]).toEqual([["a", "1"], ["a", "2"], ["e", "0"], ["f", "v"]]);
 });

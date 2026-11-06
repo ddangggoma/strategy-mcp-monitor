@@ -1,5 +1,6 @@
 // the server module is read as text (Vite ?raw) to catch drift between the two copies
 import defaultsPy from "../../../server/app/notice/defaults.py?raw";
+import { LOG_CATEGORIES } from "@/admin/logs/categories";
 import { API_ERROR_CODES, DISABLED_REASONS, copy, messageForError } from "./ko";
 
 const ERROR_CODES = ["validation", "invalid_email", "rate_limited", "login_required", "forbidden", "csrf", "not_found",
@@ -47,8 +48,8 @@ it("pins the fixed terms", () => {
 });
 
 it("has every top-level section the screens import", () => {
-  expect(Object.keys(copy).sort()).toEqual(["board", "channel", "common", "dashboard", "deny", "diff", "errors", "issues", "login",
-    "mcp", "nav", "notice", "roles", "scripts", "sessions", "settings", "setup", "states", "stream", "tamper", "toasts", "users"].sort());
+  expect(Object.keys(copy).sort()).toEqual(["audit", "board", "channel", "common", "dashboard", "deny", "diff", "errors", "issues", "login",
+    "logs", "mcp", "nav", "notice", "roles", "scripts", "sessions", "settings", "setup", "states", "stream", "tamper", "toasts", "users"].sort());
 });
 
 it("names every tamper event", () => {
@@ -132,4 +133,40 @@ it("ships the same built-in notice text as the server (version 0)", () => {
     body: field("body"),
     button_text: field("button_text"),
   });
+});
+
+it("names every log category and group", () => {
+  for (const c of LOG_CATEGORIES) expect(copy.logs.cats[c]).toMatch(/\S/);
+  for (const g of ["session", "activity", "mcp", "security", "system"] as const) expect(copy.logs.groups[g]).toMatch(/\S/);
+  expect(copy.logs.cmdLimitHelp).toContain("cmd");
+});
+
+it("gives every category chip and group its own name", () => {
+  const names = [...Object.values(copy.logs.cats), ...Object.values(copy.logs.groups)];
+  expect(new Set(names).size).toBe(names.length); // chips are found by name: no two alike
+  expect(Object.keys(copy.logs.cats).sort()).toEqual([...LOG_CATEGORIES].sort());
+});
+
+it("says what the command log leaves out (spec §2 #7)", () => {
+  for (const part of ["cmd /c", "dir", "cd", "del", "배치 파일", "키 입력", "클립보드"]) expect(copy.logs.cmdLimitHelp).toContain(part);
+});
+
+it("puts numbers and ranges into the log and audit sentences", () => {
+  expect(copy.logs.indexing(3)).toContain("3");
+  expect(copy.logs.usersCount(2)).toContain("2");
+  expect(copy.logs.histogramLabel("13:00", "14:00", 1234)).toContain("1,234");
+  expect(copy.logs.histogramLabel("13:00", "14:00", 1234)).toContain("13:00");
+  expect(copy.logs.selection("13:10", "13:40", 6)).toContain("13:40");
+  expect(copy.logs.selection("13:10", "13:40", 6)).toContain("6");
+  expect(Object.keys(copy.audit.results).sort()).toEqual(["denied", "error", "fail", "ok"]);
+  expect(Object.keys(copy.audit.kinds).sort()).toEqual(["admin", "all", "auth"]);
+});
+
+it("has the login-failure card, retention and service sentences", () => {
+  expect(Object.keys(copy.dashboard.loginFailures).sort()).toEqual(["empty", "openLogs", "rdp", "title", "web"]);
+  expect(copy.dashboard.loginFailures.title).toBe("로그인 실패 추이");
+  expect(copy.settings.retentionDeleteEvents(41_200)).toContain("41,200");
+  expect(copy.settings.retentionRunsSoon).toMatch(/\S/);
+  expect(copy.settings.service.current("delayed-auto")).toContain(copy.settings.startTypes["delayed-auto"]);
+  for (const k of ["title", "notInstalled", "mismatch", "devMode"] as const) expect(copy.settings.service[k]).toMatch(/\S/);
 });

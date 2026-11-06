@@ -18,7 +18,8 @@ it("notice initial JS < 100 KB gzip", () => {
 });
 
 it("board pulls no admin-only library", () => {
-  const bad = /recharts|@codemirror|codemirror|@tanstack\/react-router|cmdk|react-hook-form|zod|[\\/]diff[\\/]/;
+  const bad =
+    /recharts|@codemirror|codemirror|@tanstack\/react-router|cmdk|react-hook-form|zod|[\\/]diff[\\/]|@tanstack\/react-virtual|@tanstack\/react-table/;
   const modules = entryModules(DIST, "board.html");
   expect(modules.some((m) => /[\\/]react-dom[\\/]/.test(m))).toBe(true); // the module list is real
   expect(modules.filter((m) => bad.test(m))).toEqual([]);

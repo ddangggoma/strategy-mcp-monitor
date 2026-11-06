@@ -43,6 +43,34 @@ it.each(THEMES)("UI tokens meet 3:1 in %s", (theme) => {
   }
 });
 
+// Log category groups (W32): histogram bars, timeline marks and chip dots are non-text UI that has
+// to stand out from every surface a log screen paints (WCAG 1.4.11).
+const CAT_GROUPS = ["session", "activity", "mcp", "security", "system"] as const;
+
+it.each(THEMES)("UI 3:1 대비 surface: log category colors in %s", (theme) => {
+  for (const g of CAT_GROUPS) {
+    for (const bg of ["bg", "surface", "surface-raised"]) {
+      expect(contrastPairs(theme, `cat-${g}`, bg), `cat-${g} on ${bg}`).toBeGreaterThanOrEqual(3);
+    }
+  }
+});
+
+it.each(THEMES)("log category colors are told apart from each other in %s", (theme) => {
+  // OKLab distance between every pair: stacked bars sit side by side, so neighbours must differ
+  const lab = (name: string) => {
+    const c = resolveToken(theme, name);
+    const h = ((c.h ?? 0) * Math.PI) / 180;
+    return [c.l, c.c * Math.cos(h), c.c * Math.sin(h)] as const;
+  };
+  for (const [i, a] of CAT_GROUPS.entries()) {
+    for (const b of CAT_GROUPS.slice(i + 1)) {
+      const [p, q] = [lab(`cat-${a}`), lab(`cat-${b}`)];
+      const d = Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+      expect(d, `${a} vs ${b}`).toBeGreaterThanOrEqual(0.1);
+    }
+  }
+});
+
 it.each(THEMES)("the decorative border is visible but quieter than border-strong in %s", (theme) => {
   const border = contrastPairs(theme, "border", "surface");
   expect(border).toBeGreaterThan(1.1);

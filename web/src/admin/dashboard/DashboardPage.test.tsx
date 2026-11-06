@@ -30,7 +30,7 @@ it("summarizes states, lists recent activity and keeps the login-failure card pl
   expect(screen.getByRole("link", { name: /실패\s*1/ })).toHaveAttribute("href", "/admin/mcps?state=FAILED");
   // scoped to the page: the shell's disabled "로그" nav item carries the same reason
   expect(within(screen.getByRole("main")).getAllByText(copy.deny.planned_logs)).toHaveLength(1);
-  expect(within(card(copy.dashboard.loginFailures)).getByText(copy.deny.planned_logs)).toBeInTheDocument();
+  expect(within(card(copy.dashboard.loginFailures.title)).getByText(copy.deny.planned_logs)).toBeInTheDocument();
   expect(within(card(copy.dashboard.bypassEvents)).queryByText(copy.deny.planned_logs)).toBeNull();
   const activity = card(copy.dashboard.recentActivity);
   expect(await within(activity).findAllByText("seoul-weather")).toHaveLength(2);

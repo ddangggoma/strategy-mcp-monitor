@@ -1,4 +1,4 @@
-import { formatBytes, formatDuration, formatSeconds, formatKst, formatKstShort, relativeKo } from "./time";
+import { formatBytes, formatDuration, formatSeconds, formatKst, formatKstMs, formatKstShort, relativeKo } from "./time";
 
 it("formats in KST regardless of the host time zone", () => {
   expect(formatKst("2026-11-04T05:03:22.418+00:00")).toBe("2026-11-04 14:03:22");
@@ -46,4 +46,11 @@ it("formats ticking seconds without decimals", () => {
   expect(formatSeconds(65)).toBe("1분 5초");
   expect(formatSeconds(3725)).toBe("1시간 2분");
   expect(formatSeconds(-3)).toBe("0초"); // a client clock slightly behind the server never shows a negative age
+});
+
+it("formats with milliseconds", () => { expect(formatKstMs("2026-11-04T05:03:22.418Z")).toBe("2026-11-04 14:03:22.418"); });
+
+it("pads milliseconds and keeps the KST day across midnight", () => {
+  expect(formatKstMs("2026-12-31T15:00:00.007Z")).toBe("2027-01-01 00:00:00.007");
+  expect(formatKstMs("2026-11-04T14:03:22+09:00")).toBe("2026-11-04 14:03:22.000");
 });

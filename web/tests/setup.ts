@@ -24,6 +24,22 @@ class ResizeObserverStub {
 }
 globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver;
 
+// The log histogram's drag selection reads pointerId (setPointerCapture); jsdom may lack PointerEvent
+if (typeof globalThis.PointerEvent === "undefined") {
+  class PointerEventStub extends MouseEvent {
+    readonly pointerId: number;
+    readonly pointerType: string;
+    readonly isPrimary: boolean;
+    constructor(type: string, init: PointerEventInit = {}) {
+      super(type, init);
+      this.pointerId = init.pointerId ?? 0;
+      this.pointerType = init.pointerType ?? "mouse";
+      this.isPrimary = init.isPrimary ?? true;
+    }
+  }
+  globalThis.PointerEvent = PointerEventStub as unknown as typeof PointerEvent;
+}
+
 if (!window.matchMedia) {
   // no media query ever matches: light theme, motion allowed, desktop width
   window.matchMedia = (query: string): MediaQueryList =>

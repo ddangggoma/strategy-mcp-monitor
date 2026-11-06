@@ -223,7 +223,7 @@ export function DashboardPage() {
         <DashCard title={copy.dashboard.recentActivity} className="col-span-full">
           <RecentActivity />
         </DashCard>
-        <DashCard title={copy.dashboard.loginFailures}>
+        <DashCard title={copy.dashboard.loginFailures.title}>
           <PlannedFeature reason="planned_logs" />
         </DashCard>
         <DashCard title={copy.dashboard.bypassEvents}>

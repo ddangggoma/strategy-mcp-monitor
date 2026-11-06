@@ -66,6 +66,11 @@
   --color-state-maintenance-soft: var(--color-state-maintenance-soft);
   --color-diff-add: var(--color-diff-add);
   --color-diff-del: var(--color-diff-del);
+  --color-cat-session: var(--color-cat-session);
+  --color-cat-activity: var(--color-cat-activity);
+  --color-cat-mcp: var(--color-cat-mcp);
+  --color-cat-security: var(--color-cat-security);
+  --color-cat-system: var(--color-cat-system);
 
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);

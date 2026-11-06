@@ -7,7 +7,9 @@ import { BoardStore } from "@/lib/board-store";
 import { BoardStreamClient } from "@/lib/board-stream";
 import * as endpoints from "@/lib/endpoints";
 import { session, useSession } from "@/lib/session";
-import { boardFixture, meFixture } from "./msw/fixtures";
+import {
+  boardFixture, histogramFixture, logItem, logPage, logStatusFixture, meFixture, previewFixture, serviceStatusFixture, userCounts,
+} from "./msw/fixtures";
 import { trackRequests } from "./msw/server";
 import { renderWithProviders } from "./render";
 
@@ -18,6 +20,33 @@ it("default handlers answer with typed fixtures", async () => {
   expect(detail.id).toBe(3);
   await expect(endpoints.updateMcp(3, { maintenance: true })).resolves.toMatchObject({ id: 3, maintenance: true });
   await expect(endpoints.manualAction(3, "start")).resolves.toEqual({ run_id: expect.any(String) });
+});
+
+it("default log, audit and service handlers answer with typed fixtures", async () => {
+  const q = { from: "2026-11-04T13:00:00.000+09:00", to: "2026-11-04T14:00:00.000+09:00" };
+  await expect(endpoints.logs(q)).resolves.toEqual(logPage([logItem()]));
+  await expect(endpoints.audit({ ...q, kind: "admin" })).resolves.toEqual(logPage([logItem({ cat: "admin.audit", event: "user_create" })]));
+  await expect(endpoints.logUsers(q)).resolves.toEqual(userCounts());
+  await expect(endpoints.logStatus()).resolves.toEqual(logStatusFixture());
+  await expect(endpoints.serviceStatus()).resolves.toEqual(serviceStatusFixture());
+  const h = await endpoints.logHistogram(q, { buckets: 10, group: "cat" });
+  expect(h).toEqual(histogramFixture());
+  expect(h.starts).toHaveLength(6);
+  expect(h.starts[1]).toBe("2026-11-04T13:10:00.000+09:00");
+  expect(h.series.flatMap((s) => s.counts).reduce((a, b) => a + b, 0)).toBe(h.total);
+  expect(previewFixture().delete_events).toBe(0);
+});
+
+it("jsdom gets pointer events with a pointer id and a ResizeObserver", () => {
+  const seen: number[] = [];
+  const el = document.createElement("div");
+  el.addEventListener("pointerdown", (e) => seen.push(e.pointerId));
+  el.dispatchEvent(new PointerEvent("pointerdown", { pointerId: 7, clientX: 5, bubbles: true }));
+  expect(seen).toEqual([7]);
+  expect(new PointerEvent("pointermove", { clientX: 12 }).clientX).toBe(12);
+  expect(new PointerEvent("pointerup")).toBeInstanceOf(MouseEvent);
+  const ro = new ResizeObserver(() => {});
+  expect(() => { ro.observe(el); ro.disconnect(); }).not.toThrow();
 });
 
 it("an unhandled request fails instead of reaching the network", async () => {

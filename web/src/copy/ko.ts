@@ -29,6 +29,12 @@ const actionKind: Record<ActionKind, string> = { start: "시작", restart: "다�
 
 const LOCAL_ADDRESS = "http://127.0.0.1:8700";
 
+type StartType = "auto" | "delayed-auto" | "manual";
+const START_TYPES: Readonly<Record<StartType, string>> = { auto: "자동", "delayed-auto": "자동(지연된 시작)", manual: "수동" };
+
+/** Log screens: thousands with separators ("1,234건"). */
+const count = (n: number | string) => (typeof n === "number" ? n.toLocaleString("ko-KR") : n);
+
 /** Windows logon types as the Korean Windows event viewer names them. */
 const LOGON_TYPES: Readonly<Record<number, string>> = {
   2: "대화형",
@@ -284,6 +290,62 @@ export const copy = {
     },
   },
 
+  /** Log search (view_logs, both channels). Category and group names are chip labels: all distinct. */
+  logs: {
+    title: "로그",
+    quick: { "1h": "최근 1시간", today: "오늘", yesterday: "어제", "7d": "최근 7일" },
+    from: "시작 시각",
+    to: "끝 시각",
+    apply: "적용",
+    users: "사용자",
+    usersCount: (n: number) => `${n}명 선택`,
+    categories: "카테고리",
+    cats: {
+      session: "원격 접속",
+      notice: "사전 고지",
+      "activity.process": "프로세스",
+      "activity.command": "명령",
+      "activity.window": "창 전환",
+      "activity.idle": "유휴",
+      tamper: "우회 탐지",
+      "mcp.health": "MCP 상태",
+      "mcp.action": "MCP 조치",
+      auth: "웹 로그인",
+      "admin.audit": "관리 작업",
+      system: "시스템 이벤트",
+    },
+    groups: { session: "접속", activity: "활동", mcp: "MCP", security: "보안", system: "시스템" },
+    session: "세션 번호",
+    ip: "클라이언트 IP",
+    keyword: "키워드",
+    keywordHint: "낱말의 앞부분으로 찾아요. 여러 낱말을 쓰면 모두 들어 있는 기록만 나와요(최대 10개).",
+    moreConditions: "추가 조건",
+    clear: "조건 지우기",
+    view: { table: "표", timeline: "타임라인" },
+    export: { menu: "내보내기", csv: "CSV로 내보내기", jsonl: "JSONL(원문)로 내보내기" },
+    empty: "이 조건에 맞는 로그가 없어요. 기간을 넓히거나 조건을 줄여 보세요.",
+    indexing: (files: number) => `로그 색인을 만드는 중이에요. 파일 ${count(files)}개가 남아 있어 결과에 빠진 기록이 있을 수 있어요.`,
+    detail: "로그 상세",
+    // spec §2 #7: what the command log can and cannot see
+    cmdLimitHelp:
+      "cmd.exe 실행과 인자, cmd가 실행한 외부 프로그램, cmd /c 명령, 배치 파일은 기록해요. " +
+      "dir·cd·del 같은 cmd 내부 명령은 기록하지 않아요. 키 입력·클립보드·화면 내용도 수집하지 않아요.",
+    histogramLabel: (from: string, to: string, total: number | string) =>
+      `시간대별 로그 건수(${from}–${to}, 모두 ${count(total)}건). Shift+화살표로 구간을 고르고 Enter로 적용해요.`,
+    selection: (from: string, to: string, n: number | string) => `${from}–${to} 선택, ${count(n)}건`,
+    columns: { ts: "시각", cat: "카테고리", user: "사용자", session: "세션", ip: "IP", event: "이벤트", summary: "내용" },
+    loadMore: "더 보기",
+  },
+
+  /** Admin actions and login attempts (view_audit, both channels). */
+  audit: {
+    title: "감사 로그",
+    kinds: { admin: "관리 작업", auth: "로그인", all: "전체" },
+    columns: { ts: "시각", actor: "행위자", channel: "채널", ip: "IP", action: "작업", target: "대상", result: "결과" },
+    results: { ok: "성공", fail: "실패", denied: "거부", error: "오류" },
+    empty: "이 조건에 맞는 감사 기록이 없어요. 기간을 넓히거나 조건을 줄여 보세요.",
+  },
+
   stream: {
     live: "실시간 연결됨",
     reconnecting: "실시간 연결 다시 시도 중",
@@ -334,7 +396,14 @@ export const copy = {
     currentSessions: "현재 세션",
     recentActivity: "최근 이슈와 조치",
     noActivity: "최근 이슈나 조치가 없어요.",
-    loginFailures: "로그인 실패 추이",
+    /** Last 24 h of failed web logins (`auth`) and remote desktop logons (`session`). */
+    loginFailures: {
+      title: "로그인 실패 추이",
+      web: "웹 로그인",
+      rdp: "원격 데스크톱",
+      openLogs: "로그에서 보기",
+      empty: "최근 24시간 동안 로그인 실패가 없어요.",
+    },
     bypassEvents: "우회 탐지 이벤트",
     viewAll: "모두 보기",
     summaryAll: "전체",
@@ -615,7 +684,18 @@ export const copy = {
     confirmDelete: "줄이고 삭제",
     confirmReduce: "보존 기간 줄이기",
     startTypeNote: "지금은 값만 저장돼요. 서비스를 설치할 때 이 값이 적용돼요.",
-    startTypes: { auto: "자동", "delayed-auto": "자동(지연된 시작)", manual: "수동" },
+    startTypes: START_TYPES,
+    /** The confirm dialog of a shorter retention: indexed lines in the days to delete. */
+    retentionDeleteEvents: (n: number) => `로그 기록 ${n.toLocaleString("ko-KR")}건이 함께 삭제돼요.`,
+    retentionRunsSoon: "저장하면 몇 초 안에 정리를 시작해요.",
+    /** The Windows service next to the boot start type (GET /api/service). */
+    service: {
+      title: "Windows 서비스",
+      notInstalled: "Windows 서비스로 설치되어 있지 않아요. 설치하면 이 시작 유형이 적용돼요.",
+      current: (type: StartType) => `지금 서비스 시작 유형: ${START_TYPES[type] ?? type}`,
+      mismatch: "서비스의 시작 유형이 이 설정과 달라요. 다시 저장하면 이 설정으로 맞춰요.",
+      devMode: "개발용으로 실행 중이라 서비스가 없어요. 시작 유형은 저장만 돼요.",
+    },
     otpDummy: "Dummy(개발용)",
     fields: {
       ping_interval_sec: "ping 주기(초)",

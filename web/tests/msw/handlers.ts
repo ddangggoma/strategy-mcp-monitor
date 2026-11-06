@@ -3,9 +3,10 @@
 import { http, HttpResponse } from "msw";
 import type { McpConfig, McpCreate, NoticeContent, ScriptKind, ScriptUpload, Settings, UserCreate, UserPatch } from "@/lib/api-types";
 import {
-  actionDetailFixture, activityFixture, adminUser, boardFixture, collectorFixture, currentSessionFixture, historyFixture,
-  mcpDetailFixture, meFixture, noticeDisplayFixture, noticeFixture, noticeVersionFixture, previewFixture, scriptFixture,
-  scriptListFixture, scriptVersionFixture, sessionsHistoryFixture, settingsFixture, tamperFixture,
+  actionDetailFixture, activityFixture, adminUser, boardFixture, collectorFixture, currentSessionFixture, histogramFixture,
+  historyFixture, logItem, logPage, logStatusFixture, mcpDetailFixture, meFixture, noticeDisplayFixture, noticeFixture,
+  noticeVersionFixture, previewFixture, scriptFixture, scriptListFixture, scriptVersionFixture, serviceStatusFixture,
+  sessionsHistoryFixture, settingsFixture, tamperFixture, userCounts,
 } from "./fixtures";
 
 const id = (v: string | readonly string[] | undefined) => Number(v);
@@ -72,6 +73,16 @@ export const handlers = [
   http.get("/api/sessions/history", () => HttpResponse.json(sessionsHistoryFixture())),
   http.get("/api/sessions/collectors", () => HttpResponse.json([collectorFixture()])),
   http.get("/api/tamper/recent", () => HttpResponse.json([tamperFixture()])),
+
+  // logs, audit (both channels); the export routes are plain links, not fetched
+  http.get("/api/logs", () => HttpResponse.json(logPage([logItem()]))),
+  http.get("/api/logs/histogram", () => HttpResponse.json(histogramFixture())),
+  http.get("/api/logs/users", () => HttpResponse.json(userCounts())),
+  http.get("/api/logs/status", () => HttpResponse.json(logStatusFixture())),
+  http.get("/api/audit", () => HttpResponse.json(logPage([logItem({ cat: "admin.audit", event: "user_create" })]))),
+
+  // Windows service (Local, admin)
+  http.get("/api/service", () => HttpResponse.json(serviceStatusFixture())),
 
   // scripts
   http.get("/api/mcps/:id/scripts", () => HttpResponse.json(scriptListFixture())),

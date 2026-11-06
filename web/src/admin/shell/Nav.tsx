@@ -22,7 +22,8 @@ import type { Me } from "@/lib/api-types";
 import { denyReason, type Action } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 
-export type NavTo = "/admin" | "/admin/mcps" | "/admin/sessions" | "/admin/users" | "/admin/notice" | "/admin/settings";
+export type NavTo =
+  | "/admin" | "/admin/mcps" | "/admin/sessions" | "/admin/logs" | "/admin/audit" | "/admin/users" | "/admin/notice" | "/admin/settings";
 export type PlannedReason = Extract<DisabledReason, `planned_${string}`>;
 
 export interface NavItem {
@@ -41,10 +42,11 @@ export interface NavItem {
 export const NAV_ITEMS: readonly NavItem[] = [
   { key: "dashboard", icon: LayoutDashboardIcon, to: "/admin", gate: null, planned: null },
   { key: "mcps", icon: ServerIcon, to: "/admin/mcps", gate: null, planned: null },
-  // both channels (V31); `planned_sessions` stays in DisabledReason but is no longer used
+  // both channels for any signed-in user (V31, Plan 5); `planned_sessions`, `planned_logs` and
+  // `planned_audit` stay in DisabledReason and the copy deck but are no longer used
   { key: "sessions", icon: MonitorSmartphoneIcon, to: "/admin/sessions", gate: "view_session_history", planned: null },
-  { key: "logs", icon: ScrollTextIcon, to: null, gate: null, planned: "planned_logs" },
-  { key: "audit", icon: ShieldCheckIcon, to: null, gate: null, planned: "planned_audit" },
+  { key: "logs", icon: ScrollTextIcon, to: "/admin/logs", gate: "view_logs", planned: null },
+  { key: "audit", icon: ShieldCheckIcon, to: "/admin/audit", gate: "view_audit", planned: null },
   { key: "users", icon: UsersIcon, to: "/admin/users", gate: "manage_users", planned: null, groupStart: true },
   { key: "notice", icon: MegaphoneIcon, to: "/admin/notice", gate: "edit_notice", planned: null },
   { key: "settings", icon: SettingsIcon, to: "/admin/settings", gate: "edit_global_settings", planned: null },
