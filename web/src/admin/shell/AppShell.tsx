@@ -86,6 +86,7 @@ export function AppShell() {
   }, [router, stream]);
 
   useEffect(() => {
+    tracker.activate();
     const offAction = store.onAction(tracker.handle);
     const offReconnected = store.onReconnected(() => void tracker.reconcile()); // events may have been missed
     return () => {

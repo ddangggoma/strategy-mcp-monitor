@@ -97,7 +97,9 @@ it("does nothing when nothing changed, and a field typed back to its value is cl
   await retype(copy.mcp.fields.action_delay_sec, "30");
   expect(saveButton()).toHaveAttribute("aria-disabled", "true");
   await userEvent.click(saveButton());
-  // deterministic: a save would have created its mutation synchronously in the click handler
+  // no mutation and no PUT: handleSubmit validates asynchronously, but userEvent.click returns only
+  // after RTL drains a setTimeout(0), so a save would be in the cache by now. With every field typed
+  // back the patch is empty anyway: the aria-disabled check above is what guards the canSave gate.
   expect(qc.getMutationCache().getAll()).toEqual([]);
   expect(calls()).not.toContain("PUT /api/mcps/1");
 });

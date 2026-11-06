@@ -8,7 +8,7 @@ import {
 } from "@tanstack/react-table";
 import { Link, getRouteApi } from "@tanstack/react-router";
 import { ArrowDownIcon, ArrowUpIcon, ChevronsUpDownIcon, PlusIcon } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { WithReason } from "@/components/app/WithReason";
 import { STATE_ICONS, StatusBadge } from "@/components/status/StatusBadge";
 import { UptimeMeter } from "@/components/status/UptimeMeter";
@@ -200,6 +200,13 @@ function McpTable({ data }: { data: McpDetail[] }) {
     holders.current[who] = false;
     if (!holders.current.pointer && !holders.current.focus) setHeld(null);
   };
+  const body = useRef<HTMLTableSectionElement>(null);
+  // a focused row that is removed (the MCP was deleted) takes focus with it without a blur event
+  useEffect(() => {
+    if (!holders.current.focus || body.current?.contains(document.activeElement)) return;
+    holders.current.focus = false;
+    if (!holders.current.pointer) setHeld(null);
+  }, [sorted]);
 
   return (
     // the table scrolls inside its own frame in a narrow window; the page never scrolls sideways
@@ -240,6 +247,7 @@ function McpTable({ data }: { data: McpDetail[] }) {
           ))}
         </TableHeader>
         <TableBody
+          ref={body}
           onPointerEnter={() => hold("pointer")}
           onPointerLeave={() => release("pointer")}
           onFocus={() => hold("focus")}

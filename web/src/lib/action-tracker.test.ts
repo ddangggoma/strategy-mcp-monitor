@@ -200,10 +200,32 @@ it("dispose clears runs and timers", async () => {
   expect(fetchHistory).not.toHaveBeenCalled();
   tr.handle(ev("start"));
   expect(t.done).not.toHaveBeenCalled();
-  // still usable afterwards (StrictMode re-runs effects)
+  // usable again once activated (StrictMode re-runs the shell's effect on the same tracker)
+  tr.activate();
   tr.track(run);
   tr.handle(ev("start"));
   expect(t.done).toHaveBeenCalledTimes(1);
+});
+
+it("ignores runs and events that arrive after dispose (a 202 after logout)", async () => {
+  vi.useFakeTimers();
+  const t = fake();
+  const fetchHistory = vi.fn().mockResolvedValue(empty());
+  const tr = new ActionTracker({ toasts: t, fetchHistory });
+  tr.dispose();
+  expect(tr.disposed).toBe(true);
+  tr.track(run);
+  tr.handle(ev("start"));
+  await vi.advanceTimersByTimeAsync(200_000);
+  expect(t.pending).not.toHaveBeenCalled();
+  expect(t.done).not.toHaveBeenCalled();
+  expect(t.unknown).not.toHaveBeenCalled();
+  expect(fetchHistory).not.toHaveBeenCalled();
+  // nothing was kept for later either
+  tr.activate();
+  expect(tr.disposed).toBe(false);
+  tr.track(run);
+  expect(t.done).not.toHaveBeenCalled();
 });
 
 it("does not report a run twice when an event lands during a reconcile fetch", async () => {

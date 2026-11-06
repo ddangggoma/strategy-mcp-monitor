@@ -52,6 +52,7 @@ export class ActionTracker {
   private readonly timeoutMs: number;
   private readonly runs = new Map<string, Entry>();
   private early: { at: number; e: ActionEvent }[] = [];
+  private stopped = false;
 
   constructor(o: { toasts: ActionToasts; fetchHistory: (mcpId: number) => Promise<McpHistory>; timeoutMs?: number }) {
     this.toasts = o.toasts;
@@ -59,8 +60,14 @@ export class ActionTracker {
     this.timeoutMs = o.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
+  /** True from dispose() until activate(): the shell that owned the tracker is gone. */
+  get disposed(): boolean {
+    return this.stopped;
+  }
+
   track(r: TrackedRun): void {
-    if (this.runs.has(r.runId)) return;
+    // a 202 that lands after the shell unmounted (logout): Sonner would replay its toast to the next login
+    if (this.stopped || this.runs.has(r.runId)) return;
     this.toasts.pending(r);
     const timer = setTimeout(() => void this.expire(r.runId), r.timeoutMs ?? this.timeoutMs);
     this.runs.set(r.runId, { run: r, phase: "pending", timer });
@@ -72,6 +79,7 @@ export class ActionTracker {
 
   /** SSE `action` listener (an arrow property, so it can be passed to BoardStore.onAction as is). */
   readonly handle = (e: ActionEvent): void => {
+    if (this.stopped) return;
     const entry = this.runs.get(e.run_id);
     if (!entry) {
       this.pruneEarly();
@@ -91,8 +99,14 @@ export class ActionTracker {
     await this.settle([...this.runs.values()]);
   }
 
-  /** Stops every timer and forgets every run; the tracker stays usable (effects can re-run). */
+  /** Accepts runs again after dispose(): StrictMode re-runs the shell's effect on the same tracker. */
+  activate(): void {
+    this.stopped = false;
+  }
+
+  /** Stops every timer, forgets every run and ignores later ones until activate(). */
   dispose(): void {
+    this.stopped = true;
     for (const entry of this.runs.values()) clearTimeout(entry.timer);
     this.runs.clear();
     this.early = [];

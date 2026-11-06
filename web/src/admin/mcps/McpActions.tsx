@@ -43,7 +43,10 @@ export function McpActions({ mcp, size = "md" }: { mcp: McpDetail; size?: "sm" |
   const action = useManualAction({
     onAccepted: ({ mcp: m, kind }, runId) =>
       tracker?.track({ runId, mcpId: m.id, mcpName: m.name, requested: kind, timeoutMs: trackerTimeoutMs(m.script_timeout_sec) }),
-    onFailed: (err) => toast.error(messageForError(err instanceof ApiError ? err.code : "internal")),
+    onFailed: (err) => {
+      if (tracker?.disposed) return; // the shell is gone (logout): the next login must not see this
+      toast.error(messageForError(err instanceof ApiError ? err.code : "internal"));
+    },
   });
   const [busy, setBusy] = useState<ScriptKind | null>(null);
   const [confirmStop, setConfirmStop] = useState(false);

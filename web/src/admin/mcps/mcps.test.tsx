@@ -119,6 +119,43 @@ it("drops pending toasts when the shell goes away (Sonner would replay them to t
   expect(screen.queryByText(copy.toasts.pending("calc", "start"))).not.toBeInTheDocument();
 });
 
+/** Logs out through the account menu, answers the gated action, then logs in again (a new shell on this tab). */
+async function logOutBeforeTheAnswer(kind: "restart" | "start", answer: () => Response) {
+  const { router, unmount } = await renderList([mcpDetailFixture({ id: 1, name: "calc" })]);
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  let answered!: () => void;
+  const done = new Promise<void>((r) => (answered = r));
+  server.use(
+    http.post(`/api/mcps/1/actions/${kind}`, async () => {
+      await gate;
+      queueMicrotask(answered);
+      return answer();
+    }),
+  );
+  await userEvent.click(within(row("calc")).getByRole("button", { name: copy.mcp[kind] }));
+  await userEvent.click(screen.getByRole("button", { name: copy.common.accountMenu("user1") }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: copy.common.logout }));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/admin/login"));
+  await screen.findByLabelText(copy.login.email); // the shell is gone: its tracker is disposed
+  release();
+  await done;
+  await new Promise((r) => setTimeout(r, 50)); // the mutation's onSuccess / onError runs after the body is read
+  unmount();
+  await renderList([mcpDetailFixture({ id: 1, name: "calc" })]);
+  await new Promise((r) => setTimeout(r, 50)); // Sonner would replay a queued toast on the Toaster's first render
+}
+
+it("a 202 that arrives after logging out shows no toast at the next login", async () => {
+  await logOutBeforeTheAnswer("restart", () => HttpResponse.json({ run_id: "r9" }, { status: 202 }));
+  expect(screen.queryByText(copy.toasts.pending("calc", "restart"))).not.toBeInTheDocument();
+});
+
+it("an error that arrives after logging out shows no toast at the next login", async () => {
+  await logOutBeforeTheAnswer("start", () => HttpResponse.json({ error: "action_in_progress" }, { status: 409 }));
+  expect(screen.queryByText(copy.errors.action_in_progress)).not.toBeInTheDocument();
+});
+
 it("stop asks for confirmation first", async () => {
   const requests = trackRequests();
   await renderList([mcpDetailFixture({ id: 1, name: "calc" })]);
@@ -272,6 +309,25 @@ it("does not move rows while keyboard focus is in them, and re-sorts once focus 
   expect(rowNames()).toEqual(["calc", "files"]);
   act(() => filesStart.blur());
   await waitFor(() => expect(rowNames()).toEqual(["files", "calc"]));
+});
+
+it("lets rows move again when the focused row is removed (no blur arrives)", async () => {
+  const { store } = await renderList([
+    mcpDetailFixture({ id: 1, name: "calc" }),
+    mcpDetailFixture({ id: 2, name: "files" }),
+    mcpDetailFixture({ id: 3, name: "zeta" }),
+  ]);
+  act(() => {
+    for (const [id, name] of [[1, "calc"], [2, "files"], [3, "zeta"]] as const) {
+      store.apply({ event: "mcp", data: JSON.stringify(item(id, "HEALTHY", name)) });
+    }
+  });
+  act(() => within(row("calc")).getByRole("button", { name: copy.mcp.start }).focus());
+  act(() => store.apply({ event: "mcp_removed", data: JSON.stringify({ id: 1 }) }));
+  await waitFor(() => expect(rowNames()).toEqual(["files", "zeta"]));
+  act(() => store.apply({ event: "mcp", data: JSON.stringify(item(3, "FAILED", "zeta")) }));
+  await within(row("zeta")).findByText(copy.states.FAILED);
+  await waitFor(() => expect(rowNames()).toEqual(["zeta", "files"]));
 });
 
 it("shows every column of a row", async () => {
