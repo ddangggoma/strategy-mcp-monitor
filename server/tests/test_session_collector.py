@@ -139,6 +139,44 @@ async def test_collectors_start_report_failures_and_stop(services, clock):
     assert [(e["source"], e["ok"], e["error"]) for e in events] == [("a-bad", False, "RuntimeError('no access')")]
 
 
+async def test_task_stop_hooks_run_first_in_reverse_order_while_tasks_still_run(services, clock):
+    """F07: a task's graceful ``stop`` is awaited before any task is cancelled or component stopped."""
+    cs = Collectors(services.log, clock)
+    comp = _Recorder("comp"); cs.add(comp)
+    order = []
+    running = {"one": False, "two": False, "plain": False}
+
+    def job(name):
+        async def run():
+            running[name] = True
+            try:
+                await asyncio.sleep(3600)
+            finally:
+                running[name] = False
+        return run
+
+    def hook(name, fail=False):
+        async def stop():
+            order.append((name, dict(running), len(comp.calls)))
+            if fail:
+                raise RuntimeError("stuck")
+        return stop
+
+    cs.add_task("one", job("one"), stop=hook("one", fail=True))
+    cs.add_task("two", job("two"), stop=hook("two"))
+    cs.add_task("plain", job("plain"))
+    await cs.stop()  # never started: no hooks
+    assert order == []
+    await cs.start()
+    await asyncio.sleep(0)
+    await cs.stop()
+    everything_running = {"one": True, "two": True, "plain": True}
+    assert order == [("two", everything_running, 1), ("one", everything_running, 1)]
+    assert not any(running.values()) and comp.calls[-1] == ("stop", False)
+    [status] = cs.status()
+    assert (status.name, status.ok, status.error) == ("one", False, "stop failed: RuntimeError('stuck')")
+
+
 async def test_report_updates_since_and_logs_only_on_change(services, clock):
     cs = Collectors(services.log, clock)
     t0 = clock.now()

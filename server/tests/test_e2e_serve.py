@@ -202,3 +202,8 @@ def test_json_session_source_reaches_the_board_and_stops_cleanly(tmp_path):
     assert status == [("wts", True)]
     connects = [e for e in events if e["cat"] == "session" and e["event"] == "connect"]
     assert [(c["kind"], c["user"]) for c in connects] == [("existing", "CORP\\hong")]
+    # The default --agent-launcher auto (LocalLauncher here) refuses session 5, which is not this
+    # process's session: logged once and not retried (F22); nothing is spawned.
+    agent = [(e["event"], e["session_id"], e["launcher"], e["error"]) for e in events
+             if e["cat"] == "system" and e.get("event", "").startswith("agent.")]
+    assert agent == [("agent.launch_failed", 5, "local", "session_mismatch")]

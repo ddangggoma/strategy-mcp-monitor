@@ -10,6 +10,7 @@ from collections.abc import Callable, Sequence
 from datetime import datetime
 from typing import Any, Literal
 
+from app.win.launch import LaunchError, LaunchSpec
 from app.win.peer import PeerInfo
 from app.win.wmi import ProcessEvent
 from app.win.wts import WtsSnapshot
@@ -203,3 +204,45 @@ class FakeProcessWatch:
 
     def close(self) -> None:
         self.closed = True
+
+
+class FakeProcess:
+    """An ``AgentProcess``: runs until ``exit(code)``; ``kill()`` sets ``killed`` and the next
+    ``poll()`` returns 1 (unless it had already exited)."""
+
+    def __init__(self, pid: int) -> None:
+        self.pid = pid
+        self.killed = False
+        self._code: int | None = None
+
+    def exit(self, code: int) -> None:
+        self._code = code
+
+    def poll(self) -> int | None:
+        return self._code
+
+    def kill(self) -> None:
+        self.killed = True
+        if self._code is None:
+            self._code = 1
+
+
+class FakeLauncher:
+    """An ``AgentLauncher`` that records each ``LaunchSpec`` and hands out ``FakeProcess``es with
+    pids 1000, 1001, … . ``fail_next`` is raised by the next ``launch`` (once; no spec recorded)."""
+
+    name = "fake"
+
+    def __init__(self) -> None:
+        self.specs: list[LaunchSpec] = []
+        self.procs: list[FakeProcess] = []
+        self.fail_next: LaunchError | None = None
+
+    def launch(self, spec: LaunchSpec) -> FakeProcess:
+        if self.fail_next is not None:
+            error, self.fail_next = self.fail_next, None
+            raise error
+        self.specs.append(spec)
+        proc = FakeProcess(1000 + len(self.procs))
+        self.procs.append(proc)
+        return proc

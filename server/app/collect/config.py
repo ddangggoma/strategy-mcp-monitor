@@ -1,11 +1,13 @@
-"""What ``build_services`` collects. Later tasks add fields (agent)."""
+"""What ``build_services`` collects and whether it supervises session agents."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.activity.agent_supervisor import AgentOptions
 from app.win.eventlog import EventLogSource
+from app.win.launch import AgentLauncher
 from app.win.wmi import ProcessEventSource
 from app.win.wts import WtsSource
 
@@ -25,3 +27,6 @@ class CollectorConfig:
     """WMI process start/stop events; ``None`` = no ``activity.process`` collection."""
     activity: bool = True
     """``--activity off`` (DEV/E2E, V24): no process events, no 4688/4104 command handlers."""
+    launcher: AgentLauncher | None = None
+    """How session agents are started; ``None`` = no agent supervisor."""
+    agent: AgentOptions = AgentOptions()

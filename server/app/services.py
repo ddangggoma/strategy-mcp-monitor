@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.activity.agent_hub import AgentHub
+from app.activity.agent_supervisor import AgentSupervisor
 from app.activity.context import ActivityContext
 from app.activity.powershell import PowerShellHandler, expire_every
 from app.activity.process import CommandHandler, ProcessActivityHandler, ProcessComponent
@@ -74,6 +75,8 @@ class Services:
     """Process → session resolution and the session fields of every ``activity.*`` line."""
     agents: AgentHub
     """Per-session agent slots behind ``/api/agent/*`` (Local only); a display listener."""
+    agent_supervisor: AgentSupervisor | None
+    """Launches and watches the session agents when ``CollectorConfig.launcher`` is set."""
 
 
 def _load_or_create_otp_secret(db: Database) -> bytes:
@@ -145,6 +148,13 @@ def build_services(
         window_events=config_collectors.activity,
     )
     displays.add_listener(agents.on_display)
+    agent_supervisor: AgentSupervisor | None = None
+    if config_collectors.launcher is not None:
+        agent_supervisor = AgentSupervisor(
+            agents, config_collectors.launcher, rdp, tamper, log, clock, config_collectors.agent
+        )
+        rdp.add_listener(agent_supervisor.on_session_change)  # after displays: the display exists
+        manager.add_task("agent-supervisor", agent_supervisor.run, stop=agent_supervisor.stop)
     if config_collectors.wts is not None:
         manager.add(SessionsComponent(
             config_collectors.wts, rdp, manager, ReverseDns(clock=clock), clock,
@@ -198,4 +208,5 @@ def build_services(
         eventlog=eventlog,
         activity_context=activity_context,
         agents=agents,
+        agent_supervisor=agent_supervisor,
     )

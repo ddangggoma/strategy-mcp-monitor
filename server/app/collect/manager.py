@@ -50,6 +50,7 @@ class Collectors:
         self._clock = clock
         self._components: list[Component] = []
         self._task_fns: list[tuple[str, Callable[[], Awaitable[None]]]] = []
+        self._task_stops: list[tuple[str, Callable[[], Awaitable[None]]]] = []
         self._tasks: list[asyncio.Task[None]] = []
         self._status: dict[str, CollectorStatus] = {}
         self._modes: dict[str, str] = {}
@@ -59,9 +60,19 @@ class Collectors:
     def add(self, component: Component) -> None:
         self._components.append(component)
 
-    def add_task(self, name: str, fn: Callable[[], Awaitable[None]]) -> None:
-        """``fn()`` runs as a task from ``start()`` until ``stop()`` cancels it."""
+    def add_task(
+        self,
+        name: str,
+        fn: Callable[[], Awaitable[None]],
+        *,
+        stop: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
+        """``fn()`` runs as a task from ``start()`` until ``stop()`` cancels it. ``stop`` (if given)
+        is awaited first, while every task still runs, for a graceful shutdown (the agent
+        supervisor asks its agents to exit; ruling F07)."""
         self._task_fns.append((name, fn))
+        if stop is not None:
+            self._task_stops.append((name, stop))
 
     async def start(self) -> None:
         if self._started:
@@ -77,7 +88,14 @@ class Collectors:
             self._tasks.append(asyncio.create_task(_run(fn), name=name))
 
     async def stop(self) -> None:
-        """Cancel the tasks, then stop each component (in reverse order) off the loop."""
+        """Await the tasks' ``stop`` hooks (reverse order), cancel the tasks, then stop each
+        component (in reverse order) off the loop."""
+        if self._started:
+            for name, hook in reversed(self._task_stops):
+                try:
+                    await hook()
+                except Exception as exc:
+                    self.report(name, False, f"stop failed: {exc!r}")
         tasks, self._tasks = self._tasks, []
         for task in tasks:
             task.cancel()

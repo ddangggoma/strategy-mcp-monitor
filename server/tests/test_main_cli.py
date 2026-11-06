@@ -8,6 +8,7 @@ from app.main import server_configs
 from app.sessions.jsonsource import JsonFileWtsSource
 from app.web.app_factory import create_app
 from app.win.eventlog import PywinEventLogSource
+from app.win.launch import LocalLauncher, WtsLauncher
 from app.win.wts import CtypesWtsSource
 
 REPO = Path(__file__).resolve().parents[2]
@@ -132,3 +133,31 @@ def test_activity_flag_rejects_other_values(capsys):
     with pytest.raises(SystemExit) as e:
         parse_args(["--activity", "maybe"])
     assert e.value.code == 2 and "--activity" in capsys.readouterr().err
+
+
+
+
+def test_agent_flags(tmp_path, clock):
+    cfg = collector_config(parse_args(["--session-source", f"json:{tmp_path / 's.json'}", "--agent-launcher", "local",
+                                       "--agent-dialog", "print"]), clock=clock, root=tmp_path)
+    assert isinstance(cfg.launcher, LocalLauncher) and cfg.agent.dialog == "print" and cfg.agent.url_dir == tmp_path / "run"
+    assert collector_config(parse_args(["--session-source", "none"]), clock=clock, root=tmp_path).launcher is None
+    assert collector_config(parse_args(["--agent-launcher", "none"]), clock=clock, root=tmp_path).launcher is None
+
+
+def test_agent_flag_defaults_and_dir(tmp_path, clock):
+    ns = parse_args([])
+    assert (ns.agent_launcher, ns.agent_dialog, ns.agent_dir) == ("auto", "edge", REPO / "agent")
+    cfg = collector_config(ns, clock=clock, root=tmp_path)
+    assert isinstance(cfg.launcher, LocalLauncher)  # auto: this dev PC is not SYSTEM
+    assert (cfg.agent.dialog, cfg.agent.url_dir, cfg.agent.agent_dir) == ("edge", None, REPO / "agent")
+    wts = collector_config(parse_args(["--agent-launcher", "wts", "--agent-dir", str(tmp_path / "ag")]),
+                           clock=clock, root=tmp_path)
+    assert isinstance(wts.launcher, WtsLauncher) and wts.agent.agent_dir == tmp_path / "ag"
+
+
+@pytest.mark.parametrize("args", [["--agent-launcher", "remote"], ["--agent-dialog", "toast"]])
+def test_agent_flags_reject_other_values(args, capsys):
+    with pytest.raises(SystemExit) as e:
+        parse_args(args)
+    assert e.value.code == 2 and args[0] in capsys.readouterr().err

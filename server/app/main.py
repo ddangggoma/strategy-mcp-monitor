@@ -85,6 +85,10 @@ async def serve(
     if static_dir is not None and not (static_dir / "board.html").is_file():
         print(f"WARNING: no built web app in {static_dir}; serving the API only", file=sys.stderr, flush=True)
     services = build_services(root, dev_fixed_code=dev_otp_code, collectors=collectors)
+    local_url = f"http://127.0.0.1:{local_port}"
+    services.agents.configure(local_url)
+    if services.agent_supervisor is not None:
+        services.agent_supervisor.configure(local_url)
     await services.log.start()
     try:
         await services.monitor.start()
