@@ -6,6 +6,7 @@ import pytest
 from mcp_agent.dialog import EdgeWindow, PrintWindow, edge_command
 from mcp_agent.win32 import current_session_id, idle_seconds
 
+
 def test_edge_command_line():
     assert edge_command(r"C:\Edge\msedge.exe", "http://127.0.0.1:8700/notice#d=1&t=x", Path(r"C:\p")) == [
         r"C:\Edge\msedge.exe", "--app=http://127.0.0.1:8700/notice#d=1&t=x", r"--user-data-dir=C:\p",
@@ -308,6 +309,13 @@ def notice_page():
         httpd.shutdown(); httpd.server_close()
 
 
+def _desktop_locked() -> bool:
+    """The lock screen (LockApp.exe) owns the foreground window while the workstation is locked."""
+    hwnd = win32.foreground_window()
+    image = win32.process_image(win32.window_pid(hwnd)) if hwnd else None
+    return image is not None and os.path.basename(image).lower() == "lockapp.exe"
+
+
 @pytest.mark.winlive
 def test_real_edge_app_window_is_found_topmost_and_closed(tmp_path, notice_page):
     path = find_edge()
@@ -318,7 +326,11 @@ def test_real_edge_app_window_is_found_topmost_and_closed(tmp_path, notice_page)
         wait_until(lambda: w.window_handle is not None, 20)
         hwnd = w.window_handle
         ex_style = ctypes.WinDLL("user32").GetWindowLongW(ctypes.c_void_p(hwnd), -20)  # GWL_EXSTYLE
-        assert ex_style & 0x8 and win32.is_window(hwnd)  # WS_EX_TOPMOST
+        assert win32.is_window(hwnd)
+        if not _desktop_locked():
+            # F06: on a locked desktop (unattended run) SetWindowPos succeeds but Edge's window keeps
+            # no WS_EX_TOPMOST (seen 2026-11-06, Edge 156); the rest of the flow is still exercised.
+            assert ex_style & 0x8  # WS_EX_TOPMOST
         assert not w.closed_by_user()
         ctypes.WinDLL("user32").PostMessageW(ctypes.c_void_p(hwnd), 0x0010, 0, 0)  # WM_CLOSE, what the title bar X does
         wait_until(w.closed_by_user, 10)

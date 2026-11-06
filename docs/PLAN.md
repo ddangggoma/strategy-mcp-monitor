@@ -1,7 +1,7 @@
 # Strategy MCP Monitor — 하이레벨 개발 계획서
 
-- 버전: **v0.6** (2026-11-06)
-- 상태: 요구사항 확정. 구현 중입니다 (P0–P3 완료: 기반, 인증·권한, MCP 모니터 엔진, 웹 UI). 이 문서가 기준이며, 구현에서 달라진 점은 변경 이력에 적습니다.
+- 버전: **v0.7** (2026-11-06)
+- 상태: 요구사항 확정. P0–P5 구현 완료(Win 11 Pro 실기기 확인 대기, `docs/verification/win11-pro-p4-p5.md`). 이 문서가 기준이며, 구현에서 달라진 점은 변경 이력에 적습니다.
 - 대상: **Windows 11 Pro**에서 실행되는 MCP 관리 + RDP 접속·행동 감사 웹 애플리케이션
 
 ### 변경 이력
@@ -13,6 +13,7 @@
 | v0.4 | 스크립트 예외 격리 추가: 별도 프로세스 실행, **120초 타임아웃**, 결과 분류(ok/failed/timeout/error), 출력·동시 실행 제한 (R20) |
 | v0.5 | **구현 정합 (P1–P2):** §4.3 스크립트 **조회**(읽기 전용) 행 추가(MCP 개발자 이상, Local), §4.4 `can(user, action, channel, owner_id)`, §5.8 조회/편집 권한 구분, §8 `PATCH /api/users/{id}`와 MCP·스크립트·스트림 엔드포인트 보강(수동 조치는 202 + `run_id`, 외부 채널에서 Local 전용 경로는 405가 아니라 404) |
 | v0.6 | 구현 정합 (P3): 채널별 세션 쿠키(mcpmon_sid_local/_ext), /api/auth/me otp_provider, 보드 action_delay_sec, action 이벤트 requested, 응답의 사용자 요약(actor/author/updated_by_user)·owned_mcps, GET /api/mcp-activity, GET /api/settings/retention/preview(retention_cutoff = today−(days−1)), 고지 API(versions·revert, 버전 0 = 기본 문구), 정적 라우트(/, /admin/*, /notice, /assets/*)와 CSP, loopback 스트림 상한 20, CLI --static-dir/--dev-otp-code |
+| v0.7 | 구현 정합 (P4–P5): 에이전트↔서비스는 Named Pipe 대신 Local 채널 HTTP(X-Agent-Token + TCP 피어 → 세션 ID 검증, V4), 고지 창은 pywebview 대신 Edge --app 창(같은 Chromium/WebView2 엔진, V3; 640×600, 화면 중앙 최상위, 확인 전에 닫으면 1초 뒤 다시 표시), WTS 0.5초 폴링 + nudge(V6), 보드 sessions·SSE sessions/tamper, GET /api/sessions/{current,history,collectors}, GET /api/tamper/recent, POST /api/notice/display/{open,ack}(Local, 토큰), /api/agent/*(Local), 마이그레이션 6·7(rdp_connections, rdp_logon_failures, notice_displays), pywin32 312, CLI --session-source/--collect-console/--activity/--agent-launcher/--agent-dialog/--agent-dir. 그 밖에: 고지 표시는 에이전트가 세션 이벤트를 직접 받는 대신 서버 세션 추적기가 연결을 열 때 에이전트에 `show_notice`를 보냄(§5.5, 결과 같음), 수집 스레드 → 루프 큐는 소스별 1만 개 상한에서 오래된 것부터 버리고 `collector.dropped`로 남김(§7 "유실 0"은 이 상한 안의 목표, V11), SSE `tamper`는 로그인한 MCP 개발자 이상에게만, `GET /api/tamper/recent`는 `view_logs`(MCP 개발자 이상), 익명 보드의 접속자 정보에 `connection_id`·`client_build`·`protocol`·`first_seen_ip`·`first_seen_device`도 포함(§4.3 "접속자 정보") |
 
 ---
 
@@ -78,11 +79,11 @@
 │  │  Agent Supervisor (세션별 에이전트 기동·감시, 우회 탐지)               │   │
 │  │  Log Writer (logs/YYYY-MM-DD.jsonl + data/index.db, 배치 기록, 보존)    │   │
 │  └───────────────▲────────────────────────────────────────────────────────┘   │
-│                  │ Named Pipe (세션 ID 검증)                                  │
+│                  │ loopback HTTP (에이전트 토큰 + 세션 ID 검증)               │
 │  ┌───────────────┴──────────────┐                                            │
 │  │ mcp-agent (RDP 사용자 세션)  │                                            │
 │  │ · 연결마다 사전 고지 다이얼로그│                                            │
-│  │   (WebView2, 같은 디자인)    │                                            │
+│  │   (Edge 앱 창, 같은 디자인)  │                                            │
 │  │ · 포그라운드 창/최소화/제목  │                                            │
 │  │ · 유휴 상태                  │                                            │
 │  └──────────────────────────────┘                                            │
@@ -186,7 +187,7 @@
 ### 5.3 RDP 세션 수집기
 | 소스 | 얻는 정보 |
 |---|---|
-| WTS API (세션 변경 알림 + 2초 폴링 보정) | 세션 ID, 상태, 사용자명, **로그온 도메인**, **클라이언트 컴퓨터명**, **클라이언트 IP**, 클라이언트 빌드, 해상도·색 깊이, 프로토콜, 로그온/연결/해제 시각, 유휴 시간 |
+| WTS API (0.5초 폴링(+ 세션 변경 알림 시 즉시)) | 세션 ID, 상태, 사용자명, **로그온 도메인**, **클라이언트 컴퓨터명**, **클라이언트 IP**, 클라이언트 빌드, 해상도·색 깊이, 프로토콜, 로그온/연결/해제 시각, 유휴 시간 |
 | RemoteConnectionManager 1149 | 인증 성공 (사용자, 도메인, 출발지 IP) |
 | LocalSessionManager 21/22/23/24/25 | 로그온, 셸 시작, 로그오프, 연결 해제, 재연결 |
 | Security 4624(Type 10/7)/4625/4634/4647/4778/4779 | 로그온 성공·실패, 로그오프, 재연결·해제 |
@@ -205,7 +206,7 @@
 
 ### 5.5 행동 감사 사전 고지 다이얼로그
 - **표시 시점:** RDP **연결될 때마다** 표시합니다. 새 로그온과 재연결 모두 해당합니다. 에이전트가 세션 연결 이벤트를 받는 즉시 띄웁니다.
-- **형태:** 화면 중앙의 최상위 모달 창이며, '확인' 버튼 하나만 있는 안내형입니다. WebView2로 렌더링해서 웹앱과 같은 디자인 토큰과 애니메이션을 씁니다.
+- **형태:** 화면 중앙의 최상위 모달 창이며, '확인' 버튼 하나만 있는 안내형입니다. Edge 앱 창(WebView2와 같은 엔진)으로 렌더링해서 웹앱과 같은 디자인 토큰과 애니메이션을 씁니다.
 - **기록:**
   - `notice_shown`: 표시 시각, 연결 종류(로그온/재연결), 문구 버전
   - `notice_acknowledged`: 확인 시각, 확인까지 걸린 시간
@@ -365,10 +366,14 @@
 
 | 엔드포인트 (예) | 익명 | MCP 개발자 | Admin | 채널 |
 |---|:-:|:-:|:-:|---|
-| `GET /api/board`, `GET /api/stream` (SSE: `board`·`mcp`·`mcp_removed` 이벤트. `action` 이벤트는 로그인한 MCP 개발자 이상에게만) | ✓ | ✓ | ✓ | 둘 다 |
+| `GET /api/board` (`sessions` 포함), `GET /api/stream` (SSE: `board`·`mcp`·`mcp_removed`·`sessions` 이벤트. `action`·`tamper` 이벤트는 로그인한 MCP 개발자 이상에게만) | ✓ | ✓ | ✓ | 둘 다 |
 | `POST /api/auth/otp/request`, `POST /api/auth/otp/verify`, `POST /api/auth/logout` | ✓ | ✓ | ✓ | 둘 다 |
-| `GET /api/mcps`, `GET /api/mcps/{id}` (설정 포함), `GET /api/mcps/{id}/history`, `GET /api/mcps/{id}/actions/{action_id}` (출력 포함), `GET /api/sessions/history` | ✗ | ✓ | ✓ | 둘 다 |
+| `GET /api/mcps`, `GET /api/mcps/{id}` (설정 포함), `GET /api/mcps/{id}/history`, `GET /api/mcps/{id}/actions/{action_id}` (출력 포함) | ✗ | ✓ | ✓ | 둘 다 |
 | `GET /api/mcp-activity?limit=` (모든 MCP의 최근 상태 전이·조치, 대시보드용) | ✗ | ✓ | ✓ | 둘 다 |
+| `GET /api/sessions/current`, `GET /api/sessions/history?days=1..90&limit&before_id` (연결 이력 + 로그인 실패), `GET /api/sessions/collectors` (수집기 상태) — 세션 화면 | ✗ | ✓ | ✓ | 둘 다 |
+| `GET /api/tamper/recent?limit=1..200` (최근 우회 탐지 이벤트, 대시보드용, 로그 조회 권한) | ✗ | ✓ | ✓ | 둘 다 |
+| `POST /api/notice/display/open`, `POST /api/notice/display/ack` (고지 창 페이지 전용: `X-Notice-Token` + 요청 피어의 세션 = 표시 건의 세션, 문제는 모두 404) | 토큰 | 토큰 | 토큰 | **Local만** |
+| `POST /api/agent/hello`, `GET /api/agent/next`, `POST /api/agent/heartbeat`, `POST /api/agent/events`, `POST /api/agent/notice/{display_id}/closed` (세션 에이전트 전용: `X-Agent-Token` + 요청 피어의 세션 = 에이전트 슬롯의 세션) | 토큰 | 토큰 | 토큰 | **Local만** |
 | `GET /api/logs?from&to&users&cat&q&cursor`, `GET /api/logs/histogram`, `GET /api/logs/export` | ✗ | ✓ | ✓ | 둘 다 |
 | `PUT /api/mcps/{id}`, `POST /api/mcps/{id}/actions/{start\|restart\|stop}` (**202 + `run_id`**: 결과는 `action` 이벤트와 이력으로 확인) | ✗ | ✓ | ✓ | 둘 다 |
 | `POST /api/mcps`, `DELETE /api/mcps/{id}` | ✗ | 등록: ✓ / 삭제: 소유자 | ✓ | **Local만** |
@@ -400,7 +405,7 @@
 | 영역 | 선택 |
 |---|---|
 | 웹 서버 | FastAPI + Uvicorn (서버 2개), SSE |
-| Windows 연동 | pywin32, WMI(comtypes), ctypes(SetWinEventHook), WebView2(`pywebview`) |
+| Windows 연동 | pywin32(이벤트 로그·WMI·CreateProcessAsUser), ctypes(WTS·세션 ID·SetWinEventHook), Edge --app |
 | 모니터링 | psutil, httpx, icmplib |
 | 인증 | 자체 OTP 구현 (`secrets` 모듈, 상수 시간 비교), SQLite 세션 저장소 |
 | 저장 | SQLite(WAL, FTS5), JSONL |

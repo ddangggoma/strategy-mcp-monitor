@@ -6,6 +6,7 @@ import pytest
 from mcp_agent.client import AgentRejected, ServerClient, ServerUnavailable
 from mcp_agent.config import parse_args
 
+
 def test_config_requires_token_and_server():
     with pytest.raises(SystemExit) as e:
         parse_args(["--server", "http://127.0.0.1:8700"], {})

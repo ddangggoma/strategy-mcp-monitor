@@ -1,13 +1,13 @@
 import os
 import threading
 import time
-from pathlib import Path
 
 from mcp_agent import VERSION
 from mcp_agent.client import ServerClient
 from mcp_agent.config import AgentConfig
 from mcp_agent.dialog import PrintWindow
 from mcp_agent.runner import AgentRunner
+
 
 def cfg(server, tmp_path, **kw):
     base = dict(server=server, token="tok", dialog="print", url_file=tmp_path / "u.url", edge_path=None,

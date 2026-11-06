@@ -8,7 +8,7 @@
 
 **Tech Stack:** 서버: Python 3.15, FastAPI, uv, pytest, psutil(기존), **pywin32 312**(신규, V2), ctypes(wtsapi32·kernel32·user32). 에이전트: Python 3.15 표준 라이브러리 + ctypes(의존성 없음, V5), Microsoft Edge(Windows 11 기본 설치) `--app` 창(V3). 웹: Plan 3 스택 그대로(신규 의존성 없음).
 
-**Spec:** `docs/PLAN.md` (v0.5; Plan 3 끝에 v0.6). 이 계획은 §5.3(세션 수집기), §5.4(행동 로그), §5.5(고지 **표시**·기록), §3(에이전트·세션 ID 검증), §5.9(세션 에이전트 기동), §6.2(보드 접속자 카드), §6.4 #1(대시보드 현재 세션·우회 탐지)·#3(세션 화면), §7(이벤트 수집·창 이벤트 성능), §8(`GET /api/sessions/history`), §13(에이전트 사칭 차단·Win 11 Pro 실기기), §15, §11 P4·P5 완료 기준을 구현합니다. carry-forward의 "Plan 4" 절 5개 항목과 Plan 3이 넘긴 계약(`RdpSession`, `loadNoticeContent()`·`notifyHost()` 교체, `notice_shown` 문구 버전, 대시보드 현재 세션)을 모두 아래 과제에 배정했습니다(Task 20에서 체크). 이미 내려진 결정은 `2026-11-04-plan1-rulings.md`, `2026-11-05-plan2-rulings.md`, Plan 3 부록 A(U1–U32)와 Plan 3 ledger의 F18(`/notice`는 Local 채널에서만 제공)입니다. 이 계획의 결정(V1–V33)은 **부록 A**, 서버 API·SSE와 클라이언트 대응은 **부록 B**에 있습니다. 본문의 `V<n>`은 부록 A의 행입니다.
+**Spec:** `docs/PLAN.md` (v0.6; 이 계획의 Task 20에서 v0.7). 이 계획은 §5.3(세션 수집기), §5.4(행동 로그), §5.5(고지 **표시**·기록), §3(에이전트·세션 ID 검증), §5.9(세션 에이전트 기동), §6.2(보드 접속자 카드), §6.4 #1(대시보드 현재 세션·우회 탐지)·#3(세션 화면), §7(이벤트 수집·창 이벤트 성능), §8(`GET /api/sessions/history`), §13(에이전트 사칭 차단·Win 11 Pro 실기기), §15, §11 P4·P5 완료 기준을 구현합니다. carry-forward의 "Plan 4" 절 5개 항목과 Plan 3이 넘긴 계약(`RdpSession`, `loadNoticeContent()`·`notifyHost()` 교체, `notice_shown` 문구 버전, 대시보드 현재 세션)을 모두 아래 과제에 배정했습니다(Task 20에서 체크). 이미 내려진 결정은 `2026-11-04-plan1-rulings.md`, `2026-11-05-plan2-rulings.md`, Plan 3 부록 A(U1–U32)와 Plan 3 ledger의 F18(`/notice`는 Local 채널에서만 제공)입니다. 이 계획의 결정(V1–V33)은 **부록 A**, 서버 API·SSE와 클라이언트 대응은 **부록 B**에 있습니다. 본문의 `V<n>`은 부록 A의 행입니다.
 
 **carry-forward 배정:**
 | 항목 | 과제 |

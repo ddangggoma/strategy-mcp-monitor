@@ -2,6 +2,7 @@ import pytest
 
 from mcp_agent.hooks import WinEventHookThread
 
+
 @pytest.mark.winlive
 def test_hook_thread_installs_three_hooks_and_stops():
     got = []; t = WinEventHookThread(got.append); t.start()

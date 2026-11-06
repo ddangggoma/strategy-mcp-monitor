@@ -36,11 +36,11 @@ Every later plan reads this file before it is written and checks off the items i
 - [x] (From Plan 2) An SSE stream keeps the auth level it connected with: after logout, close and reopen `/api/stream`. (Plan 3 Task 7, 9)
 
 ### Plan 4 (Windows collection)
-- [ ] `LogWriter.emit()` is loop-thread only. Collector threads must go through `loop.call_soon_threadsafe`.
-- [ ] Collectors need an event-time override for `ts`: `emit` currently ignores a caller-supplied `ts`.
-- [ ] Once a second process (agent or collector) opens `config.db`, cross-process contention can block the event loop for up to 5 s (`busy_timeout`). Move DB access off the loop or keep the second process off `config.db`.
-- [ ] Record the localhost login's Windows account (spec §4.1.5).
-- [ ] (From Plan 2) Add `sessions` to `GET /api/board` and to the SSE board events.
+- [x] `LogWriter.emit()` is loop-thread only. Collector threads must go through `loop.call_soon_threadsafe`. (Plan 4 Task 1)
+- [x] Collectors need an event-time override for `ts`: `emit` currently ignores a caller-supplied `ts`. (Plan 4 Task 1)
+- [x] Once a second process (agent or collector) opens `config.db`, cross-process contention can block the event loop for up to 5 s (`busy_timeout`). Move DB access off the loop or keep the second process off `config.db`. (Plan 4 Task 7, 15: bookmarks in `data/collector-state.json`; the agent speaks HTTP only and never opens `config.db`)
+- [x] Record the localhost login's Windows account (spec §4.1.5). (Plan 4 Task 2)
+- [x] (From Plan 2) Add `sessions` to `GET /api/board` and to the SSE board events. (Plan 4 Task 5)
 
 ### Plan 5 (log viewer, retention, packaging)
 - [ ] Reader and indexer:
@@ -105,14 +105,15 @@ Every later plan reads this file before it is written and checks off the items i
 ## From Plan 3 (web UI)
 
 ### Plan 4 (Windows collection)
-- [ ] The board `sessions` field and the SSE `sessions` event (`{sessions}`, a full replacement) fill exactly the keys of `RdpSession` in `web/src/lib/api-types.ts`. Without the field the UI shows the "not collected yet" line (`board.sessionsNotReady`: "원격 접속 정보는 다음 업데이트부터 표시돼요.").
-- [ ] Replace the notice bundle's `loadNoticeContent()` and `notifyHost()` (U16) with the agent path.
-- [ ] The notice version recorded in `notice_shown` is `NoticeStore.current().version` (0 = the built-in text).
-- [ ] The dashboard "현재 세션" card uses the same sessions data.
+- [x] The board `sessions` field and the SSE `sessions` event (`{sessions}`, a full replacement) fill exactly the keys of `RdpSession` in `web/src/lib/api-types.ts`. Without the field the UI shows the "not collected yet" line (`board.sessionsNotReady`: "원격 접속 정보는 다음 업데이트부터 표시돼요."). (Plan 4 Task 4, 5, 17)
+- [x] Replace the notice bundle's `loadNoticeContent()` and `notifyHost()` (U16) with the agent path. (Plan 4 Task 17)
+- [x] The notice version recorded in `notice_shown` is `NoticeStore.current().version` (0 = the built-in text). (Plan 4 Task 11)
+- [x] The dashboard "현재 세션" card uses the same sessions data. (Plan 4 Task 18)
 
 ### Plan 5 (log viewer, retention, packaging)
 - [ ] The retention purge must use `app.logstore.retention.retention_cutoff`, so it matches the settings preview.
-- [ ] Fill the sessions, logs and audit-log navigation items and the dashboard "로그인 실패 추이" and "우회 탐지 이벤트" cards (now `PlannedFeature`).
+- [x] Fill the sessions navigation item and the dashboard "우회 탐지 이벤트" card. (Plan 4 Task 18)
+- [ ] Fill the logs and audit-log navigation items and the dashboard "로그인 실패 추이" card (still `PlannedFeature`).
 - [ ] The log table uses TanStack Virtual and no animation.
 - [ ] PyInstaller packaging: change the `--static-dir` default (now `<repo>/web/dist`) to a path relative to the executable.
 
@@ -130,3 +131,25 @@ Every later plan reads this file before it is written and checks off the items i
 
 ### Later
 - [ ] Some web unit tests still sleep 30–50 ms before asserting that something does *not* arrive (no toast later in `mcps.test`, no tooltip on a wide window in `shell.test`, an older refetch in `scripts.test`, `status.test`). There is no signal to wait on; replace them if one appears.
+
+## From Plan 4 (Windows collection)
+
+### Plan 5 (log viewer, retention, packaging)
+- [ ] Retention purge also covers `rdp_connections`, `rdp_logon_failures` and `notice_displays` (V29). Before deleting a log file, call `TamperScanner.expect_log_removed(name)`; otherwise the scanner reports a `log_file_removed` tamper event.
+- [ ] The Windows service host calls `SessionCollector.nudge()` (reachable as `SessionsComponent.nudge()` in `app/collect/manager.py`) on `SERVICE_CONTROL_SESSIONCHANGE`, so a session change is picked up at once instead of at the next 0.5 s poll (V6).
+- [ ] The Windows service stop must go through `ShutdownSequence.request` (`server/app/main.py`), like Ctrl+C does today: the collectors stop first, so the agent supervisor can still deliver `exit` over the Local channel and each agent closes its Edge notice window, and only then the HTTP servers.
+- [ ] Packaging the agent: if PyInstaller builds `mcp-agent.exe`, set `AgentOptions.python` and the launch `argv` to that executable (instead of `<python> -m mcp_agent` with `PYTHONPATH`). Whatever runs the agent must be readable by every user session: today `AgentOptions.python` is the server venv's base interpreter, which uv installs under the installing user's `%APPDATA%\uv\python`, out of reach of a standard user's session under `WtsLauncher`.
+- [ ] `install.ps1` enables the audit policy and registry values the collectors need: `auditpol` Process Creation (success), Logon (success, failure), Logoff (success), Other Logon/Logoff Events (success), Audit Policy Change (success); `ProcessCreationIncludeCmdLine_Enabled = 1`; `EnableScriptBlockLogging = 1` (commands in `docs/verification/win11-pro-p4-p5.md` §1).
+- [ ] Uninstall removes `data/collector-state.json` and each user's Edge notice profile folder (`%LOCALAPPDATA%\mcp-monitor\notice-edge`).
+- [ ] Tamper baselines (script hashes, log file sizes, audit registry values) live in memory only, so a change made while the service is stopped is not reported. Persist the baseline or compare against the last known state at startup.
+- [ ] Log viewer: filters for the `session`, `notice`, `activity.*` and `tamper` categories, and the dashboard "로그인 실패 추이" card (source: `rdp_logon_failures`).
+
+### Later
+- [ ] A notification channel for tamper events (toast, mail, webhook; spec §14). Today they are logged, shown on the dashboard card and sent as SSE `tamper` to signed-in developers.
+- [ ] GeoIP for client IPs (spec §5.3, optional).
+- [ ] Apply the notice text to the Windows pre-logon legal notice (`legalnoticecaption`/`legalnoticetext`; spec §5.5 optional, V33).
+- [ ] Make the notice window a true modal: replace the Edge `--app` `NoticeWindow` with a WebView2 host (pywebview), V3.
+- [ ] A WTS session-notification window (`WTSRegisterSessionNotification`) instead of, or next to, the 0.5 s poll (V6), if the real machine misses the 2-second target.
+
+### Win 11 Pro real-machine check
+- [ ] Every `대기` item in `docs/verification/win11-pro-p4-p5.md`: P4-1–P4-13, P5-1–P5-14, X-1–X-10. Move each failure here as its own item.

@@ -14,3 +14,14 @@ pythonpath = ["."]
 markers = ["winlive: real Windows API on this PC, no admin rights"]
 addopts = "-m 'not winlive'"
 timeout = 60
+
+# The agent is linted with the server's ruff (`uv run --project ../server python -m ruff check
+# mcp_agent tests`); the same pinned rule set as server/pyproject.toml, so ruff's widening default
+# does not apply here.
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
+ignore = ["E701", "E702", "B008"]
