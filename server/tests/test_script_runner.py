@@ -307,3 +307,40 @@ async def test_resolve_runs_inside_the_slot(tmp_path):
     assert seen == [True] and (r.status, r.stdout.strip(), r.actual_sha256) == ("ok", "new", new_sha)
     gone = await runner.run(old, expected_sha256=old_sha, timeout_sec=10, env=ENV, lock_key=1, resolve=lambda: None)
     assert (gone.status, gone.error) == ("error", "missing")
+
+
+# ---- Plan 5 Task 7: kill_failed (W20), kill_all / aclose (W21) ----
+
+def _sha(p):
+    return hashlib.sha256(p.read_bytes()).hexdigest()
+
+
+async def test_kill_failure_is_reported_and_holds_the_mcp_lock(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner_mod, "kill_tree", lambda pid: 0)  # the kill "fails": nothing dies
+    monkeypatch.setattr(runner_mod, "KILL_FAILED_HOLD_SEC", 15.0)
+    slow = tmp_path / "slow.bat"; slow.write_bytes(b"@ping -n 5 127.0.0.1 > nul\r\n")  # about 4 s
+    fast = tmp_path / "fast.bat"; fast.write_bytes(b"@exit /b 0\r\n")
+    r = runner_mod.ScriptRunner(); t0 = time.perf_counter()
+    first = asyncio.create_task(r.run(slow, expected_sha256=_sha(slow), timeout_sec=1, env={}, lock_key=1))
+    await asyncio.sleep(0.2)
+    second = await r.run(fast, expected_sha256=_sha(fast), timeout_sec=10, env={}, lock_key=1)
+    res = await first
+    assert (res.status, res.error) == ("timeout", "kill_failed")
+    assert second.status == "ok" and time.perf_counter() - t0 >= 3.5
+
+
+async def test_kill_all_kills_running_script_trees(tmp_path):
+    pidfile = tmp_path / "child.pid"
+    script = tmp_path / "hang.ps1"
+    script.write_text(f"$c = Start-Process ping -ArgumentList '-n','60','127.0.0.1' -PassThru -WindowStyle Hidden\n"
+                      f"Set-Content -Path '{pidfile}' -Value $c.Id\nStart-Sleep 60\n", "utf-8")
+    r = runner_mod.ScriptRunner()
+    task = asyncio.create_task(r.run(script, expected_sha256=_sha(script), timeout_sec=120, env={}, lock_key=1))
+    for _ in range(100):
+        if pidfile.exists() and pidfile.read_text().strip(): break
+        await asyncio.sleep(0.1)
+    child = int(pidfile.read_text().strip())
+    assert await r.kill_all() >= 2
+    res = await asyncio.wait_for(task, 10)
+    assert res.status == "failed" and not psutil.pid_exists(child)
+    await r.aclose()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import sys
 import traceback
 from pathlib import Path
@@ -143,9 +144,12 @@ class BodySizeLimit:
 
         try:
             await self.app(scope, limited_receive, limited_send)
-        except Exception:
-            if not rejected:  # the app only failed because we cut its body off
+        except Exception as exc:
+            if not rejected:
                 raise
+            # The app most likely failed only because we cut its body off; never raise from here.
+            with contextlib.suppress(Exception):
+                print(f"body limit: suppressed {exc!r} after 413", file=sys.stderr)
 
 
 def create_app(channel: Channel, services: Services, static_dir: Path | None = None) -> FastAPI:

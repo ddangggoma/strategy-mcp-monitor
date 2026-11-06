@@ -611,3 +611,63 @@ async def test_board_item_action_delay_follows_config(services):
     await mon.issue_round(); await mon.wait_idle()
     item = mon.board_item(m.id)
     assert (item["state"], item["action_delay_sec"], item["action_in_sec"]) == ("SUSPECT", 45, 45.0)
+
+
+# ---- Plan 5 Task 7: kill_failed (W20), kill_abandoned (W21), safe MCP_ACTOR (W37) ----
+
+async def test_kill_failed_is_logged(services):
+    m = seed_mcp(services, make_user(services, "o@x.com"))
+    services.monitor._runner.results.append(ok_result(status="timeout", exit_code=None, error="kill_failed"))
+    await crash_to_action(services, m)
+    e = [x for x in await logs(services, "system") if x.get("event") == "monitor.kill_failed"]
+    assert e and (e[0]["mcp_id"], e[0]["kind"]) == (m.id, "start")
+    assert e[0]["run_id"] == services.history.actions(m.id)[0].run_id
+
+
+async def test_stop_kills_abandoned_scripts_when_asked(services):
+    owner = make_user(services, "o@x.com"); m = seed_mcp(services, owner)
+    services.monitor._runner.gate = asyncio.Event()
+    services.monitor.manual_action(m.id, "start", owner); await asyncio.sleep(0)
+    await services.monitor.stop(grace_sec=0.05, kill_abandoned=True)
+    stop = [x for x in await logs(services, "system") if x.get("event") == "monitor.stop"][-1]
+    assert services.monitor._runner.killed_all == 1 and stop["abandoned"] == 1 and "killed" in stop
+    assert services.monitor._runner.closed == 1
+
+
+async def test_stop_without_kill_abandoned_never_kills_but_closes_the_runner(services):
+    owner = make_user(services, "o@x.com"); m = seed_mcp(services, owner)
+    services.monitor._runner.gate = asyncio.Event()
+    services.monitor.manual_action(m.id, "start", owner); await asyncio.sleep(0)
+    await services.monitor.stop(grace_sec=0.05)
+    stop = [x for x in await logs(services, "system") if x.get("event") == "monitor.stop"][-1]
+    assert services.monitor._runner.killed_all == 0 and (stop["abandoned"], stop["killed"]) == (1, 0)
+    assert services.monitor._runner.closed == 1
+
+
+async def test_stop_with_no_running_script_kills_nothing(services):
+    await services.monitor.stop(grace_sec=0.05, kill_abandoned=True)
+    stop = [x for x in await logs(services, "system") if x.get("event") == "monitor.stop"][-1]
+    assert services.monitor._runner.killed_all == 0 and (stop["abandoned"], stop["killed"]) == (0, 0)
+
+
+async def test_mcp_actor_is_restricted_to_safe_emails(services):
+    weird = make_user(services, "a&calc@x.com"); m = seed_mcp(services, weird)
+    services.monitor.manual_action(m.id, "start", weird); await services.monitor.wait_idle()
+    assert services.monitor._runner.calls[-1].env["MCP_ACTOR"] == f"user-{weird.id}"
+    plain = make_user(services, "dev.ops+1@x.com")
+    services.monitor.manual_action(m.id, "stop", plain); await services.monitor.wait_idle()
+    assert services.monitor._runner.calls[-1].env["MCP_ACTOR"] == "dev.ops+1@x.com"
+    actors = [a["actor"] for a in await logs(services, "mcp.action")]
+    assert actors == ["a&calc@x.com", "dev.ops+1@x.com"]  # the log keeps the real email
+
+
+def test_safe_actor():
+    from app.monitor.supervisor import safe_actor
+    from app.users.store import User as U
+    def u(email):
+        return U(id=7, email=email, name="n", role="developer", active=True, created_at=None,
+                 created_by=None, last_login_at=None)
+    assert safe_actor(None) == "system"
+    assert safe_actor(u("a.b_c%d+e-f@x-y.example")) == "a.b_c%d+e-f@x-y.example"
+    for bad in ("a&calc@x.com", "a@x.com&calc", "a b@x.com", "한@x.com", "a\"@x.com", "a@x.com\n", "%PATH%@x.com^"):
+        assert safe_actor(u(bad)) == "user-7"

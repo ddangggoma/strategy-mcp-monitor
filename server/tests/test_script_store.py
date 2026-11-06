@@ -1,9 +1,12 @@
+import contextlib
 import hashlib
+import sqlite3
 import sys
 
 import pytest
 
 import app.monitor.scripts as mod
+from app.monitor.runner import ScriptRunner
 from app.monitor.scripts import (
     MAX_SCRIPT_BYTES,
     ScriptNotFoundError,
@@ -15,7 +18,7 @@ from app.monitor.scripts import (
 from app.monitor.scripts import ScriptUpload as U
 from app.monitor.store import EndpointTakenError, McpNotFoundError, McpStore, NameTakenError
 from app.users.store import UserStore
-from tests.mcp_helpers import cfg
+from tests.mcp_helpers import cfg, make_user, seed_mcp
 
 # The "oem" codec exists only on Windows (the target platform).
 windows_only = pytest.mark.skipif(sys.platform != "win32", reason="oem codec is Windows-only")
@@ -415,3 +418,32 @@ def test_files_stay_inside_the_mcp_directory(env):
     for p in root.rglob("*"):
         assert root in p.resolve().parents
     assert [p.name for p in root.iterdir()] == [str(m.id)]
+
+
+# ---- Plan 5 Task 7 (W19): replace-before-COMMIT stays; the run-time hash check is the safety net ----
+
+def upload(ext, text):
+    return U(ext, text)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="runs a real cmd.exe script")
+async def test_commit_failure_after_replace_is_caught_by_the_runtime_hash_check(services, monkeypatch):
+    owner = make_user(services, "o@x.com"); m = seed_mcp(services, owner)
+    before = services.scripts.get(m.id, "start")
+    real = services.db.transaction
+
+    @contextlib.contextmanager
+    def failing_commit():
+        with real() as conn:
+            yield conn
+            raise sqlite3.OperationalError("disk I/O error during COMMIT")
+
+    monkeypatch.setattr(services.db, "transaction", failing_commit)
+    with pytest.raises(sqlite3.OperationalError):
+        services.scripts.put(m.id, "start", upload(".bat", "@exit /b 7\r\n"), owner.id)
+    monkeypatch.undo()
+    info = services.scripts.get(m.id, "start")
+    assert info.sha256 == before.sha256                    # DB rolled back
+    assert b"exit /b 7" in info.path.read_bytes()          # file already replaced
+    res = await ScriptRunner().run(info.path, expected_sha256=info.sha256, timeout_sec=10, env={}, lock_key=m.id)
+    assert (res.status, res.error) == ("error", "hash_mismatch")   # never executed

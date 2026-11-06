@@ -168,7 +168,9 @@ def build_services(
         )
         rdp.add_listener(agent_supervisor.on_session_change)  # after displays: the display exists
         manager.add_task("agent-supervisor", agent_supervisor.run, stop=agent_supervisor.stop)
-    tamper_scanner = TamperScanner(tamper, scripts, mcps, paths.logs_dir, log)
+    tamper_scanner = TamperScanner(
+        tamper, scripts, mcps, paths.logs_dir, log, baseline_path=paths.data_dir / "tamper-baseline.json"
+    )
     audit = AuditLogger(log)
     retention = RetentionJob(paths, db, settings, log_index, log, audit, clock, tamper_scanner)
     if config_collectors.wts is not None:

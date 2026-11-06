@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import pytest
 
@@ -225,6 +226,89 @@ async def test_build_services_reports_cleared_logs_and_policy_changes_from_the_e
     finally:
         await svc.log.stop()
         svc.db.close()
+
+# ---- Plan 5 Task 7 (preflight F07): the baselines survive a service restart ----
+
+def persisted(services, values, path):
+    return TamperScanner(services.tamper, services.scripts, services.mcps, services.paths.logs_dir, services.log,
+                         read_value=lambda v: values[v.name], registry=(RegistryValue("A", "cmd"), RegistryValue("B", "ps")),
+                         baseline_path=path)
+
+async def test_changes_made_while_stopped_are_reported_at_the_next_start(services, tmp_path):
+    d = services.paths.logs_dir; path = tmp_path / "data" / "tamper-baseline.json"
+    for name in ("2026-11-01.jsonl", "2026-11-02.jsonl", "2026-11-03.jsonl"):
+        (d / name).write_bytes(b"x" * 100)
+    m = seed_mcp(services, make_user(services, "o@x.com")); info = services.scripts.get(m.id, "start")
+    values = {"cmd": 1, "ps": None}
+    persisted(services, values, path).scan()
+    assert path.exists() and services.tamper.recent() == []
+    # --- the service is stopped; someone edits things; the service starts again ---
+    values["cmd"] = 0
+    (d / "2026-11-01.jsonl").write_bytes(b"x" * 10)
+    (d / "2026-11-02.jsonl").unlink()
+    (d / "2026-11-03.jsonl").write_bytes(b"x" * 300)  # growth stays normal
+    info.path.write_bytes(b"exit /b 9")
+    s = persisted(services, values, path); s.scan(); s.scan()
+    got = sorted((r["event"], r.get("key") or r.get("file") or r.get("kind")) for r in services.tamper.recent())
+    assert got == [("audit_config_changed", "A\\cmd"), ("log_file_removed", "2026-11-02.jsonl"),
+                   ("log_file_truncated", "2026-11-01.jsonl"), ("script_file_changed", "start")]
+    by_event = {r["event"]: r for r in services.tamper.recent()}
+    assert (by_event["audit_config_changed"]["before"], by_event["audit_config_changed"]["after"]) == (1, 0)
+    assert (by_event["log_file_truncated"]["before"], by_event["log_file_truncated"]["after"]) == (100, 10)
+    assert by_event["audit_config_changed"]["while_stopped"] is True and by_event["log_file_removed"]["while_stopped"] is True
+    # every start still logs the registry values it found
+    assert [e["values"] for e in await audit_events(services, "system") if e.get("event") == "audit.config"] == [
+        {"A\\cmd": 1, "B\\ps": None}, {"A\\cmd": 0, "B\\ps": None}]
+
+async def test_an_unfixed_script_change_is_not_reported_again_after_a_restart(services, tmp_path):
+    path = tmp_path / "data" / "tamper-baseline.json"
+    m = seed_mcp(services, make_user(services, "o@x.com")); info = services.scripts.get(m.id, "start")
+    original = info.path.read_bytes()
+    s = persisted(services, {"cmd": None, "ps": None}, path); s.scan()
+    info.path.write_bytes(b"exit /b 1"); s.scan()
+    persisted(services, {"cmd": None, "ps": None}, path).scan()
+    assert [r["event"] for r in services.tamper.recent()] == ["script_file_changed"]
+    info.path.write_bytes(original); persisted(services, {"cmd": None, "ps": None}, path).scan()
+    info.path.write_bytes(b"exit /b 1"); persisted(services, {"cmd": None, "ps": None}, path).scan()
+    assert [r["event"] for r in services.tamper.recent()] == ["script_file_changed", "script_file_changed"]
+
+async def test_announced_removals_survive_a_restart_even_without_a_scan(services, tmp_path):
+    d = services.paths.logs_dir; path = tmp_path / "data" / "tamper-baseline.json"
+    for name in ("2026-11-01.jsonl", "2026-11-02.jsonl", "2026-11-03.jsonl"):
+        (d / name).write_bytes(b"x")
+    s = persisted(services, {"cmd": None, "ps": None}, path); s.scan()
+    s.expect_log_removed("2026-11-01.jsonl"); (d / "2026-11-01.jsonl").unlink()  # retention, then a stop
+    quiet = persisted(services, {"cmd": None, "ps": None}, path)  # a run without scanning (no collection)
+    quiet.expect_log_removed("2026-11-02.jsonl"); (d / "2026-11-02.jsonl").unlink()
+    quiet.expect_log_removed("2026-11-03.jsonl"); quiet.cancel_log_removal("2026-11-03.jsonl")
+    (d / "2026-11-03.jsonl").unlink()
+    persisted(services, {"cmd": None, "ps": None}, path).scan()
+    assert [(r["event"], r["file"]) for r in services.tamper.recent()] == [("log_file_removed", "2026-11-03.jsonl")]
+
+async def test_a_corrupt_or_missing_baseline_starts_fresh(services, tmp_path, capsys):
+    d = services.paths.logs_dir; path = tmp_path / "data" / "tamper-baseline.json"
+    (d / "2026-11-01.jsonl").write_bytes(b"x" * 100)
+    persisted(services, {"cmd": 1, "ps": None}, path).scan()  # no file yet: a first run, nothing reported
+    for junk in ("{not json", "[1, 2]", '{"version": 1, "registry": [1], "logs": {}}'):
+        path.write_text(junk, "utf-8")
+        persisted(services, {"cmd": 0, "ps": None}, path).scan()
+        assert "tamper-baseline: corrupt file, starting fresh" in capsys.readouterr().err
+    assert services.tamper.recent() == []
+    assert json.loads(path.read_text("utf-8"))["registry"] == {"A\\cmd": 0, "B\\ps": None}  # rewritten
+
+async def test_a_failing_save_is_logged_once_and_never_breaks_the_scan(services, tmp_path):
+    path = tmp_path / "data" / "tamper-baseline.json"
+    path.mkdir(parents=True)  # a directory where the file should go: every save fails
+    s = persisted(services, {"cmd": 1, "ps": None}, path)
+    s.scan(); s.scan(); s.expect_log_removed("2026-11-01.jsonl")
+    failed = [e for e in await audit_events(services, "system") if e.get("event") == "tamper.baseline_save_failed"]
+    assert len(failed) == 1 and failed[0]["path"] == str(path)
+
+async def test_services_keep_the_baseline_in_the_data_dir(services):
+    (services.paths.logs_dir / "2026-11-01.jsonl").write_bytes(b"x" * 7)
+    services.tamper_scanner.scan()
+    saved = json.loads((services.paths.data_dir / "tamper-baseline.json").read_text("utf-8"))
+    assert saved["logs"]["2026-11-01.jsonl"] == 7 and set(saved["registry"]) == {v.key for v in AUDIT_REGISTRY}
 
 @pytest.mark.winlive
 def test_read_hklm_on_this_pc_returns_values_or_none():

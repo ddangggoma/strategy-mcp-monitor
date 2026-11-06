@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import functools
+import re
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Hashable, Mapping
@@ -34,7 +35,7 @@ from app.monitor.engine import (
 from app.monitor.history import ActionRecord, McpHistory, TransitionRecord
 from app.monitor.models import ActionKind, CheckResult, Mcp, McpState, ScriptStatus
 from app.monitor.probes import ProbeResult
-from app.monitor.runner import ScriptResult, ScriptTarget
+from app.monitor.runner import PIPE_DRAIN_SEC, ScriptResult, ScriptTarget
 from app.monitor.scripts import ScriptInfo, ScriptStore
 from app.monitor.store import McpNotFoundError, McpStore
 from app.settings.store import Settings, SettingsStore
@@ -59,6 +60,24 @@ class ScriptRunnerLike(Protocol):
         lock_key: Hashable,
         resolve: Callable[[], ScriptTarget | None] | None = None,
     ) -> ScriptResult: ...
+
+    async def kill_all(self) -> int: ...
+
+    async def aclose(self) -> None: ...
+
+
+_SAFE_EMAIL = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+", re.ASCII)
+
+
+def safe_actor(user: User | None) -> str:
+    """``MCP_ACTOR`` for a script (W37): ``"system"``, the email when it holds no cmd syntax, else
+    ``user-<id>``. cmd parses a line after expanding ``%MCP_ACTOR%``, so an email with ``&`` (which
+    the user store allows) could otherwise run a command as SYSTEM."""
+    if user is None:
+        return "system"
+    if _SAFE_EMAIL.fullmatch(user.email):
+        return user.email
+    return f"user-{user.id}"
 
 
 class ProberLike(Protocol):
@@ -195,8 +214,10 @@ class Monitor:
             ]
         self._log.emit("system", event="monitor.start", mcps=len(self._engines), loops=bool(self._loops))
 
-    async def stop(self, grace_sec: float = DEFAULT_GRACE_SEC) -> None:
-        """Cancel loops and probes; give running scripts ``grace_sec``, then abandon them (never kill)."""
+    async def stop(self, grace_sec: float = DEFAULT_GRACE_SEC, *, kill_abandoned: bool = False) -> None:
+        """Cancel loops and probes; give running scripts ``grace_sec``. Scripts still running then are
+        abandoned (``abandoned``); with ``kill_abandoned`` (service stop, W21) their process trees are
+        killed first (``killed`` processes) and their runs get a moment to record the result."""
         if self._stopped:
             return
         self._stopped = True
@@ -206,12 +227,19 @@ class Monitor:
             task.cancel()
         await asyncio.gather(*loops, *probes, return_exceptions=True)
         scripts = list(self._scripts.values())
-        abandoned = 0
+        abandoned = killed = 0
+        kill_error: str | None = None
         if scripts:
             _done, pending = await asyncio.wait(scripts, timeout=grace_sec)
             abandoned = len(pending)
+            if pending and kill_abandoned:
+                try:
+                    killed = await self._runner.kill_all()
+                except Exception as exc:
+                    kill_error = repr(exc)
+                _done, pending = await asyncio.wait(pending, timeout=PIPE_DRAIN_SEC + 1)
             for task in pending:
-                task.cancel()  # the runner stops waiting; the script process keeps running
+                task.cancel()  # the runner stops waiting; an unkilled script process keeps running
             await asyncio.gather(*pending, return_exceptions=True)
         try:
             self._history.flush()
@@ -221,7 +249,12 @@ class Monitor:
             await self._prober.aclose()
         except Exception as exc:
             self._log.emit("system", event="monitor.prober_close_failed", error=repr(exc))
-        self._log.emit("system", event="monitor.stop", abandoned=abandoned)
+        try:
+            await self._runner.aclose()
+        except Exception as exc:
+            self._log.emit("system", event="monitor.runner_close_failed", error=repr(exc))
+        extra: dict[str, Any] = {"kill_error": kill_error} if kill_error is not None else {}
+        self._log.emit("system", event="monitor.stop", abandoned=abandoned, killed=killed, **extra)
 
     async def wait_idle(self) -> None:
         """Wait for every probe and script task, including ones spawned meanwhile (tests)."""
@@ -451,8 +484,9 @@ class Monitor:
             # - MCP_HOST: a lowercase hostname, IPv4 or canonical IPv6 literal (may contain ":").
             # - MCP_ID, MCP_PORT, MCP_PID: decimal digits (MCP_PID may be empty).
             # - MCP_REASON, MCP_TRIGGER: fixed identifiers (issue code or "manual"; auto/manual/boot).
-            # - MCP_ACTOR: "system" or a registered user's email. Not restricted by this allowlist
-            #   (users/store.py permits "&" in emails); only a localhost admin can register users.
+            # - MCP_ACTOR: "system", a user's email made only of [A-Za-z0-9._%+-@], else "user-<id>"
+            #   (safe_actor, W37: users/store.py permits "&" in emails). "%" in a value is not
+            #   expanded again. The mcp.action log keeps the real email.
             env = {
                 "MCP_ID": str(mcp_id),
                 "MCP_NAME": config.name,
@@ -461,7 +495,7 @@ class Monitor:
                 "MCP_PID": "" if pid is None else str(pid),
                 "MCP_REASON": run.reason,
                 "MCP_TRIGGER": run.trigger,
-                "MCP_ACTOR": actor.email if actor is not None else "system",
+                "MCP_ACTOR": safe_actor(actor),
             }
             resolved: ScriptInfo | None = info
 
@@ -492,6 +526,8 @@ class Monitor:
                     "system", event="monitor.runner_internal", mcp_id=mcp_id, run_id=run_id, kind=kind,
                     error=result.stderr or "internal",
                 )
+            elif result.error == "kill_failed":
+                self._log.emit("system", event="monitor.kill_failed", mcp_id=mcp_id, run_id=run_id, kind=kind)
         self._record_step(mcp_id, run, kind, actor, run_id, at, result)
         return result.status
 

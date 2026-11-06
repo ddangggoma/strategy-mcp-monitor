@@ -72,6 +72,15 @@ class FakeRunner:
         self.results: deque[ScriptResult] = deque()
         self.gate: asyncio.Event | None = None
         self.raise_next: Exception | None = None
+        self.killed_all = 0
+        self.closed = 0
+
+    async def kill_all(self) -> int:
+        self.killed_all += 1
+        return 0
+
+    async def aclose(self) -> None:
+        self.closed += 1
 
     async def run(
         self,

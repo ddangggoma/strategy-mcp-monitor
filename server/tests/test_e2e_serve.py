@@ -23,22 +23,40 @@ def _answers(port: int) -> bool:
         return False
 
 
+READY_DEADLINE_SEC = 30  # a loaded machine (vitest in parallel) once needed more than 10 s
+
+
+def _two_ports():
+    """Two free loopback ports that differ (free_port() may hand back the same one twice)."""
+    lp, ep = free_port(), free_port()
+    while ep == lp:
+        ep = free_port()
+    assert lp != ep
+    return lp, ep
+
+
+def test_two_ports_differ_even_when_free_port_repeats(monkeypatch):
+    seq = iter([5001, 5001, 5001, 5002])
+    monkeypatch.setattr(sys.modules[__name__], "free_port", lambda: next(seq))
+    assert _two_ports() == (5001, 5002)
+
+
 @contextlib.contextmanager
 def _running_server(tmp_path, *extra_args):
     """Run `python -m app` on two free loopback-reachable ports; yields (local, external, output file).
 
     No session collection unless ``extra_args`` pass their own ``--session-source`` (the last one wins).
     """
-    lp, ep = free_port(), free_port()
+    lp, ep = _two_ports()
     out_path = tmp_path / "server-output.txt"
     with out_path.open("wb") as out:
         p = subprocess.Popen(
             [sys.executable, "-m", "app", "--root", str(tmp_path),
              "--local-port", str(lp), "--external-port", str(ep), "--session-source", "none", *extra_args],
-            cwd=SERVER_DIR, stdout=out, stderr=subprocess.STDOUT,
+            cwd=SERVER_DIR, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
         )
         try:
-            deadline = time.monotonic() + 10
+            deadline = time.monotonic() + READY_DEADLINE_SEC
             while not (_answers(lp) and _answers(ep)):
                 if p.poll() is not None or time.monotonic() > deadline:
                     p.kill()
@@ -78,8 +96,8 @@ def test_two_channels_live(server):
 def test_dummy_otp_outbox_written(server):
     lp, _, root = server
     base = f"http://127.0.0.1:{lp}"
-    httpx.post(f"{base}/api/bootstrap", json={"email": "a@x.com", "name": "a"})
-    httpx.post(f"{base}/api/auth/otp/request", json={"email": "a@x.com"})
+    assert httpx.post(f"{base}/api/bootstrap", json={"email": "a@x.com", "name": "a"}).status_code == 201
+    assert httpx.post(f"{base}/api/auth/otp/request", json={"email": "a@x.com"}).status_code == 202
     outbox = root / "data" / "dev" / "otp-outbox.log"
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
@@ -135,17 +153,17 @@ def _serve_until_ctrl_break(tmp_path, *extra_args, while_running=None):
 
     Returns (exit code, combined output, every log line written).
     """
-    lp, ep = free_port(), free_port()
+    lp, ep = _two_ports()
     out_path = tmp_path / "server-output.txt"
     with out_path.open("wb") as out:
         p = subprocess.Popen(
             [sys.executable, "-m", "app", "--root", str(tmp_path),
              "--local-port", str(lp), "--external-port", str(ep), *extra_args],
-            cwd=SERVER_DIR, stdout=out, stderr=subprocess.STDOUT,
+            cwd=SERVER_DIR, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
         )
         try:
-            deadline = time.monotonic() + 10
+            deadline = time.monotonic() + READY_DEADLINE_SEC
             while not (_answers(lp) and _answers(ep)):
                 assert p.poll() is None and time.monotonic() < deadline, "server did not become ready"
                 time.sleep(0.1)

@@ -1,5 +1,7 @@
 import pytest
+import seoul_weather.__main__ as weather_main
 from calculator.tools import add, subtract, multiply, divide, evaluate
+from common.server import build_parser
 from seoul_weather.tools import DISTRICTS, get_current_weather, get_forecast
 from seoul_clock.tools import now_kst, convert_timezone
 
@@ -42,3 +44,14 @@ def test_clock():
     assert convert_timezone("2026-11-05T09:00:00", "Asia/Tokyo") == "2026-11-05T09:00:00+09:00"
     assert convert_timezone("2026-11-05T09:00:00+09:00", "+05:30") == "2026-11-05T05:30:00+05:30"
     with pytest.raises(ValueError): convert_timezone("2026-11-05T09:00:00", "Mars/Base")
+
+
+def test_open_meteo_flag_wires_the_live_fetcher(monkeypatch):
+    calls = []
+    live = {"current": {"temperature_2m": 1.5, "relative_humidity_2m": 50, "weather_code": 0}}
+    monkeypatch.setattr(weather_main.tools, "fetch_open_meteo", lambda: calls.append(1) or live)
+    parser = build_parser("seoul-weather", 9101); weather_main._extra_args(parser)
+    on = weather_main._build_tools(parser.parse_args(["--open-meteo"]))[0]
+    off = weather_main._build_tools(parser.parse_args([]))[0]
+    assert on("중구")["source"] == "open-meteo" and calls == [1]
+    assert off("중구")["source"] == "dummy" and calls == [1]

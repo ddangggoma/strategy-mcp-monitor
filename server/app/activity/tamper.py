@@ -7,9 +7,13 @@ Also here: the event log detectors (audit policy changed, log cleared) and the 6
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import itertools
+import json
+import os
 import re
+import sys
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -179,6 +183,18 @@ _MISSING = "missing"
 """What ``TamperScanner`` remembers as reported for a script file that is gone."""
 
 
+def _str_map(value: Any, types: tuple[type, ...]) -> dict[str, Any] | None:
+    """A saved ``{str: value}`` map (``None`` = never scanned); ``ValueError`` for any other shape.
+    ``bool`` is rejected where ``int`` is expected (JSON ``true`` is not a size)."""
+    if value is None:
+        return None
+    if not isinstance(value, dict) or not all(
+        isinstance(k, str) and type(v) in types for k, v in value.items()
+    ):
+        raise ValueError("bad map")
+    return dict(value)
+
+
 class Scannable(Protocol):
     def scan(self) -> None: ...
 
@@ -193,6 +209,13 @@ class TamperScanner:
       (``script_file_changed``) is reported once per ``(mcp_id, kind, actual)`` until it matches.
     - Logs: a ``YYYY-MM-DD.jsonl[.gz]`` file that disappeared (``log_file_removed``, unless
       announced by ``expect_log_removed``) or shrank (``log_file_truncated``). Growth is normal.
+
+    With ``baseline_path`` (the service: ``data/tamper-baseline.json``, preflight F07) the state
+    survives a restart: it is saved after every scan and every announced removal, and the first
+    scan of the next run compares the registry and the log files with the saved state, so a change
+    made while the service was stopped is reported (``while_stopped: true``). Script files are
+    always compared with the DB; the saved "already reported" set keeps an unfixed change from
+    being reported again at every start.
     """
 
     def __init__(
@@ -205,6 +228,7 @@ class TamperScanner:
         *,
         read_value: Callable[[RegistryValue], int | str | None] = read_hklm,
         registry: tuple[RegistryValue, ...] = AUDIT_REGISTRY,
+        baseline_path: Path | None = None,
     ) -> None:
         self._tamper = tamper
         self._scripts = scripts
@@ -218,20 +242,94 @@ class TamperScanner:
         """``(mcp_id, kind)`` → the reported actual sha256, or ``_MISSING``."""
         self._log_sizes: dict[str, int] | None = None
         self._expected_removals: set[str] = set()
+        self._baseline_path = baseline_path
+        self._saved_text: str | None = None
+        self._save_failing = False
+        # The previous run's last state, compared by this run's first scan (then dropped).
+        self._prev_values: dict[str, int | str | None] | None = None
+        self._prev_log_sizes: dict[str, int] | None = None
+        if baseline_path is not None:
+            self._load_baseline(baseline_path)
 
     def expect_log_removed(self, file_name: str) -> None:
         """Announce that ``file_name`` is about to be deleted on purpose (retention, Plan 5): its
-        disappearance is forgotten quietly instead of reported."""
+        disappearance is forgotten quietly instead of reported (also after a restart)."""
         self._expected_removals.add(file_name)
+        self._save_baseline()
 
     def cancel_log_removal(self, file_name: str) -> None:
         """The announced deletion of ``file_name`` failed: a later disappearance is reported again."""
-        self._expected_removals.discard(file_name)
+        if file_name in self._expected_removals:
+            self._expected_removals.discard(file_name)
+            self._save_baseline()
 
     def scan(self) -> None:
         self._scan_registry()
         self._scan_scripts()
         self._scan_logs()
+        self._save_baseline()
+
+    # -- the persisted baseline (F07) ------------------------------------------------------------
+
+    def _load_baseline(self, path: Path) -> None:
+        try:
+            raw = path.read_text("utf-8")
+        except FileNotFoundError:
+            return
+        except OSError:
+            raw = ""
+        try:
+            data = json.loads(raw)
+            registry = _str_map(data["registry"], (int, str, type(None)))
+            logs = _str_map(data["logs"], (int,))
+            reported = {}
+            for mcp_id, kind, actual in data["scripts"]:
+                if type(mcp_id) is not int or not isinstance(kind, str) or not isinstance(actual, str):
+                    raise ValueError("bad script entry")
+                reported[(mcp_id, kind)] = actual
+            removals = data["expected_removals"]
+            if not isinstance(removals, list) or not all(isinstance(n, str) for n in removals):
+                raise ValueError("bad expected_removals")
+        except (ValueError, TypeError, KeyError):
+            print("tamper-baseline: corrupt file, starting fresh", file=sys.stderr, flush=True)
+            return
+        self._prev_values = registry
+        self._prev_log_sizes = logs
+        self._script_reported = reported
+        self._expected_removals = set(removals)
+
+    def _save_baseline(self) -> None:
+        """Write the state atomically when it changed; a failure is logged once (until a save
+        works again) and never raised: a scan or a retention delete must not fail on it."""
+        path = self._baseline_path
+        if path is None:
+            return
+        state = {
+            "version": 1,
+            "registry": self._values if self._values is not None else self._prev_values,
+            "logs": self._log_sizes if self._log_sizes is not None else self._prev_log_sizes,
+            "scripts": sorted([mcp_id, kind, actual] for (mcp_id, kind), actual in self._script_reported.items()),
+            "expected_removals": sorted(self._expected_removals),
+        }
+        text = json.dumps(state, sort_keys=True, ensure_ascii=False)
+        if text == self._saved_text:
+            return
+        tmp = path.with_name(path.name + ".tmp")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp.write_text(text, "utf-8")
+            os.replace(tmp, path)
+        except OSError as exc:
+            with contextlib.suppress(OSError):
+                tmp.unlink(missing_ok=True)
+            if not self._save_failing:
+                self._save_failing = True
+                self._log.emit("system", event="tamper.baseline_save_failed", path=str(path), error=repr(exc))
+            return
+        self._saved_text = text
+        self._save_failing = False
+
+    # -- the scans -------------------------------------------------------------------------------
 
     def _read(self, v: RegistryValue) -> int | str | None:
         try:
@@ -244,6 +342,12 @@ class TamperScanner:
         before, self._values = self._values, values
         if before is None:
             self._log.emit("system", event="audit.config", values=values)
+            prev, self._prev_values = self._prev_values, None
+            for key, value in values.items():  # changed while the service was stopped
+                if prev is not None and key in prev and prev[key] != value:
+                    self._tamper.report(
+                        "audit_config_changed", key=key, before=prev[key], after=value, while_stopped=True
+                    )
             return
         for key, value in values.items():
             if before.get(key) != value:
@@ -304,15 +408,19 @@ class TamperScanner:
         if sizes is None:
             return
         before, self._log_sizes = self._log_sizes, sizes
+        extra: dict[str, Any] = {}
+        if before is None and self._prev_log_sizes is not None:  # first scan after a restart
+            before, self._prev_log_sizes = self._prev_log_sizes, None
+            extra = {"while_stopped": True}
         if before is not None:
             for name, size in sorted(before.items()):
                 after = sizes.get(name)
                 if after is None:
                     if name in self._expected_removals:
                         continue
-                    self._tamper.report("log_file_removed", file=name)
+                    self._tamper.report("log_file_removed", file=name, **extra)
                 elif after < size:
-                    self._tamper.report("log_file_truncated", file=name, before=size, after=after)
+                    self._tamper.report("log_file_truncated", file=name, before=size, after=after, **extra)
         self._expected_removals &= set(sizes)  # announced files that are gone need no more notice
 
 

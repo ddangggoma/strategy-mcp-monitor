@@ -8,6 +8,7 @@ costs ~2 s on top of the 5 s issue-check interval; the waits below allow for tha
 scenario typically needs 50-70 s.
 """
 import asyncio
+import json
 import sys
 import time
 from datetime import datetime
@@ -19,10 +20,12 @@ import pytest
 import pytest_asyncio
 
 from app.monitor.probes import listening_ports
+from app.monitor.scripts import ScriptUpload
 from app.services import build_services
 from app.web.app_factory import create_app
-from tests.fakes import CapturingOtpProvider
+from tests.fakes import CapturingOtpProvider, FakeProber
 from tests.live import free_port
+from tests.mcp_helpers import make_user, seed_mcp
 from tests.test_auth_api import bootstrap, login
 
 pytestmark = [
@@ -179,3 +182,27 @@ async def test_crash_hang_and_failed(live):
     assert samples and max(s[0] for s in samples) < 0.5  # the API kept answering
     assert max(s[1] for s in samples) < 3.5  # the other MCP's pings kept flowing
     assert {s[2] for s in samples} == {"HEALTHY"}
+
+
+# ---- Plan 5 Task 7 (W21): a service stop kills the tree of a script still running after the grace ----
+
+async def test_service_stop_kills_abandoned_script_tree(tmp_path):
+    from app.clock import SystemClock
+    clock = SystemClock()
+    svc = build_services(tmp_path, clock=clock, otp_provider=CapturingOtpProvider(), prober=FakeProber(clock))
+    await svc.log.start()
+    pidfile = tmp_path / "child.pid"
+    hang = (f"$c = Start-Process ping -ArgumentList '-n','60','127.0.0.1' -PassThru -WindowStyle Hidden\n"
+            f"Set-Content -Path '{pidfile}' -Value $c.Id\nStart-Sleep 60\n")
+    owner = make_user(svc, "o@x.com")
+    m = seed_mcp(svc, owner, scripts={"start": ScriptUpload(".ps1", hang), "stop": ScriptUpload(".ps1", "exit 0\n")})
+    svc.monitor.manual_action(m.id, "start", owner)
+    for _ in range(150):
+        if pidfile.exists() and pidfile.read_text("utf-8-sig").strip(): break
+        await asyncio.sleep(0.1)
+    child = int(pidfile.read_text("utf-8-sig").strip())
+    await svc.monitor.stop(grace_sec=0.5, kill_abandoned=True)
+    await svc.log.stop(); svc.db.close()
+    stop = [json.loads(x) for x in next((tmp_path / "logs").glob("*.jsonl")).read_text("utf-8").split("\n")
+            if x and '"monitor.stop"' in x][-1]
+    assert not psutil.pid_exists(child) and stop["killed"] >= 2 and stop["abandoned"] == 1

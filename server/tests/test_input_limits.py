@@ -1,5 +1,7 @@
+import httpx
 import pytest
 
+from app.web.app_factory import MAX_BODY_BYTES, BodySizeLimit, create_app
 from tests.test_auth_api import audit_events, bootstrap
 
 # Ruling F20: the body cap is 524_288 (not 262_144) so a legitimate POST /api/mcps with
@@ -53,3 +55,57 @@ async def test_chunked_body_too_large_413(local_client):
             yield b" " * 65_536
     r = await local_client.post("/api/bootstrap", content=chunks(), headers={"Content-Type": "application/json"})
     assert r.status_code == 413 and r.json() == {"error": "body_too_large"}
+
+
+# ---- Plan 5 Task 7: BodySizeLimit test gaps and the swallowed-exception line ----
+
+async def test_oversize_with_a_bad_host_is_bad_host(services):
+    app = create_app("local", services)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://evil.example") as c:
+        r = await c.post("/api/bootstrap", content=b"x" * (MAX_BODY_BYTES + 1))
+    assert (r.status_code, r.json()) == (400, {"error": "bad_host"})
+
+
+async def _drive(app, body_chunks):
+    sent = []
+    chunks = [{"type": "http.request", "body": b, "more_body": i < len(body_chunks) - 1} for i, b in enumerate(body_chunks)]
+
+    async def receive():
+        return chunks.pop(0) if chunks else {"type": "http.disconnect"}
+
+    async def send(m):
+        sent.append(m)
+
+    await app({"type": "http", "method": "POST", "path": "/x", "headers": []}, receive, send)
+    return sent
+
+
+async def test_streamed_oversize_sends_exactly_one_413(capsys):
+    async def inner(scope, receive, send):
+        while (await receive()).get("more_body"): pass
+        raise RuntimeError("body cut off")
+
+    sent = await _drive(BodySizeLimit(inner), [b"x" * MAX_BODY_BYTES, b"y"])
+    starts = [m for m in sent if m["type"] == "http.response.start"]
+    assert [m["status"] for m in starts] == [413]
+    assert "body limit: suppressed RuntimeError('body cut off') after 413" in capsys.readouterr().err
+
+
+async def test_an_app_error_without_a_413_is_raised(capsys):
+    async def inner(scope, receive, send):
+        await receive()
+        raise RuntimeError("app bug")
+
+    with pytest.raises(RuntimeError, match="app bug"):
+        await _drive(BodySizeLimit(inner), [b"small"])
+    assert "body limit" not in capsys.readouterr().err
+
+
+async def test_websocket_scope_passes_through():
+    seen = []
+
+    async def inner(scope, receive, send):
+        seen.append(scope["type"])
+
+    await BodySizeLimit(inner)({"type": "websocket", "path": "/ws", "headers": []}, None, None)
+    assert seen == ["websocket"]

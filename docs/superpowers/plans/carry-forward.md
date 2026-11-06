@@ -65,11 +65,11 @@ Every later plan reads this file before it is written and checks off the items i
   - pin `.python-version` to the exact patch;
   - add PyInstaller hiddenimports for httptools, websockets and watchfiles;
   - switch back to `uvicorn[standard]` once pyyaml has a cp315 wheel.
-- [ ] e2e test: assert `lp != ep`, assert the POST statuses, and set `stdin=DEVNULL`.
+- [x] e2e test: assert `lp != ep`, assert the POST statuses, and set `stdin=DEVNULL`. (Plan 5 Task 7)
 - [ ] (From Plan 2) ACL on `scripts/` (SYSTEM + Administrators only; spec §5.8).
 - [ ] (From Plan 2) Retention purge for `mcp_actions` and `mcp_transitions` (`mcp_minutes` already has an hourly purge).
 - [ ] (From Plan 2) Apply the service start type (auto, delayed) from the global settings.
-- [ ] (From Plan 2) Service stop: `Monitor.stop()` abandons a still-running script after 10 s (the script process keeps running); decide whether the service host should wait longer or kill the tree.
+- [x] (From Plan 2) Service stop: `Monitor.stop()` abandons a still-running script after 10 s (the script process keeps running); decide whether the service host should wait longer or kill the tree. (Plan 5 Task 7: kill the tree, W21 — `Monitor.stop(kill_abandoned=True)` → `ScriptRunner.kill_all()`; `serve(kill_scripts_on_stop=True)` passes it in Task 8)
 
 ### Later
 - [ ] (From Plan 2) `Alert` effects (alert-only issues, FAILED) only write an `mcp.health` log line; a notification channel (spec §14) is needed.
@@ -90,17 +90,17 @@ Every later plan reads this file before it is written and checks off the items i
 
 ### Plan 5 (log viewer, retention, packaging)
 - [ ] FAILED status and the auto-action budget reset on service restart. Decide whether to persist them.
-- [ ] The runner path where a timeout kill fails is untested. The next run can start while the old script is still alive. Log it, and add a test.
-- [ ] BodySizeLimit: log the exception it swallows after rejecting a request, and fill the test gaps (bad_host combined with oversize, a single 413, websocket passthrough).
-- [ ] The script store calls `os.replace` before COMMIT, so a COMMIT failure leaves the file changed. Use the run-time hash check, or reorder.
-- [ ] At loop shutdown, the script is killed but its children are not. The "Task was destroyed but it is pending" message is cosmetic.
+- [x] The runner path where a timeout kill fails is untested. The next run can start while the old script is still alive. Log it, and add a test. (Plan 5 Task 7: `error="kill_failed"`, MCP lock held up to 30 s, `system` `monitor.kill_failed`; W20)
+- [x] BodySizeLimit: log the exception it swallows after rejecting a request, and fill the test gaps (bad_host combined with oversize, a single 413, websocket passthrough). (Plan 5 Task 7)
+- [x] The script store calls `os.replace` before COMMIT, so a COMMIT failure leaves the file changed. Use the run-time hash check, or reorder. (Plan 5 Task 7: run-time hash check kept as the safety net and pinned by a test, W19)
+- [x] At loop shutdown, the script is killed but its children are not. The "Task was destroyed but it is pending" message is cosmetic. (Plan 5 Task 7: `kill_all` kills each tree, `ScriptRunner.aclose()` collects the detached tasks)
 - [ ] Add retention for the MCP action and transition tables.
 - [ ] If the defensive `_apply` refusal ever fires, it is settled as an error that consumes a budget slot. It is unreachable today. Consider an engine-side cancel.
 
 ### Later
 - [ ] E501 is not enforced (about 80 lines over 100 columns), and ruff is pinned to `E4,E7,E9,F,I,UP,B`.
-- [ ] Add a unit test for the `--open-meteo` wiring.
-- [ ] `MCP_ACTOR` (the user email) is not allowlisted for script env vars. Only an admin registers emails, but consider tightening email validation.
+- [x] Add a unit test for the `--open-meteo` wiring. (Plan 5 Task 7)
+- [x] `MCP_ACTOR` (the user email) is not allowlisted for script env vars. Only an admin registers emails, but consider tightening email validation. (Plan 5 Task 7: `safe_actor` — the email only when it matches `[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+`, else `user-<id>`; W37)
 
 ## From Plan 3 (web UI)
 
@@ -127,7 +127,7 @@ Every later plan reads this file before it is written and checks off the items i
 - [ ] Every SSE `action` event refetches all of that MCP's active history windows (1 h, 24 h, 7 d), because the history response carries buckets, transitions and actions together. Add an actions-only history read (or an `actions` field the client can merge), then refetch only the action list.
 - [ ] After a `session_changed` error (another tab switched the shared cookie to another user), the editors (`ScriptEditor`, `NoticeEditorPage`, `McpCreatePage`) keep the previous user's edits on screen. The next change stores them as the new user's draft, and a second Save writes as the new user. Treat `session_changed` like a user switch: `clearAllDrafts()`, `qc.clear()`, then navigate to `/admin` with `ignoreBlocker: true` (or reload).
 - [ ] Dependency allowlist wording: name the implied toolchain packages (`@types/node`, `@types/react*`, `@vitejs/plugin-react`, `@tailwindcss/vite`, `vite`, `typescript`). If Chromium 123 is a real target, verify the computed colour of the `-soft` tokens there (`light-dark()` inside `color-mix()`).
-- [ ] `server/tests/test_e2e_serve.py::test_two_channels_live` is load-sensitive: it failed once with "server did not become ready" while vitest ran at the same time, and passes alone. Raise its 10 s readiness deadline, or run the two suites one after the other in CI.
+- [x] `server/tests/test_e2e_serve.py::test_two_channels_live` is load-sensitive: it failed once with "server did not become ready" while vitest ran at the same time, and passes alone. Raise its 10 s readiness deadline, or run the two suites one after the other in CI. (Plan 5 Task 7: 30 s for every spawned server in that file)
 
 ### Later
 - [ ] Some web unit tests still sleep 30–50 ms before asserting that something does *not* arrive (no toast later in `mcps.test`, no tooltip on a wide window in `shell.test`, an older refetch in `scripts.test`, `status.test`). There is no signal to wait on; replace them if one appears.
@@ -141,7 +141,7 @@ Every later plan reads this file before it is written and checks off the items i
 - [ ] Packaging the agent: if PyInstaller builds `mcp-agent.exe`, set `AgentOptions.python` and the launch `argv` to that executable (instead of `<python> -m mcp_agent` with `PYTHONPATH`). Whatever runs the agent must be readable by every user session: today `AgentOptions.python` is the server venv's base interpreter, which uv installs under the installing user's `%APPDATA%\uv\python`, out of reach of a standard user's session under `WtsLauncher`. Every agent launch must pass both `MCPMON_AGENT_TOKEN` and `MCPMON_AGENT_SERVER_KEY` (32-byte hex) in the environment (the agent removes both at once); an agent started by hand without the key exits at argument parsing (exit 2).
 - [ ] `install.ps1` enables the audit policy and registry values the collectors need: `auditpol` Process Creation (success), Logon (success, failure), Logoff (success), Other Logon/Logoff Events (success), Audit Policy Change (success); `ProcessCreationIncludeCmdLine_Enabled = 1`; `EnableScriptBlockLogging = 1` (commands in `docs/verification/win11-pro-p4-p5.md` §1).
 - [ ] Uninstall removes `data/collector-state.json` and each user's Edge notice profile folder (`%LOCALAPPDATA%\mcp-monitor\notice-edge`).
-- [ ] Tamper baselines (script hashes, log file sizes, audit registry values) live in memory only, so a change made while the service is stopped is not reported. Persist the baseline or compare against the last known state at startup.
+- [x] Tamper baselines (script hashes, log file sizes, audit registry values) live in memory only, so a change made while the service is stopped is not reported. Persist the baseline or compare against the last known state at startup. (Plan 5 Task 7, preflight F07: `data/tamper-baseline.json`, saved after every scan and announced removal; the first scan after a start reports registry and log-file changes with `while_stopped: true`. Uninstall `-RemoveData` should take this file with `data/`.)
 - [ ] Log viewer: filters for the `session`, `notice`, `activity.*` and `tamper` categories, and the dashboard "로그인 실패 추이" card (source: `rdp_logon_failures`).
 - [ ] Move the agent launch and kill off the event loop (`asyncio.to_thread`, as `stop()` already does): `AgentSupervisor` calls `PopenProcess.kill` (`taskkill`, up to 5 s) and `WtsLauncher.launch` (`CreateEnvironmentBlock` + `CreateProcessAsUser`) on the loop from `forget`, `_tick_alive` and `_launch` (`server/app/activity/agent_supervisor.py`, `server/app/win/launch.py`). The production `HandleProcess.kill` is a bare `TerminateProcess` and the launch takes milliseconds, so only the dev `LocalLauncher` blocks today (review M14).
 - [ ] Live updates on the sessions screen: "현재 세션" refetches only when the board's active session list changes, so a disconnected session that logs off stays in the table until another change, and the connection history never updates live (`web/src/admin/live.ts`, SessionsPage). Also invalidate both on any `sessions` SSE event and on `Closed` (needs a small server signal; review M16).

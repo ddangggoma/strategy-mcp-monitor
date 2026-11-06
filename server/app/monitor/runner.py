@@ -2,7 +2,8 @@
 
 `ScriptRunner.run` returns a `ScriptResult` for every outcome and never raises (except `CancelledError`).
 Completion is the script process's exit, not pipe EOF: a script may leave a background child (e.g. an MCP launched
-with Start-Process) that inherited the stdout/stderr pipes. Only a timeout kills, and then the whole process tree.
+with Start-Process) that inherited the stdout/stderr pipes. Only a timeout or a service stop (`kill_all`) kills,
+and then the whole process tree.
 No Job Object is used, because a kill-on-close job would take the MCP a start script launched down with it.
 """
 
@@ -28,6 +29,10 @@ OUTPUT_CAP_BYTES = 1_048_576
 DEFAULT_CONCURRENCY = 4
 PIPE_DRAIN_SEC = 1.0
 KILL_WAIT_SEC = 5.0
+KILL_FAILED_HOLD_SEC = 30.0
+"""After a timeout kill that did not take, the MCP lock is held this long (or until the process
+exits) so the MCP's next run never overlaps the old script (W20)."""
+DETACHED_CLOSE_SEC = 2.0
 
 _CHUNK = 65_536
 _EXTS = (".ps1", ".bat", ".cmd")
@@ -45,7 +50,7 @@ class ScriptResult:
     stdout_truncated: bool
     stderr_truncated: bool
     killed: int
-    error: str | None  # missing | hash_mismatch | unsupported | spawn_failed | internal
+    error: str | None  # missing | hash_mismatch | unsupported | spawn_failed | internal | kill_failed (timeout)
     actual_sha256: str | None
 
 
@@ -134,8 +139,28 @@ class ScriptRunner:
         self._slots = asyncio.Semaphore(concurrency)
         self._locks: dict[Hashable, asyncio.Lock] = {}
         self._detached: set[asyncio.Task[None]] = set()
+        self._procs: set[asyncio.subprocess.Process] = set()
+        """Script processes started and not yet seen to exit (``kill_all`` targets)."""
         self.active = 0
         self.peak_active = 0
+
+    async def kill_all(self) -> int:
+        """Kill the process tree of every script still running (service stop, W21), in parallel.
+        Returns how many processes ended."""
+        alive = [p for p in list(self._procs) if p.returncode is None]
+        counts = await asyncio.gather(*(asyncio.to_thread(kill_tree, p.pid) for p in alive))
+        return sum(counts)
+
+    async def aclose(self, timeout: float = DETACHED_CLOSE_SEC) -> None:
+        """Give the detached cleanup tasks ``timeout`` to finish, then cancel and collect the rest
+        (no "Task was destroyed but it is pending" at loop shutdown)."""
+        tasks = list(self._detached)
+        if not tasks:
+            return
+        _done, pending = await asyncio.wait(tasks, timeout=timeout)
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     async def run(
         self,
@@ -202,10 +227,12 @@ class ScriptRunner:
             )
         except OSError:
             return _failure("spawn_failed", started, actual)
+        self._procs.add(proc)
 
         assert proc.stdout is not None and proc.stderr is not None
         out, err = _Capture(), _Capture()
         readers = [asyncio.create_task(out.pump(proc.stdout)), asyncio.create_task(err.pump(proc.stderr))]
+        error: str | None = None
         try:
             killed = 0
             try:
@@ -217,15 +244,25 @@ class ScriptRunner:
                     await asyncio.wait_for(proc.wait(), PIPE_DRAIN_SEC)
                 except TimeoutError:
                     pass
+                if proc.returncode is None:
+                    # The kill did not take (W20). Still inside the MCP lock: the MCP's next run waits
+                    # until the old script ends or KILL_FAILED_HOLD_SEC passes.
+                    error = "kill_failed"
+                    try:
+                        await asyncio.wait_for(proc.wait(), KILL_FAILED_HOLD_SEC)
+                    except TimeoutError:
+                        pass
             await _drain(readers)
         except BaseException:
-            # Cancellation (service shutdown) or an internal error: stop waiting, never kill. The process keeps
-            # running; a detached task finishes the cleanup once it exits on its own.
+            # Cancellation (service shutdown) or an internal error: stop waiting, never kill here (the
+            # service stop calls kill_all). The process keeps running; a detached task finishes the
+            # cleanup once it exits.
             self._detach(proc, readers)
             raise
         if proc.returncode is None:
             self._detach(proc, [])  # a timeout kill that did not take: close the transport once it does exit
         else:
+            self._procs.discard(proc)
             _close_transport(proc)
 
         if exit_code is None:
@@ -241,7 +278,7 @@ class ScriptRunner:
             stdout_truncated=out.truncated,
             stderr_truncated=err.truncated,
             killed=killed,
-            error=None,
+            error=error,
             actual_sha256=actual,
         )
 
@@ -249,6 +286,7 @@ class ScriptRunner:
         task = asyncio.get_running_loop().create_task(_finish_detached(proc, readers))
         self._detached.add(task)
         task.add_done_callback(self._detached.discard)
+        task.add_done_callback(lambda _t: self._procs.discard(proc))
 
 
 async def _drain(readers: list[asyncio.Task[None]]) -> None:
