@@ -15,7 +15,7 @@ import uvicorn
 from fastapi import FastAPI
 
 from app.collect.config import CollectorConfig
-from app.services import build_services
+from app.services import Services, build_services
 from app.web.app_factory import create_app
 
 
@@ -171,32 +171,41 @@ async def serve(
     )
     await services.log.start()
     try:
-        # I1: own both ports before the collectors start, so a session agent launched by the
-        # supervisor never finds the Local port unbound (or bound by another process).
-        sockets = bind_listeners(configs)
+        await services.log_index.start()
         try:
-            await services.monitor.start()
-            try:
-                await services.collectors.start()
-                shutdown: ShutdownSequence | None = None
-                try:
-                    servers = [_Server(cfg) for cfg in configs]
-                    shutdown = ShutdownSequence(servers, services.collectors.stop)
-                    with _stop_on_signals(shutdown.request):
-                        await asyncio.gather(
-                            *(s.serve(sockets=[sock]) for s, sock in zip(servers, sockets, strict=True))
-                        )
-                finally:
-                    try:
-                        if shutdown is not None:
-                            await shutdown.wait()
-                    finally:
-                        await services.collectors.stop()  # a no-op after the sequence stopped them
-            finally:
-                await services.monitor.stop()
+            await _serve_started(services, configs)
         finally:
-            for sock in sockets:
-                sock.close()
+            await services.log_index.stop()
     finally:
         await services.log.stop()
         services.db.close()
+
+
+async def _serve_started(services: Services, configs: Sequence[uvicorn.Config]) -> None:
+    """``serve()`` once the log writer and the log index run: ports, monitor, collectors, servers."""
+    # I1: own both ports before the collectors start, so a session agent launched by the
+    # supervisor never finds the Local port unbound (or bound by another process).
+    sockets = bind_listeners(configs)
+    try:
+        await services.monitor.start()
+        try:
+            await services.collectors.start()
+            shutdown: ShutdownSequence | None = None
+            try:
+                servers = [_Server(cfg) for cfg in configs]
+                shutdown = ShutdownSequence(servers, services.collectors.stop)
+                with _stop_on_signals(shutdown.request):
+                    await asyncio.gather(
+                        *(s.serve(sockets=[sock]) for s, sock in zip(servers, sockets, strict=True))
+                    )
+            finally:
+                try:
+                    if shutdown is not None:
+                        await shutdown.wait()
+                finally:
+                    await services.collectors.stop()  # a no-op after the sequence stopped them
+        finally:
+            await services.monitor.stop()
+    finally:
+        for sock in sockets:
+            sock.close()

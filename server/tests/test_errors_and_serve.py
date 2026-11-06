@@ -226,6 +226,39 @@ async def test_serve_starts_nothing_when_the_local_port_is_taken(tmp_path, monke
     assert started == []
 
 
+async def test_serve_starts_the_log_index_after_the_log_and_stops_it_before(tmp_path, monkeypatch):
+    order = []
+    real_build = main_mod.build_services
+
+    def build(root, **kw):
+        services = real_build(root, **kw)
+
+        def record(name, fn):
+            async def wrapped(*a, **k):
+                order.append(name)
+                return await fn(*a, **k)
+            return wrapped
+
+        services.log.start = record("log.start", services.log.start)
+        services.log.stop = record("log.stop", services.log.stop)
+        services.log_index.start = record("index.start", services.log_index.start)
+        services.log_index.stop = record("index.stop", services.log_index.stop)
+
+        async def start():
+            order.append("collectors.start")
+            raise _CollectorsStarted
+
+        services.collectors.start = start
+        return services
+
+    monkeypatch.setattr(main_mod, "build_services", build)
+    with pytest.raises(_CollectorsStarted):
+        await main_mod.serve(tmp_path, free_port(), free_port(), external_host="127.0.0.1",
+                             collectors=CollectorConfig())
+    assert order == ["log.start", "index.start", "collectors.start", "index.stop", "log.stop"]
+    assert (tmp_path / "data" / "index.db").is_file()
+
+
 def test_bind_listener_is_exclusive():
     first = bind_listener("127.0.0.1", 0)
     try:

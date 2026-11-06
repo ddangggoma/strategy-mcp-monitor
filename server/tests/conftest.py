@@ -38,8 +38,10 @@ async def services(tmp_path, clock):
         runner=FakeRunner(), prober=FakeProber(clock),
     )
     await svc.log.start()
+    await svc.log_index.start(run_loop=False)
     yield svc
     await svc.monitor.stop()
+    await svc.log_index.stop()
     await svc.log.stop()
     svc.db.close()
 

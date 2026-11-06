@@ -19,6 +19,7 @@ from app.collect.config import CollectorConfig
 from app.collect.eventlog import BookmarkStore, EventLogComponent
 from app.collect.manager import Collectors, SessionsComponent
 from app.db import Database
+from app.logstore.indexer import LogIndex
 from app.logstore.writer import DailyJsonlWriter, LogWriter
 from app.monitor.bus import BoardBus
 from app.monitor.history import McpHistory
@@ -80,6 +81,9 @@ class Services:
     tamper_scanner: TamperScanner
     """Audit registry / script file / log file checks; scanned every 60 s by the ``tamper-scan``
     collector task when collection is on (``CollectorConfig.wts``)."""
+    log_index: LogIndex
+    """The log search index ``data/index.db``; woken by every log flush. ``serve()`` starts it
+    after the log writer and stops it before."""
 
 
 def _load_or_create_otp_secret(db: Database) -> bytes:
@@ -118,6 +122,8 @@ def build_services(
         db, users, provider, clock, _load_or_create_otp_secret(db), dev_fixed_code=dev_fixed_code
     )
     log = LogWriter(DailyJsonlWriter(paths.logs_dir), clock)
+    log_index = LogIndex(paths.index_db_path, paths.logs_dir, clock, log)
+    log.add_flush_listener(log_index.wake)
     settings = SettingsStore(db)
     mcps = McpStore(db, clock, users)
     scripts = ScriptStore(db, paths, clock, mcps)
@@ -227,4 +233,5 @@ def build_services(
         agents=agents,
         agent_supervisor=agent_supervisor,
         tamper_scanner=tamper_scanner,
+        log_index=log_index,
     )
