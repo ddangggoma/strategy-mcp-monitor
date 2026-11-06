@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import functools
 import secrets
 from dataclasses import dataclass
 from pathlib import Path
 
 from app.activity.context import ActivityContext
-from app.activity.process import ProcessActivityHandler, ProcessComponent
+from app.activity.powershell import PowerShellHandler, expire_every
+from app.activity.process import CommandHandler, ProcessActivityHandler, ProcessComponent
 from app.activity.tamper import TamperMonitor
 from app.audit import AuditLogger
 from app.auth.otp import DummyOtpProvider, OtpProvider, OtpService
@@ -128,6 +130,7 @@ def build_services(
         rdp_history, clock, log, bus, collect_console=config_collectors.collect_console
     )
     manager = Collectors(log, clock)
+    activity_context = ActivityContext(rdp, clock)
     if config_collectors.wts is not None:
         manager.add(SessionsComponent(
             config_collectors.wts, rdp, manager, ReverseDns(clock=clock), clock,
@@ -142,8 +145,15 @@ def build_services(
         session_events = SessionEventHandler(rdp_history, log)
         for channel in ("eventlog:security", "eventlog:lsm", "eventlog:rcm"):
             eventlog.on(channel, session_events)
+        if config_collectors.activity:
+            eventlog.on("eventlog:security", CommandHandler(activity_context, log))
+            script_blocks = PowerShellHandler(activity_context, log, clock)
+            for channel in ("eventlog:powershell", "eventlog:pwsh"):
+                eventlog.on(channel, script_blocks)
+            manager.add_task(
+                "powershell-expire", functools.partial(expire_every, script_blocks, manager)
+            )
         manager.add(eventlog)
-    activity_context = ActivityContext(rdp, clock)
     if config_collectors.process is not None:
         manager.add(ProcessComponent(
             config_collectors.process, ProcessActivityHandler(activity_context, log), manager

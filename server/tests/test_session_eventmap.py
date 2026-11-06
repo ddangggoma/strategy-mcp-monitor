@@ -182,7 +182,9 @@ async def test_build_services_registers_the_handler_on_the_three_session_channel
         await svc.collectors.start()
         try:
             await eventually(lambda: len(seen) == 3)
-            assert sorted(o[0] for o in src.opened) == sorted([SEC, LSM, RCM])
+            # plus the two PowerShell channels of the script-block handler (Task 10, activity on)
+            assert sorted(o[0] for o in src.opened) == sorted([
+                SEC, LSM, RCM, "Microsoft-Windows-PowerShell/Operational", "PowerShellCore/Operational"])
         finally:
             await svc.collectors.stop()
         assert [f.record_id for f in svc.rdp_history.failures(clock.now() - timedelta(days=1))] == [13]

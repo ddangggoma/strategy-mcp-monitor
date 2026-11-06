@@ -24,4 +24,4 @@ class CollectorConfig:
     process: ProcessEventSource | None = None
     """WMI process start/stop events; ``None`` = no ``activity.process`` collection."""
     activity: bool = True
-    """``--activity off`` (DEV/E2E, V24): no process events and no command handlers (Task 10)."""
+    """``--activity off`` (DEV/E2E, V24): no process events, no 4688/4104 command handlers."""
