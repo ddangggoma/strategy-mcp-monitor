@@ -225,6 +225,12 @@ async def retention_preview(
     """What keeping ``days`` days of logs would delete today (KST date); nothing is deleted."""
     today = services.clock.now().astimezone(KST).date()
     p = await asyncio.to_thread(preview, services.paths.logs_dir, today, days)
+    reader = services.log_index.reader()
+
+    def delete_events() -> int | None:
+        """Index rows the purge would delete; None while nothing has been indexed yet."""
+        return reader.count_before_day(p.cutoff.isoformat()) if reader.file_count() else None
+
     return {
         "days": p.days,
         "cutoff": p.cutoff.isoformat(),
@@ -235,6 +241,7 @@ async def retention_preview(
         "delete_bytes": p.delete_bytes,
         "delete_from": _iso_date(p.delete_from),
         "delete_to": _iso_date(p.delete_to),
+        "delete_events": await services.log_index.query(delete_events),
     }
 
 
@@ -271,6 +278,9 @@ async def update_settings(
         )
         raise ApiError(422, "validation") from None
     changes = {k: [before[k], v] for k, v in after.items() if before[k] != v}
+    if (after["log_retention_days"] < before["log_retention_days"]
+            or after["log_compress_after_days"] != before["log_compress_after_days"]):
+        services.retention.request_run("settings")  # the confirmed preview is purged soon (W14, D2)
     if changes:
         services.audit.admin(
             actor=actor,

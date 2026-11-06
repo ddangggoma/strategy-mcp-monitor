@@ -119,6 +119,16 @@ async def test_log_scan_ignores_growth_other_names_and_reports_each_change_once(
     (d / "2026-11-01.jsonl").unlink(); s.scan()
     assert len(services.tamper.recent()) == 1
 
+
+async def test_a_cancelled_log_removal_is_reported_again(services):
+    d = services.paths.logs_dir
+    (d / "2026-11-01.jsonl").write_bytes(b"x")
+    s = scanner(services, {"cmd": None, "ps": None}); s.scan()
+    s.expect_log_removed("2026-11-01.jsonl"); s.cancel_log_removal("2026-11-01.jsonl")
+    s.cancel_log_removal("2026-11-02.jsonl")  # never announced: no error
+    (d / "2026-11-01.jsonl").unlink(); s.scan()
+    assert [(r["event"], r["file"]) for r in services.tamper.recent()] == [("log_file_removed", "2026-11-01.jsonl")]
+
 async def test_scan_every_scans_at_once_then_every_interval_and_logs_failures(services):
     calls = []
 

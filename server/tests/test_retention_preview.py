@@ -52,6 +52,7 @@ async def test_preview_route_local_admin_only(local_client, external_client, ser
     assert body["days"] == 7 and body["delete_from"] == "2026-10-01" and body["delete_to"] == "2026-10-01"
     assert body["delete_files"] == 1 and body["delete_bytes"] == 5
     assert body["oldest_date"] == "2026-10-01" and body["total_files"] >= 1
+    assert body["delete_events"] is None  # nothing indexed yet: the row count is unknown
     assert (await local_client.get("/api/settings/retention/preview", params={"days": 6})).status_code == 422
     assert (await local_client.get("/api/settings/retention/preview", params={"days": 3651})).status_code == 422
     assert (await local_client.get("/api/settings/retention/preview")).status_code == 422

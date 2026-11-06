@@ -20,6 +20,7 @@ from app.collect.eventlog import BookmarkStore, EventLogComponent
 from app.collect.manager import Collectors, SessionsComponent
 from app.db import Database
 from app.logstore.indexer import LogIndex
+from app.logstore.retention import RetentionJob
 from app.logstore.writer import DailyJsonlWriter, LogWriter
 from app.monitor.bus import BoardBus
 from app.monitor.history import McpHistory
@@ -84,6 +85,9 @@ class Services:
     log_index: LogIndex
     """The log search index ``data/index.db``; woken by every log flush. ``serve()`` starts it
     after the log writer and stops it before."""
+    retention: RetentionJob
+    """The daily log retention job (W14); ``serve()`` starts it after the log index and stops it
+    first. Fixtures do not start it (tests call ``run_once``)."""
 
 
 def _load_or_create_otp_secret(db: Database) -> bytes:
@@ -165,6 +169,8 @@ def build_services(
         rdp.add_listener(agent_supervisor.on_session_change)  # after displays: the display exists
         manager.add_task("agent-supervisor", agent_supervisor.run, stop=agent_supervisor.stop)
     tamper_scanner = TamperScanner(tamper, scripts, mcps, paths.logs_dir, log)
+    audit = AuditLogger(log)
+    retention = RetentionJob(paths, db, settings, log_index, log, audit, clock, tamper_scanner)
     if config_collectors.wts is not None:
         manager.add_task("tamper-scan", functools.partial(scan_every, tamper_scanner, manager))
         manager.add(SessionsComponent(
@@ -214,7 +220,7 @@ def build_services(
         otp=otp,
         sessions=SessionStore(db, clock),
         log=log,
-        audit=AuditLogger(log),
+        audit=audit,
         mcps=mcps,
         scripts=scripts,
         history=history,
@@ -234,4 +240,5 @@ def build_services(
         agent_supervisor=agent_supervisor,
         tamper_scanner=tamper_scanner,
         log_index=log_index,
+        retention=retention,
     )

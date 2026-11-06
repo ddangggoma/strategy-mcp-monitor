@@ -173,7 +173,11 @@ async def serve(
     try:
         await services.log_index.start()
         try:
-            await _serve_started(services, configs)
+            await services.retention.start()
+            try:
+                await _serve_started(services, configs)
+            finally:
+                await services.retention.stop()  # first of the stops below: it uses the index and the DB
         finally:
             await services.log_index.stop()
     finally:

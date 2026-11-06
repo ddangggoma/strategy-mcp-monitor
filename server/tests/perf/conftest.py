@@ -11,16 +11,22 @@ import asyncio
 import json
 import shutil
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 
+from app.audit import AuditLogger
 from app.clock import KST
+from app.db import Database
 from app.logstore.indexer import IndexReader, LogIndex
 from app.logstore.query import Cursor, LogFilter
+from app.logstore.retention import RetentionJob
+from app.paths import AppPaths
+from app.settings.store import SettingsStore
 from tests.fakes import FakeClock
 from tests.perf.gen import GEN_VERSION, GenInfo, generate
 from tests.winfakes import ListLog
@@ -138,3 +144,60 @@ SCENARIOS: dict[str, Callable[[PerfIndex], object]] = {
     "S9": lambda p: p.reader.histogram(last_days(30, q="zebra"), 60),
     "S10": lambda p: p.reader.page(last_days(30), deep_cursor(p)),
 }
+
+
+# -- the retention purge (Task 6) ------------------------------------------------------------------
+
+PURGE_ROWS = 200_000
+PURGE_DAYS = 10
+PURGE_END_DAY = date(2026, 11, 4)
+
+
+@dataclass(frozen=True)
+class PurgeEnv:
+    job: RetentionJob
+    reader: IndexReader
+    recent_filter: LogFilter
+
+
+def purge_cache_dir() -> Path:
+    return CACHE_ROOT / f"perf-purge-v{GEN_VERSION}"
+
+
+def ensure_purge_cache() -> Path:
+    """The 200,000-row / 10-day template (logs + index), built once; ``meta.json`` is written last."""
+    d = purge_cache_dir()
+    if (d / "meta.json").is_file():
+        return d
+    if d.exists():
+        shutil.rmtree(d)
+    generate(d / "logs", PURGE_ROWS, PURGE_DAYS, PURGE_END_DAY, PERF_SEED)
+    asyncio.run(_index(d / "index.db", d / "logs"))
+    (d / "meta.json").write_text(json.dumps({"gen_version": GEN_VERSION, "rows": PURGE_ROWS}), encoding="utf-8")
+    return d
+
+
+@pytest_asyncio.fixture
+async def perf_purge(tmp_path) -> AsyncIterator[PurgeEnv]:
+    """A copy of the template under ``tmp_path`` and a job keeping 7 days (compress after 7) on
+    2026-11-06, two days after the data ends (F04): it deletes 10-26..10-30, 100,000 rows."""
+    src = await asyncio.to_thread(ensure_purge_cache)
+    paths = AppPaths(tmp_path)
+    paths.ensure()
+    await asyncio.to_thread(shutil.copytree, src / "logs", paths.logs_dir, dirs_exist_ok=True)
+    await asyncio.to_thread(shutil.copy2, src / "index.db", paths.index_db_path)
+    clock = FakeClock(datetime(2026, 11, 6, 12, tzinfo=KST))
+    db = Database(paths.db_path)
+    db.migrate()
+    settings = SettingsStore(db)
+    settings.update({"log_retention_days": 7, "log_compress_after_days": 7})
+    log = ListLog()
+    index = LogIndex(paths.index_db_path, paths.logs_dir, clock, log)
+    await index.start(run_loop=False)
+    job = RetentionJob(paths, db, settings, index, log, AuditLogger(log), clock, None)
+    try:
+        yield PurgeEnv(job, index.reader(), LogFilter(END_MS - DAY_MS, END_MS))  # the newest 24 h of the data
+    finally:
+        await job.stop()
+        await index.stop()
+        db.close()

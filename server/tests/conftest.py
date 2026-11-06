@@ -40,6 +40,7 @@ async def services(tmp_path, clock):
     await svc.log.start()
     await svc.log_index.start(run_loop=False)
     yield svc
+    await svc.retention.stop()  # first: a run requested by PUT /api/settings uses the index and the DB (F14)
     await svc.monitor.stop()
     await svc.log_index.stop()
     await svc.log.stop()

@@ -178,6 +178,11 @@ class IndexReader:
         with self._use() as conn:
             return int(conn.execute("SELECT COUNT(*) FROM events WHERE day < ?", (day,)).fetchone()[0])
 
+    def file_count(self) -> int:
+        """How many log files the index has a state for (0 before the first file was indexed)."""
+        with self._use() as conn:
+            return int(conn.execute("SELECT COUNT(*) FROM files").fetchone()[0])
+
     # -- queries (app.logstore.query) ---------------------------------------------------------------
 
     def page(self, f: LogFilter, cursor: Cursor | None, limit: int = query.DEFAULT_PAGE) -> Page:
@@ -288,6 +293,55 @@ _ROLLUP = """
 INSERT INTO {table} (bucket, cat, user, n) VALUES (?, ?, ?, ?)
 ON CONFLICT (bucket, cat, user) DO UPDATE SET n = n + excluded.n
 """
+# The user key compares NOCASE (the primary key's collation), as the upsert above merged it.
+_UNROLL = "UPDATE {table} SET n = n - ? WHERE bucket = ? AND cat = ? AND user = ?"
+_UNROLL_EMPTY = "DELETE FROM {table} WHERE bucket = ? AND cat = ? AND user = ? AND n <= 0"
+
+
+def _delete_rows(conn: sqlite3.Connection, day: str, chunk: int) -> int:
+    """Worker thread: delete up to ``chunk`` rows of the days before ``day`` in one transaction,
+    their full-text entries with them, and take them off the minute/hour rollups. The count."""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        rows = conn.execute(
+            "SELECT id, ts_ms, cat, user FROM events WHERE day < ? LIMIT ?", (day, chunk)
+        ).fetchall()
+        if rows:
+            ids = [(r[0],) for r in rows]
+            conn.executemany("DELETE FROM events_fts WHERE rowid = ?", ids)
+            conn.executemany("DELETE FROM events WHERE id = ?", ids)
+            per_min: Counter[tuple[int, str, str]] = Counter()
+            per_hour: Counter[tuple[int, str, str]] = Counter()
+            for _, ts_ms, cat, user in rows:
+                per_min[(ts_ms // 60_000, cat, user or "")] += 1
+                per_hour[(ts_ms // 3_600_000, cat, user or "")] += 1
+            for table, counts in (("counts_min", per_min), ("counts_hour", per_hour)):
+                conn.executemany(_UNROLL.format(table=table), [(n, *k) for k, n in counts.items()])
+                conn.executemany(_UNROLL_EMPTY.format(table=table), list(counts))
+        conn.execute("COMMIT")
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+    return len(rows)
+
+
+def rename_file_state(conn: sqlite3.Connection, logs_dir: Path, old: str, new: str, offset: int) -> None:
+    """Worker thread: ``old`` was compressed into ``new`` (a ``.gz`` read to the end at ``offset``
+    uncompressed bytes): upsert ``new`` as done, with its size on disk and both files' line counts,
+    and drop ``old``, in one transaction."""
+    size = (Path(logs_dir) / new).stat().st_size
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        row = conn.execute("SELECT lines, bad_lines FROM files WHERE name = ?", (old,)).fetchone()
+        lines, bad = (row[0], row[1]) if row is not None else (0, 0)
+        conn.execute(_UPSERT_FILE, (new, new[:10], offset, size, lines, bad, 1))
+        conn.execute("DELETE FROM files WHERE name = ?", (old,))
+        conn.execute("COMMIT")
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
 
 
 class LogIndex:
@@ -421,6 +475,57 @@ class LogIndex:
             fut: asyncio.Future[T] = asyncio.ensure_future(asyncio.to_thread(fn, conn))
             self._inflight = fut  # type: ignore[assignment]
             return await _outlive_cancel(fut)
+
+    # -- retention (Task 6) -----------------------------------------------------------------------
+
+    async def delete_before(self, day: str, chunk: int = 5000) -> int:
+        """Delete the rows of the days before ``day`` (``YYYY-MM-DD``), ``chunk`` rows per
+        transaction so queries and indexing go on in between, with their full-text entries and their
+        counts in the rollups (histograms stay equal to a scan). Then drop the ``files`` states of
+        those days whose file is gone. Returns how many rows were deleted."""
+        if chunk < 1:
+            raise ValueError("chunk must be positive")
+        total = 0
+        while True:
+            n = await self.run_exclusive(functools.partial(_delete_rows, day=day, chunk=chunk))
+            total += n
+            if n == 0:
+                break
+            await asyncio.sleep(0)
+        await self.run_exclusive(functools.partial(self._drop_gone_states, day=day))
+        return total
+
+    def _drop_gone_states(self, conn: sqlite3.Connection, day: str) -> None:
+        # A file that could not be deleted keeps its state: it is not indexed (and purged) again.
+        names = [r[0] for r in conn.execute("SELECT name FROM files WHERE day < ?", (day,))]
+        gone = [(n,) for n in names if not (self._logs_dir / n).exists()]
+        if gone:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                conn.executemany("DELETE FROM files WHERE name = ?", gone)
+                conn.execute("COMMIT")
+            except BaseException:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
+                raise
+
+    async def file_state(self, name: str) -> FileState | None:
+        """The ``files`` row of the log file ``name``, or None when it was never indexed."""
+        return (await self._exclusive(functools.partial(self._states_of, name=name))).get(name)
+
+    @staticmethod
+    def _states_of(conn: sqlite3.Connection, name: str) -> dict[str, FileState]:
+        r = conn.execute(
+            'SELECT name, day, "offset", size, lines, bad_lines, done FROM files WHERE name = ?', (name,)
+        ).fetchone()
+        return {} if r is None else {name: FileState(r[0], r[1], r[2], r[3], r[4], r[5], bool(r[6]))}
+
+    async def rename_file(self, old: str, new: str, offset: int) -> None:
+        """``old`` was compressed into the ``.gz`` ``new``: ``new`` becomes done at ``offset`` and
+        its size on disk, ``old`` is dropped (see :func:`rename_file_state`)."""
+        await self.run_exclusive(functools.partial(
+            rename_file_state, logs_dir=self._logs_dir, old=old, new=new, offset=offset
+        ))
 
     async def query[T, *Ts](self, fn: Callable[[*Ts], T], *args: *Ts) -> T:
         """Run the blocking read ``fn(*args)`` (an :class:`IndexReader` method) in a worker thread

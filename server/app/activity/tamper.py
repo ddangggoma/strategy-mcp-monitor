@@ -224,6 +224,10 @@ class TamperScanner:
         disappearance is forgotten quietly instead of reported."""
         self._expected_removals.add(file_name)
 
+    def cancel_log_removal(self, file_name: str) -> None:
+        """The announced deletion of ``file_name`` failed: a later disappearance is reported again."""
+        self._expected_removals.discard(file_name)
+
     def scan(self) -> None:
         self._scan_registry()
         self._scan_scripts()
