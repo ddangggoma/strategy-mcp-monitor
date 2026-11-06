@@ -1,10 +1,12 @@
 import sqlite3
+import threading
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
 from app.clock import to_kst_iso
-from app.db import MIGRATIONS
+from app.db import MIGRATIONS, Database, DatabaseTooNewError
 
 
 def test_kst_iso():
@@ -156,3 +158,49 @@ def test_execute_rowcount(db):
     db.execute("INSERT INTO secrets(name, value) VALUES ('b','1')")
     assert db.execute_rowcount("UPDATE secrets SET value='2'") == 2
     assert db.execute_rowcount("DELETE FROM secrets WHERE name='zz'") == 0
+
+
+def test_migrate_rejects_a_newer_database(paths):
+    db = Database(paths.db_path); db.migrate()
+    db.execute(f"PRAGMA user_version = {len(MIGRATIONS) + 1}")
+    with pytest.raises(DatabaseTooNewError) as e:
+        db.migrate()
+    assert (e.value.found, e.value.supported) == (len(MIGRATIONS) + 1, len(MIGRATIONS))
+    assert str(e.value) == (
+        f"database schema {len(MIGRATIONS) + 1} is newer than this program supports ({len(MIGRATIONS)})"
+    )
+    assert not db._conn.in_transaction  # rolled back, the connection stays usable
+    db.close()
+
+
+def test_migrate_reads_user_version_inside_the_transaction(paths):
+    db = Database(paths.db_path); seen: list[str] = []
+    db._conn.set_trace_callback(seen.append)
+    db.migrate()
+    first = seen.index("BEGIN IMMEDIATE")
+    assert seen[first + 1] == "PRAGMA user_version"
+    assert "PRAGMA user_version" not in seen[:first]
+    db.close()
+
+
+def test_two_connections_migrate_concurrently(paths):
+    a, b = Database(paths.db_path), Database(paths.db_path)
+    barrier, errors = threading.Barrier(2), []
+
+    def run(db):
+        barrier.wait()
+        try:
+            db.migrate()
+        except Exception as exc:  # collected and asserted below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=run, args=(d,)) for d in (a, b)]
+    for t in threads: t.start()
+    for t in threads: t.join(30)
+    assert errors == [] and a.query("PRAGMA user_version")[0][0] == len(MIGRATIONS)
+    a.close(); b.close()
+
+
+def test_wal_is_required():
+    with pytest.raises(RuntimeError, match="WAL is required"):
+        Database(Path(":memory:"))

@@ -1,7 +1,10 @@
 import asyncio
 import json
 import threading
+import time
 from datetime import UTC, datetime
+
+import pytest
 
 from app.logstore.writer import DailyJsonlWriter, LogWriter
 
@@ -93,7 +96,8 @@ async def test_batch_dropped_after_second_failure(paths, clock, capsys):
     logs.mkdir()
     lw.emit("system", n=2)
     await lw.stop()
-    assert [r["n"] for r in read(paths, "2026-11-04")] == [2]
+    rows = [(r.get("event"), r.get("count", r.get("n"))) for r in read(paths, "2026-11-04")]
+    assert rows == [("logstore.dropped", 1), (None, 2)]  # the dropped batch is reported first
 
 
 async def wait_for_rows(paths, day, count, timeout=2.0, until=None):
@@ -161,9 +165,9 @@ async def test_background_loop_survives_write_failure(paths, clock, capsys):
         logs.mkdir()
         lw.emit("system", n=2)
         rows = await wait_for_rows(
-            paths, "2026-11-04", 1, until=lambda rows: 2 in [r["n"] for r in rows]
+            paths, "2026-11-04", 1, until=lambda rows: 2 in [r.get("n") for r in rows]
         )
-        assert 2 in [r["n"] for r in rows]
+        assert 2 in [r.get("n") for r in rows]
         assert not lw._task.done()
     finally:
         await lw.stop()
@@ -226,3 +230,93 @@ def test_emit_threadsafe_after_loop_closed_is_dropped_with_warning(paths, clock,
     t = threading.Thread(target=lambda: lw.emit_threadsafe("system", n=1)); t.start(); t.join()
     assert "emit_threadsafe after loop closed" in capsys.readouterr().err
     assert not (paths.logs_dir / "2026-11-04.jsonl").exists()
+
+
+class FlakyDaily(DailyJsonlWriter):
+    def __init__(self, d):
+        super().__init__(d); self.fail = True
+
+    def write_batch(self, events):
+        if self.fail:
+            raise OSError("disk full")
+        super().write_batch(events)
+
+
+class SlowDaily(DailyJsonlWriter):
+    def write_batch(self, events):
+        time.sleep(1.0); super().write_batch(events)
+
+
+def lines(d):
+    return [json.loads(x) for f in sorted(d.glob("*.jsonl")) for x in f.read_text("utf-8").split("\n") if x]
+
+
+async def test_queue_is_bounded_and_drops_are_reported(tmp_path, clock, capsys):
+    flaky = FlakyDaily(tmp_path)
+    w = LogWriter(flaky, clock, flush_interval=0.01, max_batch=10, max_queue=50); await w.start()
+    for i in range(200): w.emit("system", event="x", i=i)
+    assert w.pending <= 60
+    assert capsys.readouterr().err.count("log queue full; dropping oldest events") == 1
+    await asyncio.sleep(0.1)
+    flaky.fail = False; await w.flush(); await w.stop()
+    got = lines(tmp_path)
+    dropped = [e for e in got if e.get("event") == "logstore.dropped"]
+    written = [e for e in got if e.get("event") == "x"]
+    assert len(dropped) == 1 and dropped[0]["count"] + len(written) == 200
+    assert all(e["i"] >= 150 for e in written)  # the bound dropped the oldest 150
+    assert dropped[0]["cat"] == "system" and dropped[0]["ts"] == "2026-11-04T14:00:00.000+09:00"
+
+
+async def test_dropped_count_survives_losing_its_own_report(tmp_path, clock):
+    flaky = FlakyDaily(tmp_path)
+    w = LogWriter(flaky, clock, flush_interval=60, max_batch=10, max_queue=5); await w.start()
+    for i in range(8): w.emit("system", event="x", i=i)  # the 3 oldest are dropped
+    await w.flush()  # [report(3), 3..7] fails and waits for its retry
+    assert w.pending == 6
+    await w.flush()  # the retry fails: report(3) and 5 events are lost -> a new report(8) waits
+    assert w.pending == 1
+    flaky.fail = False
+    w.emit("system", event="x", i=8); await w.flush(); await w.stop()
+    got = [(e["event"], e.get("i", e.get("count"))) for e in lines(tmp_path)]
+    # the lost report is re-counted as the 3 events it carried, not as 1 lost line
+    assert got == [("logstore.dropped", 8), ("x", 8)]
+
+
+async def test_stop_warns_about_events_not_written(tmp_path, clock, capsys):
+    w = LogWriter(FlakyDaily(tmp_path), clock, flush_interval=0.01); await w.start()
+    for i in range(5): w.emit("system", event="x", i=i)
+    await w.stop()
+    assert "stop: 5 log event(s) were not written" in capsys.readouterr().err and w.stopped
+
+
+async def test_stop_survives_cancellation(tmp_path, clock):
+    w = LogWriter(SlowDaily(tmp_path), clock, flush_interval=0.01); await w.start()
+    w.emit("system", event="x"); await asyncio.sleep(0.05)
+    t = asyncio.create_task(w.stop()); await asyncio.sleep(0.05); t.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await t
+    assert w.stopped and w._task is not None and w._task.done()
+    w.emit("system", event="after")  # ignored, never raises
+    assert w.pending <= 1
+
+
+async def test_flush_listeners_run_after_each_successful_write(tmp_path, clock, capsys):
+    calls = []
+    w = LogWriter(DailyJsonlWriter(tmp_path), clock, flush_interval=0.01); await w.start()
+    w.add_flush_listener(lambda: calls.append(1))
+    w.add_flush_listener(lambda: 1 / 0)  # a failing listener does not stop the others
+    w.add_flush_listener(lambda: calls.append(2))
+    w.emit("system", event="x"); await w.flush(); await w.stop()
+    assert calls[:2] == [1, 2]
+    assert "flush listener failed: ZeroDivisionError" in capsys.readouterr().err
+
+
+async def test_flush_listeners_skip_failed_writes(tmp_path, clock):
+    calls = []
+    flaky = FlakyDaily(tmp_path)
+    w = LogWriter(flaky, clock, flush_interval=60); await w.start()
+    w.add_flush_listener(lambda: calls.append(1))
+    w.emit("system", event="x"); await w.flush()
+    assert calls == [] and w.pending == 1  # held for its retry
+    flaky.fail = False; await w.flush(); await w.stop()
+    assert calls == [1] and w.pending == 0

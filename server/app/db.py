@@ -247,15 +247,30 @@ def split_statements(script: str) -> list[str]:
     return statements
 
 
+class DatabaseTooNewError(RuntimeError):
+    """The database was migrated by a newer program version (its schema is unknown here)."""
+
+    def __init__(self, found: int, supported: int) -> None:
+        super().__init__(f"database schema {found} is newer than this program supports ({supported})")
+        self.found = found
+        self.supported = supported
+
+
 class Database:
     def __init__(self, path: Path) -> None:
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(
             str(path), check_same_thread=False, isolation_level=None
         )
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA foreign_keys=ON")
+        try:
+            self._conn.row_factory = sqlite3.Row
+            mode = self._conn.execute("PRAGMA journal_mode=WAL").fetchone()[0]
+            if str(mode).lower() != "wal":  # e.g. "memory", or a file system without shared memory
+                raise RuntimeError(f"journal_mode is {mode}; WAL is required")
+            self._conn.execute("PRAGMA foreign_keys=ON")
+        except BaseException:
+            self._conn.close()
+            raise
 
     def query(self, sql: str, params: Sequence = ()) -> list[sqlite3.Row]:
         with self._lock:
@@ -297,14 +312,25 @@ class Database:
                 raise
 
     def migrate(self) -> None:
+        """Apply the missing migrations, one transaction each.
+
+        The schema version is read as the first statement inside each ``BEGIN IMMEDIATE``
+        transaction, so two processes migrating the same file never apply one migration twice.
+        Raises :class:`DatabaseTooNewError` (after rolling back) for a schema newer than this code.
+        """
         with self._lock:
-            current = self._conn.execute("PRAGMA user_version").fetchone()[0]
-            for version, script in enumerate(MIGRATIONS[current:], start=current + 1):
+            while True:
                 self._conn.execute("BEGIN IMMEDIATE")
                 try:
-                    for stmt in split_statements(script):
+                    current = self._conn.execute("PRAGMA user_version").fetchone()[0]
+                    if current > len(MIGRATIONS):
+                        raise DatabaseTooNewError(current, len(MIGRATIONS))
+                    if current == len(MIGRATIONS):
+                        self._conn.execute("COMMIT")
+                        return
+                    for stmt in split_statements(MIGRATIONS[current]):
                         self._conn.execute(stmt)
-                    self._conn.execute(f"PRAGMA user_version = {version}")
+                    self._conn.execute(f"PRAGMA user_version = {current + 1}")
                     self._conn.execute("COMMIT")
                 except BaseException:
                     if self._conn.in_transaction:
