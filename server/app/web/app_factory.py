@@ -13,6 +13,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.services import Services
 from app.web import (
+    agent_api,
     local_api,
     mcp_local,
     mcp_shared,
@@ -167,6 +168,7 @@ def create_app(channel: Channel, services: Services, static_dir: Path | None = N
         app.include_router(mcp_local.router)
         app.include_router(notice_api.router)
         app.include_router(notice_display_api.router)
+        app.include_router(agent_api.router)
     if static_dir is not None and (static_dir / HTML_PAGES["board"]).is_file():
         # After the API routers, so an API path can never be shadowed by a page. /notice is a
         # Local-channel page only.

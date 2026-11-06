@@ -5,6 +5,7 @@ import secrets
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.activity.agent_hub import AgentHub
 from app.activity.context import ActivityContext
 from app.activity.powershell import PowerShellHandler, expire_every
 from app.activity.process import CommandHandler, ProcessActivityHandler, ProcessComponent
@@ -71,6 +72,8 @@ class Services:
     handlers with ``eventlog.on(...)`` inside ``build_services`` (before ``collectors.start()``)."""
     activity_context: ActivityContext
     """Process → session resolution and the session fields of every ``activity.*`` line."""
+    agents: AgentHub
+    """Per-session agent slots behind ``/api/agent/*`` (Local only); a display listener."""
 
 
 def _load_or_create_otp_secret(db: Database) -> bytes:
@@ -137,6 +140,11 @@ def build_services(
     rdp.add_listener(displays.on_session_change)  # first: later listeners see the new display
     manager = Collectors(log, clock)
     activity_context = ActivityContext(rdp, clock)
+    agents = AgentHub(
+        clock, log, tamper, rdp, displays, activity_context,
+        window_events=config_collectors.activity,
+    )
+    displays.add_listener(agents.on_display)
     if config_collectors.wts is not None:
         manager.add(SessionsComponent(
             config_collectors.wts, rdp, manager, ReverseDns(clock=clock), clock,
@@ -189,4 +197,5 @@ def build_services(
         collectors=manager,
         eventlog=eventlog,
         activity_context=activity_context,
+        agents=agents,
     )
