@@ -7,8 +7,8 @@ export const API_ERROR_CODES = [
   "validation", "invalid_email", "rate_limited", "login_required", "forbidden", "csrf", "not_found",
   "bootstrap_done", "user_exists", "last_admin", "name_taken", "endpoint_taken", "action_in_progress",
   "script_required", "scripts_required", "script_too_large", "script_encoding", "script_empty",
-  "invalid_owner", "too_many_streams", "body_too_large", "bad_host", "internal", "method_not_allowed",
-  "network", "session_changed",
+  "invalid_owner", "too_many_streams", "body_too_large", "bad_host", "internal", "unavailable",
+  "method_not_allowed", "network", "session_changed",
 ] as const;
 /**
  * Server `{"error": code}` values, plus two the client makes itself: `network` for a fetch that
@@ -748,6 +748,7 @@ export const copy = {
     body_too_large: "보낸 내용이 너무 커요. 512KB 이하로 줄이세요.",
     bad_host: "허용되지 않은 주소로 접속했어요. 서버 주소를 확인하세요.",
     internal: "서버에서 오류가 났어요. 잠시 뒤에 다시 시도하세요.",
+    unavailable: "잠시 연결을 확인하지 못했어요. 다시 시도하세요.",
     method_not_allowed: "지원하지 않는 요청이에요. 페이지를 새로 고친 뒤 다시 시도하세요.",
     network: "서버에 연결할 수 없어요. 네트워크와 서비스 상태를 확인하세요.",
     session_changed: "다른 탭에서 다른 계정으로 로그인해 요청을 보내지 않았어요. 지금 로그인한 계정을 확인한 뒤 다시 시도하세요.",

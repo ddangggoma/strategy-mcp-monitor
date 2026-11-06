@@ -291,7 +291,9 @@ def test_only_notice_urls_of_the_configured_server_are_opened(fake_server, tmp_p
     w = FakeWindow()
     r = AgentRunner(cfg(fake_server.url, tmp_path), ServerClient(fake_server.url, "tok", KEY), w, session_id=2, pid=1, idle=lambda: 0)
     assert r.run() == 0 and w.opened == [(7, U(fake_server))]
-    assert capsys.readouterr().err.count("refused notice url") == len(bad)
+    err = capsys.readouterr().err
+    assert err.count("refused notice url") == len(bad)
+    assert "t=x" not in err and "#..." in err  # R5: the fragment (token) is never printed
 
 
 def test_a_real_agent_process_leaves_a_rogue_server_within_seconds(fake_server, tmp_path):

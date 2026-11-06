@@ -90,6 +90,8 @@ class ServerClient:
                 status = e.code
                 proof = e.headers.get(PROOF_HEADER) if e.headers is not None else None
             if status in (401, 403):
+                # Unproven (may come from a squatter, R2); after a real one nothing is accepted anyway.
+                self._verified.clear()
                 raise AgentRejected(f"{what}: {status}") from None
             if status >= 500:
                 self._verified.clear()

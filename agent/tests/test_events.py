@@ -313,3 +313,21 @@ def test_sender_posts_window_events_only_to_a_verified_server():
     s = EventSender(Client())
     s.add({"type": "idle", "at": "2026-11-04T14:00:00.000+09:00", "idle_sec": 1}); s.flush()
     assert seen == [("/api/agent/events", True)]
+
+
+def test_activity_final_flush_sends_nothing_after_an_unproven_401(fake_server):
+    """R2: a squatter's 401 makes the agent stop; the final flush must not hand it the window titles."""
+    FakeHooks.made = []
+    client = verified_client(fake_server)
+    fake_server.server_key = None
+    fake_server.status_for["/api/agent/heartbeat"] = 401
+    with pytest.raises(AgentRejected):
+        client.post("/api/agent/heartbeat", {})
+    a = WindowActivity(client, hook_factory=FakeHooks, idle_seconds=lambda: 999.0)
+    a.on_hello({"events_max": 200, "idle_threshold_sec": 300, "window_events": True})
+    deadline = time.monotonic() + 5
+    while (a._sender is None or a._sender.pending == 0) and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert a._sender is not None and a._sender.pending > 0
+    a.stop()
+    assert not any(r[1] == "/api/agent/events" for r in fake_server.requests)

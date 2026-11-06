@@ -165,3 +165,19 @@ def test_sensitive_posts_wait_for_a_proven_answer_after_an_outage(fake_server):
     with pytest.raises(ServerUnavailable):
         c.post("/api/agent/events", {"events": []}, verified_only=True)
     assert [r[1] for r in fake_server.requests].count("/api/agent/events") == 1
+
+def test_an_unproven_401_after_a_proven_answer_drops_the_trust(fake_server):
+    """R2: a 401/403 carries no proof, so it may come from a squatter: nothing sensitive goes out after it."""
+    c = ServerClient(fake_server.url, "tok", KEY)
+    c.next(0)
+    assert c.verified
+    fake_server.server_key = None
+    for status in (401, 403):
+        fake_server.status_for["/api/agent/heartbeat"] = status
+        with pytest.raises(AgentRejected):
+            c.post("/api/agent/heartbeat", {})
+        assert not c.verified
+        with pytest.raises(ServerUnavailable):
+            c.post("/api/agent/events", {"events": []}, verified_only=True)
+        fake_server.server_key = KEY; c.next(0); fake_server.server_key = None
+    assert not any(r[1] == "/api/agent/events" for r in fake_server.requests)

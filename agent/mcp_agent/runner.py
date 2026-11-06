@@ -151,7 +151,8 @@ class AgentRunner:
         if kind == "show_notice":
             url, display_id = cmd.get("url"), int(cmd["display_id"])
             if not isinstance(url, str) or not url.startswith(self._notice_prefix):
-                print(f"mcp_agent: refused notice url {url!r}: not under {self._notice_prefix}", file=sys.stderr)
+                shown = url.split("#", 1)[0] + "#..." if isinstance(url, str) and "#" in url else url
+                print(f"mcp_agent: refused notice url {shown!r}: not under {self._notice_prefix}", file=sys.stderr)
                 return pending
             if pending is not None:
                 self._window.close()
