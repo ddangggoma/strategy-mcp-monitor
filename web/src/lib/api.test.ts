@@ -64,6 +64,7 @@ it("leaves retryAfterSec null without a usable Retry-After", async () => {
 });
 
 it("retries once after a csrf refresh", async () => {
+  session.me = meFixture("admin", "local");
   session.csrf = "old";
   const putTokens: (string | null)[] = [];
   let meCalls = 0;
@@ -87,6 +88,7 @@ it("retries once after a csrf refresh", async () => {
 });
 
 it("does not loop on repeated csrf", async () => {
+  session.me = meFixture("admin", "local");
   session.csrf = "old";
   let puts = 0;
   let meCalls = 0;
@@ -103,6 +105,60 @@ it("does not loop on repeated csrf", async () => {
   await expect(endpoints.updateSettings({ ping_interval_sec: 7 })).rejects.toMatchObject({ status: 403, code: "csrf" });
   expect(puts).toBe(2);
   expect(meCalls).toBe(1);
+});
+
+it("does not replay a mutation as another user after a csrf refresh (RF2)", async () => {
+  session.me = meFixture("admin", "local", 1); // the tab shows (and acts for) user 1
+  session.csrf = "old";
+  let puts = 0;
+  const onUnauthorized = vi.fn();
+  session.onUnauthorized = onUnauthorized;
+  server.use(
+    http.put("/api/settings", () => {
+      puts++;
+      return HttpResponse.json({ error: "csrf" }, { status: 403 });
+    }),
+    // another tab logged out and user 2 logged in on the same channel: the shared cookie is theirs
+    http.get("/api/auth/me", () => HttpResponse.json(meFixture("admin", "local", 2))),
+  );
+  await expect(endpoints.updateSettings({ ping_interval_sec: 7 })).rejects.toMatchObject({ status: 403, code: "session_changed" });
+  expect(puts).toBe(1); // never sent again under the other user's session
+  expect(session.me?.user?.id).toBe(2); // the tab now shows who is really logged in
+  expect(onUnauthorized).not.toHaveBeenCalled();
+});
+
+it("sends the tab to login, without a retry, when the csrf refresh finds no session", async () => {
+  session.me = meFixture("admin", "local", 1);
+  session.csrf = "old";
+  let puts = 0;
+  const onUnauthorized = vi.fn();
+  session.onUnauthorized = onUnauthorized;
+  server.use(
+    http.put("/api/settings", () => {
+      puts++;
+      return HttpResponse.json({ error: "csrf" }, { status: 403 });
+    }),
+    http.get("/api/auth/me", () => HttpResponse.json(meFixture(null, "local"))),
+  );
+  await expect(endpoints.updateSettings({ ping_interval_sec: 7 })).rejects.toMatchObject({ status: 401, code: "login_required" });
+  expect(puts).toBe(1);
+  expect(onUnauthorized).toHaveBeenCalledTimes(1);
+});
+
+it("compares with the user the request was made for, not one set while it was in flight", async () => {
+  session.me = meFixture("admin", "local", 1);
+  session.csrf = "old";
+  let puts = 0;
+  server.use(
+    http.put("/api/settings", () => {
+      puts++;
+      session.me = meFixture("admin", "local", 2); // e.g. a refresh elsewhere while this was in flight
+      return HttpResponse.json({ error: "csrf" }, { status: 403 });
+    }),
+    http.get("/api/auth/me", () => HttpResponse.json(meFixture("admin", "local", 2))),
+  );
+  await expect(endpoints.updateSettings({ ping_interval_sec: 7 })).rejects.toMatchObject({ code: "session_changed" });
+  expect(puts).toBe(1);
 });
 
 it("does not refresh on a 403 that is not csrf", async () => {

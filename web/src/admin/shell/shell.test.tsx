@@ -1,14 +1,19 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { createMemoryHistory, createRootRoute, createRouter } from "@tanstack/react-router";
 import { http, HttpResponse } from "msw";
+import { MotionConfigContext } from "motion/react";
+import { useContext } from "react";
+import { AdminApp, type AdminRouter } from "@/admin/router";
 import { copy, type DisabledReason } from "@/copy/ko";
+import { BoardStore } from "@/lib/board-store";
 import type { Me } from "@/lib/api-types";
 import { loadDraft, saveDraft } from "@/lib/draft";
 import { mcps } from "@/lib/endpoints";
 import { session } from "@/lib/session";
 import { mcpDetailFixture, meFixture } from "../../../tests/msw/fixtures";
 import { server } from "../../../tests/msw/server";
-import { renderWithProviders } from "../../../tests/render";
+import { createTestQueryClient, fakeStream, renderWithProviders } from "../../../tests/render";
 import { PlannedFeature } from "./PlannedFeature";
 
 /** The admin app at `route` with `me` logged in; waits until the shell's navigation is there. */
@@ -138,6 +143,20 @@ it("logging out drops this tab's unsaved drafts (a 401 keeps them: scripts.test)
   expect(loadDraft("mcp-create")).toBeNull();
 });
 
+it("logging out from a page with unsaved edits still reaches the login page", async () => {
+  const { router, qc } = renderWithProviders(null, { route: "/admin/settings", me: meFixture("admin", "local") });
+  const field = await screen.findByLabelText(copy.settings.fields.confirm_interval_sec, {}, { timeout: 5000 });
+  await userEvent.clear(field);
+  await userEvent.type(field, "3"); // dirty: the page's leave guard is armed
+  const clear = vi.spyOn(qc, "clear");
+  await userEvent.click(screen.getByRole("button", { name: copy.common.accountMenu("user1") }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: copy.common.logout }));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/admin/login"));
+  expect(await screen.findByLabelText(copy.login.email)).toBeInTheDocument(); // not a blank page
+  expect(screen.queryByRole("alertdialog")).toBeNull(); // logging out is the deliberate discard
+  expect(clear).toHaveBeenCalled();
+});
+
 it("opens the command palette with Ctrl+K and navigates to an MCP", async () => {
   server.use(http.get("/api/mcps", () => HttpResponse.json([mcpDetailFixture({ id: 1, name: "calc" }), mcpDetailFixture({ id: 2, name: "weather" })])));
   const { router } = await renderShell(meFixture("admin", "local"));
@@ -208,6 +227,18 @@ it("keeps the full sidebar without tooltips on a wide window", async () => {
   navLink(copy.nav.mcps).focus();
   await new Promise((r) => setTimeout(r, 50));
   expect(screen.queryByRole("tooltip")).toBeNull();
+});
+
+it("follows the user's reduced-motion setting for Motion on every admin page", () => {
+  let seen: string | undefined;
+  function Probe() {
+    seen = useContext(MotionConfigContext).reducedMotion;
+    return null;
+  }
+  const root = createRootRoute({ component: Probe });
+  const router = createRouter({ routeTree: root, history: createMemoryHistory({ initialEntries: ["/"] }) });
+  render(<AdminApp router={router as unknown as AdminRouter} qc={createTestQueryClient()} live={{ store: new BoardStore(), stream: fakeStream(), tracker: null }} />);
+  return waitFor(() => expect(seen).toBe("user"));
 });
 
 it("shows a planned feature as an empty state without data", () => {

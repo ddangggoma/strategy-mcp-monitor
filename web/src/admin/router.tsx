@@ -12,6 +12,7 @@ import {
   redirect,
   type RouterHistory,
 } from "@tanstack/react-router";
+import { MotionConfig } from "motion/react";
 import { buttonVariants } from "@/components/ui/button";
 import { copy } from "@/copy/ko";
 import type { McpState, ScriptKind } from "@/lib/api-types";
@@ -213,7 +214,10 @@ export function AdminApp({ router, qc, live }: { router: AdminRouter; qc: QueryC
   return (
     <QueryClientProvider client={qc}>
       <LiveProvider value={live}>
-        <RouterProvider router={router} />
+        {/* Motion follows prefers-reduced-motion on every admin page (Global Constraints) */}
+        <MotionConfig reducedMotion="user">
+          <RouterProvider router={router} />
+        </MotionConfig>
       </LiveProvider>
     </QueryClientProvider>
   );

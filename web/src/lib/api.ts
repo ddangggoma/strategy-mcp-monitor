@@ -56,8 +56,19 @@ async function errorCode(res: Response): Promise<string> {
   return "internal";
 }
 
+/** Who the tab acted for when a request was made: a CSRF retry must not change that (RF2). */
+interface Actor {
+  userId: number | null;
+  channel: string | null;
+}
+
+function currentActor(): Actor {
+  return { userId: session.me?.user?.id ?? null, channel: session.me?.channel ?? null };
+}
+
 async function request<T>(path: string, init: ApiInit, csrfRetry: boolean): Promise<T> {
   const method = init.method ?? "GET";
+  const actor = currentActor();
   const headers: Record<string, string> = { Accept: "application/json" };
   if (init.body !== undefined) headers["Content-Type"] = "application/json";
   if (method !== "GET" && session.csrf) headers["X-CSRF-Token"] = session.csrf;
@@ -89,8 +100,15 @@ async function request<T>(path: string, init: ApiInit, csrfRetry: boolean): Prom
 
   const code = await errorCode(res);
   if (res.status === 403 && code === "csrf" && csrfRetry) {
-    // another tab logged in again and revoked this tab's session token: fetch the current one, retry once
-    await refreshSession();
+    // another tab logged in again and revoked this tab's session token: fetch the current one and
+    // retry once, but only as the same user on the same channel. If someone else's session now sits
+    // in the shared cookie, replaying would act (and be audited) as them.
+    const me = await refreshSession();
+    if (me.user === null) {
+      if (!path.startsWith("/api/auth/")) session.onUnauthorized?.();
+      throw new ApiError(401, "login_required");
+    }
+    if (me.user.id !== actor.userId || me.channel !== actor.channel) throw new ApiError(403, "session_changed");
     return request<T>(path, init, false);
   }
   if (res.status === 401 && code === "login_required" && !path.startsWith("/api/auth/")) {

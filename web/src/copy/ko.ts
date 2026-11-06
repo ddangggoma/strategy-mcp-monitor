@@ -8,9 +8,12 @@ export const API_ERROR_CODES = [
   "bootstrap_done", "user_exists", "last_admin", "name_taken", "endpoint_taken", "action_in_progress",
   "script_required", "scripts_required", "script_too_large", "script_encoding", "script_empty",
   "invalid_owner", "too_many_streams", "body_too_large", "bad_host", "internal", "method_not_allowed",
-  "network",
+  "network", "session_changed",
 ] as const;
-/** Server `{"error": code}` values, plus `network` for a fetch that never reached the server. */
+/**
+ * Server `{"error": code}` values, plus two the client makes itself: `network` for a fetch that
+ * never reached the server, `session_changed` when a CSRF refresh finds another user's session.
+ */
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
 
 export const DISABLED_REASONS = [
@@ -622,6 +625,7 @@ export const copy = {
     internal: "서버에서 오류가 났어요. 잠시 뒤에 다시 시도하세요.",
     method_not_allowed: "지원하지 않는 요청이에요. 페이지를 새로 고친 뒤 다시 시도하세요.",
     network: "서버에 연결할 수 없어요. 네트워크와 서비스 상태를 확인하세요.",
+    session_changed: "다른 탭에서 다른 계정으로 로그인해 요청을 보내지 않았어요. 지금 로그인한 계정을 확인한 뒤 다시 시도하세요.",
   } satisfies Record<ApiErrorCode, string>,
 
   toasts: {

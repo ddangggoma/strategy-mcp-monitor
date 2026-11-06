@@ -120,8 +120,13 @@ export function AppShell() {
     clearSession();
     clearAllDrafts(); // a deliberate logout: the next person on this tab must not find these edits
     stream.restart();
-    await router.navigate({ to: "/admin/login" });
-    qc.clear(); // the next person to log in on this tab sees nothing of this one
+    try {
+      // past any unsaved-changes blocker: logging out is the deliberate discard (drafts are gone),
+      // and the shell unmounts with the session, so a blocker's dialog could never answer
+      await router.navigate({ to: "/admin/login", ignoreBlocker: true });
+    } finally {
+      qc.clear(); // the next person to log in on this tab sees nothing of this one
+    }
   }, [qc, router, stream]);
 
   if (!me?.user) return null; // between a 401 and the login page

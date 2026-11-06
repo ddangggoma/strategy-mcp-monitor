@@ -5,7 +5,7 @@ import { API_ERROR_CODES, DISABLED_REASONS, copy, messageForError } from "./ko";
 const ERROR_CODES = ["validation", "invalid_email", "rate_limited", "login_required", "forbidden", "csrf", "not_found",
   "bootstrap_done", "user_exists", "last_admin", "name_taken", "endpoint_taken", "action_in_progress", "script_required",
   "scripts_required", "script_too_large", "script_encoding", "script_empty", "invalid_owner", "too_many_streams",
-  "body_too_large", "bad_host", "internal", "method_not_allowed", "network"];
+  "body_too_large", "bad_host", "internal", "method_not_allowed", "network", "session_changed"];
 
 const REASONS = ["login", "local_only", "admin_only", "owner_only", "no_owner", "running", "config_error",
   "planned_sessions", "planned_logs", "planned_audit", "planned_alerts", "unchanged"];
