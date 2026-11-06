@@ -63,6 +63,8 @@ _CloseHandle = _fn(_kernel32, "CloseHandle", wintypes.BOOL, wintypes.HANDLE)
 _CreateToolhelp32Snapshot = _fn(_kernel32, "CreateToolhelp32Snapshot", wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD)
 _Process32FirstW = _fn(_kernel32, "Process32FirstW", wintypes.BOOL, wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W))
 _Process32NextW = _fn(_kernel32, "Process32NextW", wintypes.BOOL, wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W))
+_QueryFullProcessImageNameW = _fn(_kernel32, "QueryFullProcessImageNameW", wintypes.BOOL, wintypes.HANDLE,
+                                  wintypes.DWORD, wintypes.LPWSTR, wintypes.LPDWORD)
 
 _GetLastInputInfo = _fn(_user32, "GetLastInputInfo", wintypes.BOOL, ctypes.POINTER(LASTINPUTINFO))
 _EnumWindows = _fn(_user32, "EnumWindows", wintypes.BOOL, WNDENUMPROC, wintypes.LPARAM)
@@ -78,6 +80,7 @@ _GetMonitorInfoW = _fn(_user32, "GetMonitorInfoW", wintypes.BOOL, wintypes.HMONI
 _SetWindowPos = _fn(_user32, "SetWindowPos", wintypes.BOOL, wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
                     ctypes.c_int, ctypes.c_int, wintypes.UINT)
 _SetForegroundWindow = _fn(_user32, "SetForegroundWindow", wintypes.BOOL, wintypes.HWND)
+_GetForegroundWindow = _fn(_user32, "GetForegroundWindow", wintypes.HWND)
 
 
 def current_session_id() -> int:
@@ -149,6 +152,26 @@ def window_text(hwnd: int) -> str:
     buf = ctypes.create_unicode_buffer(n + 1)
     _GetWindowTextW(hwnd, buf, n + 1)
     return buf.value
+
+
+def foreground_window() -> int:
+    """The foreground window's handle, or 0 (none, e.g. while the desktop is locked or switching)."""
+    return int(_GetForegroundWindow() or 0)
+
+
+def process_image(pid: int) -> str | None:
+    """Full image path of ``pid`` (``PROCESS_QUERY_LIMITED_INFORMATION``), or None if it cannot be opened."""
+    handle = _OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return None
+    try:
+        size = wintypes.DWORD(32768)
+        buf = ctypes.create_unicode_buffer(size.value)
+        if not _QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+            return None
+        return buf.value
+    finally:
+        _CloseHandle(handle)
 
 
 def window_class(hwnd: int) -> str:
