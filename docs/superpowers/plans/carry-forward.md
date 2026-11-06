@@ -119,3 +119,14 @@ Every later plan reads this file before it is written and checks off the items i
 ### Later
 - [ ] Server 422 responses carry no field information, so forms rely on client validation (U27).
 - [ ] Script `PUT` has no optimistic locking (`If-Match`).
+
+## From the Plan 3 whole-plan review
+
+### Plan 5 (log viewer, retention, packaging)
+- [ ] Every SSE `action` event refetches all of that MCP's active history windows (1 h, 24 h, 7 d), because the history response carries buckets, transitions and actions together. Add an actions-only history read (or an `actions` field the client can merge), then refetch only the action list.
+- [ ] After a `session_changed` error (another tab switched the shared cookie to another user), the editors (`ScriptEditor`, `NoticeEditorPage`, `McpCreatePage`) keep the previous user's edits on screen. The next change stores them as the new user's draft, and a second Save writes as the new user. Treat `session_changed` like a user switch: `clearAllDrafts()`, `qc.clear()`, then navigate to `/admin` with `ignoreBlocker: true` (or reload).
+- [ ] Dependency allowlist wording: name the implied toolchain packages (`@types/node`, `@types/react*`, `@vitejs/plugin-react`, `@tailwindcss/vite`, `vite`, `typescript`). If Chromium 123 is a real target, verify the computed colour of the `-soft` tokens there (`light-dark()` inside `color-mix()`).
+- [ ] `server/tests/test_e2e_serve.py::test_two_channels_live` is load-sensitive: it failed once with "server did not become ready" while vitest ran at the same time, and passes alone. Raise its 10 s readiness deadline, or run the two suites one after the other in CI.
+
+### Later
+- [ ] Some web unit tests still sleep 30–50 ms before asserting that something does *not* arrive (no toast later in `mcps.test`, no tooltip on a wide window in `shell.test`, an older refetch in `scripts.test`, `status.test`). There is no signal to wait on; replace them if one appears.
