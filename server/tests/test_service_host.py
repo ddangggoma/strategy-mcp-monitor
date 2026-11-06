@@ -16,8 +16,8 @@ from app.db import MIGRATIONS, Database
 from app.main import PortInUseError, ServeControl, bind_listener, serve
 from app.paths import AppPaths
 from app.rootlock import RootInUseError, RootLock
-from app.winsvc.host import ServiceHost
-from tests.fakes import FakeClock
+from app.winsvc.host import ServiceHost, StopHeartbeat, run_for_scm
+from tests.fakes import FakeClock, FakeScm
 from tests.live import free_port
 from tests.winfakes import ListLog
 
@@ -206,18 +206,125 @@ def _service_argv(tmp_path, local_port=None):
             "--external-port", str(free_port()), "--external-host", "127.0.0.1", *NO_COLLECTORS]
 
 
-def test_service_host_runs_until_stop(tmp_path):
+def _log_lines(root):
+    return [json.loads(x) for f in sorted((root / "logs").glob("*.jsonl")) for x in f.read_text("utf-8").splitlines()]
+
+
+@pytest.mark.parametrize("start,result,applied", [("delayed-auto", "in_sync", []), ("manual", "applied", ["delayed-auto"])])
+def test_service_host_runs_until_stop(tmp_path, start, result, applied):
+    # plan review minor 10: a fake SCM, never the installed service (an elevated run would change it)
     moved = []
-    host = ServiceHost(_service_argv(tmp_path), chdir=moved.append)
+    scm = FakeScm(start=start)
+    host = ServiceHost(_service_argv(tmp_path), chdir=moved.append, configurator=scm)
     codes = []
     t = threading.Thread(target=lambda: codes.append(host.run())); t.start()
     assert host.control.wait_started(30)
     host.session_change(5, 2); host.stop(); t.join(30)
     assert codes == [0] and moved == [tmp_path.resolve()] and host.control.as_service
-    lines = [json.loads(x) for f in sorted((tmp_path / "logs").glob("*.jsonl")) for x in f.read_text("utf-8").splitlines()]
-    reconciled = [x for x in lines if x.get("event") == "service.start_type"]
-    assert len(reconciled) == 1 and reconciled[0]["desired"] == "delayed-auto"
-    assert reconciled[0]["result"] in ("applied", "in_sync", "not_installed", "denied", "error")
+    reconciled = [x for x in _log_lines(tmp_path) if x.get("event") == "service.start_type"]
+    assert [(x["result"], x["desired"], x["current"]) for x in reconciled] == [(result, "delayed-auto", start)]
+    assert scm.applied == applied
+
+
+def test_run_for_scm_reports_stopped_after_any_requested_stop():
+    # plan review I4: after an SCM stop, a failing shutdown still ends with SERVICE_STOPPED (None)
+    errors = []
+    requested = threading.Event(); requested.set()
+
+    def boom():
+        raise RuntimeError("collectors stop failed")
+
+    assert run_for_scm(boom, requested, errors.append) is None
+    assert "RuntimeError: collectors stop failed" in errors[0] and "code 1" in errors[1]
+    errors.clear()
+    assert run_for_scm(lambda: 0, requested, errors.append) is None and errors == []
+    assert run_for_scm(lambda: 4, requested, errors.append) is None and errors == ["mcp-monitor stopped on request with errors (code 4)"]
+
+
+def test_run_for_scm_leaves_for_recovery_when_it_ends_on_its_own():
+    errors = []
+    idle = threading.Event()
+    assert run_for_scm(lambda: 3, idle, errors.append) == 3
+    assert run_for_scm(lambda: 0, idle, errors.append) == 1  # ending without a stop request is a failure
+    assert run_for_scm(lambda: 1 / 0, idle, errors.append) == 1
+    assert errors[:2] == ["mcp-monitor exited with code 3", "mcp-monitor exited with code 0"]
+    assert "ZeroDivisionError" in errors[2]
+
+
+def test_a_failing_stop_sequence_under_the_service_still_reports_stopped(tmp_path, monkeypatch):
+    """I4 end to end: the real server; the collectors' stop raises during the SCM-requested stop."""
+    real_build = main_mod.build_services
+
+    def build(root, **kw):
+        services = real_build(root, **kw)
+        real_stop = services.collectors.stop
+        calls = []
+
+        async def failing_stop():
+            calls.append(1)
+            await real_stop()
+            if len(calls) == 1:
+                raise RuntimeError("taskkill failed")
+
+        services.collectors.stop = failing_stop
+        return services
+
+    monkeypatch.setattr(main_mod, "build_services", build)
+    host = ServiceHost(_service_argv(tmp_path), chdir=lambda p: None, configurator=FakeScm())
+    requested, errors, outcome = threading.Event(), [], []
+    t = threading.Thread(target=lambda: outcome.append(run_for_scm(host.run, requested, errors.append)))
+    t.start()
+    assert host.control.wait_started(30)
+    requested.set(); host.stop(); t.join(60)
+    assert not t.is_alive() and outcome == [None]
+    assert "RuntimeError: taskkill failed" in errors[0]
+    # the trail before the failure is on disk (the log was flushed and stopped in order)
+    assert any(x.get("event") == "service.start_type" for x in _log_lines(tmp_path))
+
+
+class _Clock:
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self):
+        return self.t
+
+
+class _Done:
+    """A ``threading.Event`` stand-in: ``wait`` advances the fake clock instead of sleeping."""
+
+    def __init__(self, clock, done_after=None):
+        self.clock, self.done_after, self.waits = clock, done_after, 0
+
+    def wait(self, timeout):
+        self.waits += 1
+        self.clock.t += timeout
+        return self.done_after is not None and self.waits > self.done_after
+
+
+def test_stop_heartbeat_reports_until_the_run_ends():
+    clock, reports, gave_up = _Clock(), [], []
+    StopHeartbeat(lambda: reports.append(clock.t), _Done(clock, done_after=3), lambda: gave_up.append(1),
+                  interval=2, deadline=50, clock=clock).run()
+    assert reports == [2, 4, 6] and gave_up == []
+
+
+def test_stop_heartbeat_gives_up_at_the_deadline():
+    clock, reports, gave_up = _Clock(), [], []
+    StopHeartbeat(lambda: reports.append(clock.t), _Done(clock), lambda: gave_up.append(clock.t),
+                  interval=2, deadline=10, clock=clock).run()
+    assert reports == [2, 4, 6, 8] and gave_up == [10]
+
+
+def test_stop_budget_fits_the_preshutdown_timeout():
+    from app.winsvc import (
+        PRESHUTDOWN_TIMEOUT_MS,
+        STOP_DEADLINE_SEC,
+        STOP_HEARTBEAT_SEC,
+        STOP_WAIT_HINT_MS,
+    )
+    assert STOP_HEARTBEAT_SEC * 1000 < STOP_WAIT_HINT_MS  # each report promises the next in time
+    assert STOP_DEADLINE_SEC * 1000 + STOP_WAIT_HINT_MS <= PRESHUTDOWN_TIMEOUT_MS
 
 
 def test_service_host_reports_a_busy_port(tmp_path):
@@ -237,6 +344,106 @@ def test_service_class_contract():
     assert service.McpMonitorService._svc_name_ == "mcp-monitor"
     assert service.McpMonitorService._svc_display_name_ == "MCP Monitor"
     assert callable(service.McpMonitorService.SvcOtherEx) and callable(service.dispatch)
+
+
+class _FakeHost:
+    def __init__(self, run):
+        self._run, self.stops, self.nudges = run, 0, []
+        self.stopped = threading.Event()
+
+    def run(self):
+        return self._run(self)
+
+    def stop(self):
+        self.stops += 1
+        self.stopped.set()
+
+    def session_change(self, event_type, session_id):
+        self.nudges.append((event_type, session_id))
+
+
+def _service(monkeypatch, run):
+    """A McpMonitorService without the SCM: statuses recorded, event log / exit / SCM config faked."""
+    import win32service
+
+    from app.winsvc import service
+    svc = object.__new__(service.McpMonitorService)
+    svc._setup(_FakeHost(run))
+    svc.statuses, svc.errors, svc.exits, svc.preshutdown = [], [], [], []
+    svc.ssh, svc.checkPoint = object(), 0  # the framework's own ReportServiceStatus, SetServiceStatus faked
+    # (state, checkpoint, wait hint) of every SetServiceStatus
+    monkeypatch.setattr(win32service, "SetServiceStatus", lambda ssh, st: svc.statuses.append((st[1], st[5], st[6])))
+    monkeypatch.setattr(service, "_log_error", svc.errors.append)
+    monkeypatch.setattr(service, "_log_warning", svc.errors.append)
+    monkeypatch.setattr(service, "_set_preshutdown_timeout", lambda: svc.preshutdown.append(1))
+
+    def fake_exit(code):
+        svc.exits.append(code)
+        raise SystemExit(code)
+
+    monkeypatch.setattr(service, "_exit", fake_exit)
+    return svc, win32service
+
+
+def test_service_accepts_preshutdown_and_stops_once(monkeypatch):
+    svc, ws = _service(monkeypatch, lambda h: 0)
+    accepted = svc.GetAcceptedControls()
+    for flag in (ws.SERVICE_ACCEPT_STOP, ws.SERVICE_ACCEPT_SHUTDOWN, ws.SERVICE_ACCEPT_SESSIONCHANGE, ws.SERVICE_ACCEPT_PRESHUTDOWN):
+        assert accepted & flag, flag
+    svc.SvcOtherEx(ws.SERVICE_CONTROL_SESSIONCHANGE, 5, (3,))
+    svc.SvcOtherEx(ws.SERVICE_CONTROL_PRESHUTDOWN, 0, None)
+    svc.SvcShutdown(); svc.SvcStop()  # SHUTDOWN after PRESHUTDOWN, a second stop: one sequence
+    svc._run_done.set()
+    assert svc.host.nudges == [(5, 3)] and svc.host.stops == 1
+    assert svc.statuses[0] == (ws.SERVICE_STOP_PENDING, 1, 10_000)
+
+
+def test_service_stop_error_reports_stopped_not_a_crash(monkeypatch):
+    # plan review I4: the stop sequence raises after an SCM stop -> SvcDoRun returns (the framework
+    # reports STOPPED), no os._exit (which the SCM would treat as a crash and restart)
+    def run(host):
+        assert host.stopped.wait(10)
+        raise RuntimeError("monitor kill failed")
+
+    svc, ws = _service(monkeypatch, run)
+    threading.Timer(0.2, svc.SvcStop).start()
+    svc.SvcRun()
+    assert svc.exits == [] and svc.preshutdown == [1] and svc._run_done.is_set()
+    assert svc.statuses[:2] == [(ws.SERVICE_RUNNING, 0, 5000), (ws.SERVICE_STOP_PENDING, 1, 10_000)]
+    assert ws.SERVICE_STOPPED not in [s for s, _c, _w in svc.statuses]  # the framework reports it after SvcRun
+    assert any("monitor kill failed" in e for e in svc.errors)
+
+
+def test_service_that_ends_on_its_own_exits_for_recovery(monkeypatch):
+    svc, _ws = _service(monkeypatch, lambda h: 3)
+    with pytest.raises(SystemExit):
+        svc.SvcRun()
+    assert svc.exits == [3] and svc.errors == ["mcp-monitor exited with code 3"]
+
+
+def test_service_heartbeat_reports_progress_and_gives_up(monkeypatch):
+    import app.winsvc.host as host_mod
+    from app.winsvc import service
+    monkeypatch.setattr(host_mod, "STOP_HEARTBEAT_SEC", 0.01)
+    svc, ws = _service(monkeypatch, lambda h: 0)
+    monkeypatch.setattr(service, "StopHeartbeat",
+                        lambda report, done, give_up: host_mod.StopHeartbeat(report, done, give_up, interval=0.01, deadline=0.2))
+    gave_up = threading.Event()
+    real_give_up = svc._give_up
+
+    def give_up():
+        try:
+            real_give_up()
+        except SystemExit:
+            gave_up.set()
+
+    svc._give_up = give_up
+    svc.SvcStop()
+    assert gave_up.wait(10)
+    checkpoints = [c for s, c, w in svc.statuses if s == ws.SERVICE_STOP_PENDING and w == 10_000]
+    assert len(checkpoints) >= 3 and checkpoints == list(range(1, len(checkpoints) + 1))  # increasing
+    assert svc.statuses[-1][0] == ws.SERVICE_STOPPED and svc.exits == [0]
+    assert "did not stop within" in svc.errors[0]
 
 
 class _Nudged:

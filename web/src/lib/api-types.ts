@@ -371,7 +371,8 @@ export interface AuditQuery extends Omit<LogQuery, "cat" | "event" | "outcome" |
 export interface ServiceStatus {
   installed: boolean;
   running_as_service: boolean;
-  start_type: Settings["service_start_type"] | null;
+  /** "disabled": an admin disabled the service in the SCM; never a setting, never re-enabled by the server. */
+  start_type: Settings["service_start_type"] | "disabled" | null;
   desired: Settings["service_start_type"];
   in_sync: boolean;
   /** Running from a deployment bundle, which can be installed as the service; false in a development run (F20). */

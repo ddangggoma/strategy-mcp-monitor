@@ -9,6 +9,10 @@ function statusLines(st: ServiceStatus): { text: string; warn?: boolean }[] {
     // a bundle (or the service itself) can be installed; a development run never is (F20)
     return [{ text: st.bundle || st.running_as_service ? s.notInstalled : s.devMode }];
   }
+  if (st.start_type === "disabled") {
+    // an admin's decision in the SCM: the server leaves it alone (plan review minor 17)
+    return [{ text: s.current(st.start_type) }, { text: s.disabled, warn: true }];
+  }
   return [{ text: s.current(st.start_type) }, ...(st.in_sync ? [] : [{ text: s.mismatch, warn: true }])];
 }
 

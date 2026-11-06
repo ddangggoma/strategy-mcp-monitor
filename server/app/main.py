@@ -10,7 +10,7 @@ import sys
 import threading
 from collections.abc import Awaitable, Callable, Iterator, Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import uvicorn
 from fastapi import FastAPI
@@ -19,6 +19,9 @@ from app.collect.config import CollectorConfig
 from app.rootlock import RootLock
 from app.services import Services, build_services
 from app.web.app_factory import create_app
+
+if TYPE_CHECKING:
+    from app.winsvc.start_type import ServiceConfigurator
 
 
 def server_configs(
@@ -183,10 +186,12 @@ class ServeControl:
     ``request_stop()`` goes through the same ``ShutdownSequence`` as Ctrl+C (collectors first,
     while the Local channel still answers; F01). A stop requested before the servers exist stops
     them right after they start. Every method is thread-safe and may be called repeatedly.
+    ``configurator`` (as a service) replaces the real SCM for the start-type reconcile.
     """
 
-    def __init__(self, *, as_service: bool = False) -> None:
+    def __init__(self, *, as_service: bool = False, configurator: ServiceConfigurator | None = None) -> None:
         self.as_service = as_service
+        self.configurator = configurator
         self._lock = threading.Lock()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._shutdown: ShutdownSequence | None = None
@@ -345,6 +350,8 @@ async def _serve_started(
         try:
             if control is not None and control.as_service:
                 services.start_type.running_as_service = True
+                if control.configurator is not None:
+                    services.start_type.configurator = control.configurator
                 desired = services.settings.get().service_start_type  # config.db: on the loop thread
                 await asyncio.to_thread(services.start_type.reconcile, desired)
             waiting = len(configs)
@@ -356,7 +363,15 @@ async def _serve_started(
                     control._set_started()
 
             servers = [_Server(cfg, one_started) for cfg in configs]
-            shutdown = ShutdownSequence(servers, services.collectors.stop)
+
+            async def before_exit() -> None:
+                # What is queued reaches the disk before the slow stops (plan review I5): a stop the
+                # OS cuts short (shutdown) still leaves the trail up to here.
+                await services.log.flush()
+                await services.collectors.stop()
+                await services.log.flush()
+
+            shutdown = ShutdownSequence(servers, before_exit)
             if control is not None:
                 control._attach(asyncio.get_running_loop(), shutdown, services.collectors.nudge_sessions)
             try:
@@ -375,3 +390,4 @@ async def _serve_started(
                 await services.collectors.stop()  # a no-op after the sequence stopped them
     finally:
         await services.monitor.stop(kill_abandoned=kill_scripts_on_stop)
+        await services.log.flush()  # monitor.stop{killed} before the retention and index stops

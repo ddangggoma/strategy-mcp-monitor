@@ -308,6 +308,16 @@ it("shows the installed service start type and a mismatch", async () => {
   expect(await screen.findByText(copy.settings.service.current("auto"))).toBeInTheDocument();
   expect(screen.getByText(copy.settings.service.mismatch)).toBeInTheDocument();
 });
+it("shows a disabled service as disabled, not as manual", async () => {
+  // plan review minor 17: an admin disabled the service in the SCM; the server never re-enables it
+  server.use(http.get("/api/service", () => HttpResponse.json(serviceStatusFixture({ installed: true, start_type: "disabled", desired: "delayed-auto", in_sync: false }))));
+  await renderSettings(settingsFixture());
+  expect(await screen.findByText(copy.settings.service.current("disabled"))).toBeInTheDocument();
+  expect(copy.settings.service.current("disabled")).toContain("사용 안 함");
+  expect(screen.getByText(copy.settings.service.disabled)).toBeInTheDocument();
+  expect(screen.queryByText(copy.settings.service.mismatch)).toBeNull();
+  expect(screen.queryByRole("option", { name: "사용 안 함" })).toBeNull();
+});
 it("tells a bundle without the service from a development run", async () => {
   server.use(http.get("/api/service", () => HttpResponse.json(serviceStatusFixture({ installed: false, running_as_service: false, start_type: null, in_sync: false, bundle: true }))));
   const { unmount } = await renderSettings(settingsFixture());

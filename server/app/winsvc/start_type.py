@@ -14,16 +14,20 @@ from app.settings.store import SettingsStore
 from app.winsvc import SERVICE_NAME
 
 StartType = Literal["auto", "delayed-auto", "manual"]
-ReconcileResult = Literal["applied", "in_sync", "not_installed", "denied", "error"]
+# What the SCM can report: an admin may have disabled the service (incident response); that is never
+# a setting and never overwritten by one (plan review minor 17).
+CurrentStartType = Literal["auto", "delayed-auto", "manual", "disabled"]
+ReconcileResult = Literal["applied", "in_sync", "not_installed", "disabled", "denied", "error"]
 
 _ERROR_ACCESS_DENIED = 5
 _ERROR_SERVICE_DOES_NOT_EXIST = 1060
 _SERVICE_AUTO_START = 2
 _SERVICE_DEMAND_START = 3
+_SERVICE_DISABLED = 4
 
 
 class ServiceConfigurator(Protocol):
-    def query(self) -> StartType | None:
+    def query(self) -> CurrentStartType | None:
         """The installed service's start type; ``None`` when the service is not installed."""
         ...
 
@@ -70,13 +74,15 @@ class ScmConfigurator:
                 raise LookupError(self.name) from None
             raise _os_error(exc) from None
 
-    def query(self) -> StartType | None:
+    def query(self) -> CurrentStartType | None:
         import win32service
 
-        def read(svc: Any, handle: Any) -> StartType:
+        def read(svc: Any, handle: Any) -> CurrentStartType:
             start = svc.QueryServiceConfig(handle)[1]
+            if start == _SERVICE_DISABLED:
+                return "disabled"
             if start != _SERVICE_AUTO_START:
-                return "manual"  # demand start; disabled and driver start types read as manual
+                return "manual"  # demand start; the driver start types read as manual
             delayed = svc.QueryServiceConfig2(handle, svc.SERVICE_CONFIG_DELAYED_AUTO_START_INFO)
             return "delayed-auto" if delayed else "auto"
 
@@ -102,11 +108,33 @@ class ScmConfigurator:
         except LookupError:
             raise OSError(_ERROR_SERVICE_DOES_NOT_EXIST, f"service {self.name} is not installed") from None
 
+    def set_preshutdown_timeout(self, ms: int) -> None:
+        """How long the SCM waits for the service at OS shutdown once it accepts PRESHUTDOWN (plan
+        review I5); the service sets it on itself when it starts. ``LookupError`` when not installed."""
+        import win32service
+
+        def change(svc: Any, handle: Any) -> None:
+            svc.ChangeServiceConfig2(handle, svc.SERVICE_CONFIG_PRESHUTDOWN_INFO, ms)
+
+        self._with_service(win32service.SERVICE_CHANGE_CONFIG, change)
+
+    def preshutdown_timeout(self) -> int | None:
+        """The service's preshutdown timeout in ms (no admin needed); ``None`` when not installed."""
+        import win32service
+
+        def read(svc: Any, handle: Any) -> int:
+            return int(svc.QueryServiceConfig2(handle, svc.SERVICE_CONFIG_PRESHUTDOWN_INFO))
+
+        try:
+            return int(self._with_service(win32service.SERVICE_QUERY_CONFIG, read))
+        except LookupError:
+            return None
+
 
 class NullConfigurator:
     """No SCM (not Windows): never installed."""
 
-    def query(self) -> StartType | None:
+    def query(self) -> CurrentStartType | None:
         return None
 
     def apply(self, st: StartType) -> None:
@@ -151,12 +179,14 @@ class StartTypeManager:
         (``emit_threadsafe``: it runs off the loop). ``desired`` as in :meth:`status`."""
         if desired is None:
             desired = self._settings.get().service_start_type
-        current: StartType | None = None
+        current: CurrentStartType | None = None
         result: ReconcileResult
         try:
             current = self.configurator.query()
             if current is None:
                 result = "not_installed"
+            elif current == "disabled":
+                result = "disabled"  # an admin's decision in the SCM: never re-enabled from here
             elif current == desired:
                 result = "in_sync"
             else:

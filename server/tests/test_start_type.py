@@ -24,6 +24,29 @@ def test_reconcile(services, scm, result, applied):
     ]
 
 
+def test_a_disabled_service_reads_as_disabled_and_is_never_re_enabled(services):
+    # plan review minor 17: an admin who disabled the service (incident response) must not see "manual,
+    # in sync", and saving auto/delayed-auto must not silently enable it again
+    log = ListLog()
+    scm = FakeScm(start="disabled")
+    m = StartTypeManager(scm, services.settings, log)
+    assert m.reconcile() == "disabled" and m.reconcile("auto") == "disabled" and scm.applied == []
+    assert [f["result"] for _c, _t, f in log.events] == ["disabled", "disabled"]
+    assert log.events[0][2]["current"] == "disabled"
+    st = m.status()
+    assert (st["installed"], st["start_type"], st["in_sync"]) == (True, "disabled", False)
+
+
+async def test_put_start_type_on_a_disabled_service_is_audited_and_not_applied(local_client, services):
+    scm = FakeScm(start="disabled"); services.start_type.configurator = scm
+    await bootstrap(local_client); await login(local_client, services)
+    r = await local_client.put("/api/settings", json={"service_start_type": "auto"}, headers={"X-CSRF-Token": local_client.csrf})
+    assert r.status_code == 200 and scm.applied == []
+    e = [x for x in await audit_events(services, "admin.audit") if x["action"] == "service_start_type_apply"]
+    assert e[-1]["target"] == {"start_type": "auto", "result": "disabled"} and e[-1]["result"] == "error"
+    assert (await local_client.get("/api/service")).json()["start_type"] == "disabled"
+
+
 def test_reconcile_reports_the_start_type_before_applying(services):
     log = ListLog()
     StartTypeManager(FakeScm(start="manual"), services.settings, log).reconcile()
@@ -98,6 +121,15 @@ async def test_service_route_is_local_admin_only(local_client, external_client, 
 def test_scm_query_without_admin():
     assert ScmConfigurator("EventLog").query() in ("auto", "delayed-auto", "manual")
     assert ScmConfigurator("mcp-monitor-does-not-exist-7f3a").query() is None
+
+
+@pytest.mark.winlive
+def test_scm_preshutdown_timeout_without_admin():
+    # read only (plan review I5): the service sets its own value when it starts, as LocalSystem
+    assert ScmConfigurator("EventLog").preshutdown_timeout() > 0
+    assert ScmConfigurator("mcp-monitor-does-not-exist-7f3a").preshutdown_timeout() is None
+    with pytest.raises(LookupError):  # never set on a real service here: one that does not exist
+        ScmConfigurator("mcp-monitor-does-not-exist-7f3a").set_preshutdown_timeout(60_000)
 
 
 @pytest.mark.winlive

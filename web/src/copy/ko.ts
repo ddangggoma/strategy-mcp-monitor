@@ -31,6 +31,8 @@ const LOCAL_ADDRESS = "http://127.0.0.1:8700";
 
 type StartType = "auto" | "delayed-auto" | "manual";
 const START_TYPES: Readonly<Record<StartType, string>> = { auto: "자동", "delayed-auto": "자동(지연된 시작)", manual: "수동" };
+/** What the SCM can report besides the settings' choices (Windows' own name for it). */
+const SERVICE_START_TYPES: Readonly<Record<StartType | "disabled", string>> = { ...START_TYPES, disabled: "사용 안 함" };
 
 /** Log screens: thousands with separators ("1,234건"). */
 const count = (n: number | string) => (typeof n === "number" ? n.toLocaleString("ko-KR") : n);
@@ -725,11 +727,12 @@ export const copy = {
     service: {
       title: "Windows 서비스",
       notInstalled: "Windows 서비스로 설치되어 있지 않아요. 설치하면 이 시작 유형이 적용돼요.",
-      current: (type: StartType) => `지금 서비스 시작 유형: ${START_TYPES[type] ?? type}`,
+      current: (type: StartType | "disabled") => `지금 서비스 시작 유형: ${SERVICE_START_TYPES[type] ?? type}`,
       // the server applies the setting when it is changed and when the service starts (W25), not on
       // a save that leaves it as it is
       mismatch: "서비스의 시작 유형이 이 설정과 달라요. 서비스가 다시 시작할 때 이 설정으로 맞춰요.",
       devMode: "개발용으로 실행 중이라 서비스가 없어요. 시작 유형은 저장만 돼요.",
+      disabled: "Windows에서 서비스가 사용 안 함으로 되어 있어 이 설정을 적용하지 않아요. 다시 쓰려면 서비스 관리자에서 바꾸세요.",
       loadError: "서비스 상태를 확인하지 못했어요. 새로 고친 뒤 다시 시도하세요.",
     },
     otpDummy: "Dummy(개발용)",
