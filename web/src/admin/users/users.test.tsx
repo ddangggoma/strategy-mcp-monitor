@@ -7,6 +7,9 @@ import { formatKst } from "@/lib/time";
 import { adminUser, meFixture, NOW } from "../../../tests/msw/fixtures";
 import { server } from "../../../tests/msw/server";
 import { renderWithProviders } from "../../../tests/render";
+import { warmChunks } from "../../../tests/warm";
+
+warmChunks("users", "login");
 
 /** Method + path of every request from now on. */
 function trackCalls(): () => string[] {

@@ -11,6 +11,9 @@ import { renderWithProviders } from "../../../tests/render";
 import { UsersPage } from "../users/UsersPage";
 import { SettingsPage } from "./SettingsPage";
 import { settingsSchema } from "./settings-schema";
+import { warmChunks } from "../../../tests/warm";
+
+warmChunks("settings", "users", "dashboard");
 
 /** Method + path (+ query) of every request from now on. */
 function trackCalls(): () => string[] {

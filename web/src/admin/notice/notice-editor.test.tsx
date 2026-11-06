@@ -8,6 +8,9 @@ import { meFixture, noticeFixture, noticeVersionFixture, userSummary } from "../
 import { server, trackRequests } from "../../../tests/msw/server";
 import { renderWithProviders } from "../../../tests/render";
 import { qk } from "../query-keys";
+import { warmChunks } from "../../../tests/warm";
+
+warmChunks("notice", "login");
 
 afterEach(() => sessionStorage.clear());
 
@@ -59,9 +62,11 @@ const preview = () => screen.getByRole("group", { name: copy.notice.previewLabel
 const saveButton = () => screen.getByRole("button", { name: copy.common.save });
 const versionList = () => screen.getByRole("list", { name: copy.notice.versions });
 
+/** Replaces a field's value. Pasted, not typed: what is under test is the value, not each keystroke
+ * (typing 80 characters re-renders the form and the preview 80 times). */
 async function retype(label: string, text: string) {
   await userEvent.clear(field(label));
-  if (text) await userEvent.type(field(label), text);
+  if (text) await userEvent.paste(text);
 }
 
 // ---- edit + live preview ---------------------------------------------------------------

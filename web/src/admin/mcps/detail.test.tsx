@@ -10,6 +10,9 @@ import { server, trackRequests } from "../../../tests/msw/server";
 import { renderWithProviders } from "../../../tests/render";
 import { qk } from "../query-keys";
 import { SettingsTab } from "./SettingsTab";
+import { warmChunks } from "../../../tests/warm";
+
+warmChunks("mcpDetail", "mcpList", "chart");
 
 /** The detail page in the full admin app (shell, toasts), with GET /api/mcps/:id answering `detail`. */
 async function renderDetail(detail: McpDetail, { me = meFixture("admin", "local"), route }: { me?: Me; route?: string } = {}) {

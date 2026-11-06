@@ -6,6 +6,9 @@ import { BoardStore } from "@/lib/board-store";
 import { NOW, activityFixture, boardEvent, item, meFixture, rdpSession, record } from "../../../tests/msw/fixtures";
 import { server } from "../../../tests/msw/server";
 import { renderWithProviders } from "../../../tests/render";
+import { warmChunks } from "../../../tests/warm";
+
+warmChunks("dashboard", "mcpList");
 
 /** The dashboard in the admin app, with the live store already holding `mcps` (and `sessions` when given). */
 async function renderDashboard({ mcps, activity, sessions }: { mcps: BoardItem[]; activity: McpActivity; sessions?: RdpSession[] }) {

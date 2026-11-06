@@ -8,6 +8,9 @@ import { loadDraft, saveDraft } from "@/lib/draft";
 import { mcpDetailFixture, meFixture } from "../../../tests/msw/fixtures";
 import { server, trackRequests } from "../../../tests/msw/server";
 import { renderWithProviders } from "../../../tests/render";
+import { warmChunks } from "../../../tests/warm";
+
+warmChunks("mcpCreate", "scriptEditor", "mcpList");
 
 afterEach(() => sessionStorage.clear());
 

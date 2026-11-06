@@ -15,6 +15,9 @@ import { mcpDetailFixture, meFixture } from "../../../tests/msw/fixtures";
 import { server } from "../../../tests/msw/server";
 import { createTestQueryClient, fakeStream, renderWithProviders } from "../../../tests/render";
 import { PlannedFeature } from "./PlannedFeature";
+import { warmChunks } from "../../../tests/warm";
+
+warmChunks("dashboard", "mcpList", "mcpDetail", "chart", "login", "settings", "palette");
 
 /** The admin app at `route` with `me` logged in; waits until the shell's navigation is there. */
 async function renderShell(me: Me, route = "/admin") {

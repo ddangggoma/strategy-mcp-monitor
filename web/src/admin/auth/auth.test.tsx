@@ -10,6 +10,9 @@ import { ResendRing } from "./ResendRing";
 import { meFixture } from "../../../tests/msw/fixtures";
 import { server, trackRequests } from "../../../tests/msw/server";
 import { fakeStream, renderWithProviders } from "../../../tests/render";
+import { warmChunks } from "../../../tests/warm";
+
+warmChunks("login", "setup", "dashboard", "mcpDetail", "chart");
 
 interface LoginOptions {
   search?: Record<string, string>;

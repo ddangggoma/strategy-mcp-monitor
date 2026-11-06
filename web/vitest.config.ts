@@ -23,9 +23,9 @@ export default defineConfig({
     // CSS is stripped in tests by default; the token tests read src/styles/*.css?raw as text
     css: { include: [/[\\/]src[\\/]styles[\\/][\w-]+\.css\?raw/] },
     setupFiles: ["tests/setup.ts"],
-    // route-level tests mount the whole admin app and compile lazy page chunks; under the full
-    // parallel run a few of them pass 5 s (the default) on this PC, so the limit is 15 s
-    testTimeout: 15_000,
+    // the vitest default: route-level files load their lazy chunks in beforeAll (tests/warm.ts), so
+    // no test pays a cold chunk compile and a real hang fails fast
+    testTimeout: 5_000,
     include: ["src/**/*.test.{ts,tsx}", "tests/**/*.test.{ts,tsx}"],
     exclude: ["tests/budget/**", "e2e/**", "node_modules/**", "dist/**"],
   },

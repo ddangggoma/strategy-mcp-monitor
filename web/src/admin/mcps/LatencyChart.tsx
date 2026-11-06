@@ -20,7 +20,7 @@ import {
 import { copy } from "@/copy/ko";
 import type { McpState, MinuteBucket, Transition } from "@/lib/api-types";
 import { formatKst } from "@/lib/time";
-import { downsample } from "./downsample";
+import { downsample, tickStep } from "./downsample";
 import { CHART_HEIGHT } from "./history-config";
 
 const STRIP_HEIGHT = 84; // uptime plot + the time axis band
@@ -49,15 +49,6 @@ interface Point {
   max: number | null;
   /** percent 0–100 */
   uptime: number | null;
-}
-
-/** Clock-friendly tick steps; the chart uses the smallest that keeps about six ticks on the span shown. */
-const TICK_STEPS = [1, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440].map((m) => m * MINUTE);
-const MAX_TICKS = 6;
-
-/** The step for the data actually shown (a new MCP has minutes of data even in the 7-day view). */
-export function tickStep(span: number): number {
-  return TICK_STEPS.find((s) => span / s <= MAX_TICKS) ?? Math.ceil(span / MAX_TICKS / DAY) * DAY;
 }
 
 function ticksFor(min: number, max: number, step: number): number[] {

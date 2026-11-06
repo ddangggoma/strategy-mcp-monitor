@@ -11,6 +11,9 @@ import {
 import { server, trackRequests } from "../../../tests/msw/server";
 import { renderWithProviders } from "../../../tests/render";
 import { qk } from "../query-keys";
+import { warmChunks } from "../../../tests/warm";
+
+warmChunks("mcpDetail", "scriptEditor", "login");
 
 afterEach(() => sessionStorage.clear());
 

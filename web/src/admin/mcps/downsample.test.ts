@@ -1,5 +1,5 @@
 import type { MinuteBucket } from "@/lib/api-types";
-import { downsample } from "./downsample";
+import { downsample, tickStep } from "./downsample";
 
 const T0 = Date.parse("2026-11-04T00:00:00.000+09:00");
 
@@ -47,8 +47,7 @@ it("keeps a full week (10,080 minutes) at no more than 720 points", () => {
   expect(downsample([])).toEqual([]);
 });
 
-it("chart ticks follow the span shown, not the period picked", async () => {
-  const { tickStep } = await import("./LatencyChart");
+it("chart ticks follow the span shown, not the period picked", () => {
   const min = 60_000;
   expect(tickStep(5 * min)).toBe(min); // a new MCP: minutes of data even in the 7-day view
   expect(tickStep(60 * min)).toBe(10 * min);

@@ -7,6 +7,9 @@ import { historyFixture, item, mcpDetailFixture, meFixture, record } from "../..
 import { server, trackRequests } from "../../../tests/msw/server";
 import { renderWithProviders } from "../../../tests/render";
 import { connectLive } from "../live";
+import { warmChunks } from "../../../tests/warm";
+
+warmChunks("mcpList", "mcpDetail", "chart", "dashboard");
 
 /** The MCP list page in the full admin app (shell, toasts, tracker), mirrored from the live store like main.tsx. */
 async function renderList(list: McpDetail[], { me = meFixture("admin", "local"), route = "/admin/mcps" }: { me?: Me; route?: string } = {}) {

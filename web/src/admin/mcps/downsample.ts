@@ -45,3 +45,17 @@ export function downsample(buckets: MinuteBucket[], maxPoints = 720): ChartPoint
   }
   return out;
 }
+
+const MINUTE_MS = 60_000;
+const DAY_MS = 24 * 60 * MINUTE_MS;
+/** Clock-friendly tick steps; the chart uses the smallest that keeps about six ticks on the span shown. */
+const TICK_STEPS = [1, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440].map((m) => m * MINUTE_MS);
+const MAX_TICKS = 6;
+
+/**
+ * The chart's tick step (ms) for the data actually shown (a new MCP has minutes of data even in the
+ * 7-day view). Here, not in LatencyChart, so it is testable without loading Recharts.
+ */
+export function tickStep(span: number): number {
+  return TICK_STEPS.find((s) => span / s <= MAX_TICKS) ?? Math.ceil(span / MAX_TICKS / DAY_MS) * DAY_MS;
+}
