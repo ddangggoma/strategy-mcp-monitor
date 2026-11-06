@@ -1,7 +1,7 @@
 // Board state fed by SSE events. Immutable updates (new Maps per change) so useSyncExternalStore
 // re-renders only when something changed; anything unparseable leaves the snapshot as it was.
 import { useSyncExternalStore } from "react";
-import type { ActionEvent, BoardItem, McpState, RdpSession } from "./api-types";
+import type { ActionEvent, BoardItem, McpState, RdpSession, TamperEvent } from "./api-types";
 import type { StreamStatus } from "./board-stream";
 import type { SseEvent } from "./sse";
 
@@ -58,6 +58,7 @@ export class BoardStore {
   };
   private readonly listeners = new Set<() => void>();
   private readonly actionListeners = new Set<(e: ActionEvent) => void>();
+  private readonly tamperListeners = new Set<(e: TamperEvent) => void>();
   private readonly reconnectedListeners = new Set<() => void>();
 
   // arrow properties: stable references for useSyncExternalStore
@@ -74,6 +75,14 @@ export class BoardStore {
     this.actionListeners.add(fn);
     return () => {
       this.actionListeners.delete(fn);
+    };
+  }
+
+  /** SSE `tamper` (authenticated streams only): not board state, handed to listeners as it comes. */
+  onTamper(fn: (e: TamperEvent) => void): () => void {
+    this.tamperListeners.add(fn);
+    return () => {
+      this.tamperListeners.delete(fn);
     };
   }
 
@@ -128,6 +137,11 @@ export class BoardStore {
       case "action": {
         if (!isObject(data) || typeof data.run_id !== "string") return;
         for (const fn of [...this.actionListeners]) fn(data as unknown as ActionEvent);
+        return;
+      }
+      case "tamper": {
+        if (!isObject(data) || typeof data.event !== "string" || typeof data.at !== "string") return;
+        for (const fn of [...this.tamperListeners]) fn(data as TamperEvent);
         return;
       }
       default:

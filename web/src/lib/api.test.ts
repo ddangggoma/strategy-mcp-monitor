@@ -233,6 +233,12 @@ it("every endpoint calls its Appendix B method and path", async () => {
     [() => endpoints.mcpHistory(2, 6), "GET /api/mcps/2/history?hours=6"],
     [() => endpoints.actionDetail(2, 9), "GET /api/mcps/2/actions/9"],
     [() => endpoints.mcpActivity(20), "GET /api/mcp-activity?limit=20"],
+    [() => endpoints.sessionsCurrent(), "GET /api/sessions/current"],
+    [() => endpoints.sessionsHistory(7), "GET /api/sessions/history?days=7"],
+    [() => endpoints.sessionsHistory(30, 41), "GET /api/sessions/history?days=30&before_id=41"],
+    [() => endpoints.collectorsStatus(), "GET /api/sessions/collectors"],
+    [() => endpoints.tamperRecent(), "GET /api/tamper/recent"],
+    [() => endpoints.tamperRecent(50), "GET /api/tamper/recent?limit=50"],
     [() => endpoints.updateMcp(2, { maintenance: true }), "PUT /api/mcps/2"],
     [() => endpoints.manualAction(2, "restart"), "POST /api/mcps/2/actions/restart"],
     [
@@ -266,5 +272,5 @@ it("every endpoint calls its Appendix B method and path", async () => {
     expect(seen).toEqual([expected]);
   }
   // nothing exported is left untested
-  expect(Object.keys(endpoints).length).toBe(calls.length);
+  expect(Object.keys(endpoints).length).toBe(calls.length - 2); // two endpoints are called twice (with and without the optional argument)
 });

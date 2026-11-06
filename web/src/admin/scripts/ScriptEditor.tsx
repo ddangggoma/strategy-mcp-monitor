@@ -115,7 +115,10 @@ function CodeEditor({ value, onChange, ext, label, id, compact = false, ref, ...
   const invalid = aria["aria-invalid"] === true;
   const required = aria["aria-required"] === true;
   const contentAttributes = useMemo(() => {
-    const attrs: Record<string, string> = { "aria-label": label, "aria-invalid": String(invalid) };
+    // tabindex: the content is focusable already (contenteditable), but axe only counts tabindex or
+    // native controls, so a long line that scrolls the editor sideways read as a keyboard trap
+    // (scrollable-region-focusable). Tab order is unchanged.
+    const attrs: Record<string, string> = { "aria-label": label, "aria-invalid": String(invalid), tabindex: "0" };
     if (id) attrs.id = id;
     if (describedBy) attrs["aria-describedby"] = describedBy;
     if (required) attrs["aria-required"] = "true";

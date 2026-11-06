@@ -3,9 +3,9 @@
 import { http, HttpResponse } from "msw";
 import type { McpConfig, McpCreate, NoticeContent, ScriptKind, ScriptUpload, Settings, UserCreate, UserPatch } from "@/lib/api-types";
 import {
-  actionDetailFixture, activityFixture, adminUser, boardFixture, historyFixture, mcpDetailFixture, meFixture,
-  noticeDisplayFixture, noticeFixture, noticeVersionFixture, previewFixture, scriptFixture, scriptListFixture, scriptVersionFixture,
-  settingsFixture,
+  actionDetailFixture, activityFixture, adminUser, boardFixture, collectorFixture, currentSessionFixture, historyFixture,
+  mcpDetailFixture, meFixture, noticeDisplayFixture, noticeFixture, noticeVersionFixture, previewFixture, scriptFixture,
+  scriptListFixture, scriptVersionFixture, sessionsHistoryFixture, settingsFixture, tamperFixture,
 } from "./fixtures";
 
 const id = (v: string | readonly string[] | undefined) => Number(v);
@@ -66,6 +66,12 @@ export const handlers = [
     );
   }),
   http.get("/api/mcp-activity", () => HttpResponse.json(activityFixture())),
+
+  // sessions, tamper (both channels)
+  http.get("/api/sessions/current", () => HttpResponse.json({ ready: true, sessions: [currentSessionFixture()] })),
+  http.get("/api/sessions/history", () => HttpResponse.json(sessionsHistoryFixture())),
+  http.get("/api/sessions/collectors", () => HttpResponse.json([collectorFixture()])),
+  http.get("/api/tamper/recent", () => HttpResponse.json([tamperFixture()])),
 
   // scripts
   http.get("/api/mcps/:id/scripts", () => HttpResponse.json(scriptListFixture())),

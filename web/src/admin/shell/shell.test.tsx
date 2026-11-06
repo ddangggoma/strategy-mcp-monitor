@@ -14,6 +14,7 @@ import { session } from "@/lib/session";
 import { mcpDetailFixture, meFixture } from "../../../tests/msw/fixtures";
 import { server } from "../../../tests/msw/server";
 import { createTestQueryClient, fakeStream, renderWithProviders } from "../../../tests/render";
+import { NAV_ITEMS, navReason } from "./Nav";
 import { PlannedFeature } from "./PlannedFeature";
 import { warmChunks } from "../../../tests/warm";
 
@@ -33,7 +34,6 @@ const navLink = (name: string) =>
 it("shows planned and forbidden nav items disabled with reasons", async () => {
   await renderShell(meFixture("developer", "external"));
   const blocked: [string, DisabledReason][] = [
-    [copy.nav.sessions, "planned_sessions"],
     [copy.nav.logs, "planned_logs"],
     [copy.nav.audit, "planned_audit"],
     [copy.nav.users, "local_only"],
@@ -51,6 +51,20 @@ it("shows planned and forbidden nav items disabled with reasons", async () => {
   expect(navLink(copy.nav.mcps)).not.toHaveAttribute("aria-disabled");
 });
 
+it("opens the sessions nav item for developers on both channels and gates it for anonymous", async () => {
+  const { unmount } = await renderShell(meFixture("developer", "external"));
+  expect(navLink(copy.nav.sessions)).not.toHaveAttribute("aria-disabled");
+  expect(navLink(copy.nav.sessions)).toHaveAttribute("href", "/admin/sessions");
+  unmount();
+  await renderShell(meFixture("developer", "local"));
+  expect(navLink(copy.nav.sessions)).toHaveAttribute("href", "/admin/sessions");
+  const sessions = NAV_ITEMS.find((i) => i.key === "sessions");
+  if (!sessions) throw new Error("no sessions nav item");
+  expect(navReason(meFixture(null, "external"), sessions)).toBe("login");
+  expect(navReason(meFixture(null, "local"), sessions)).toBe("login");
+  expect(sessions.planned).toBeNull();
+});
+
 it("gives a local developer the admin-only reason and a local admin every link", async () => {
   const { unmount } = await renderShell(meFixture("developer", "local"));
   expect(navLink(copy.nav.users)).toHaveAccessibleDescription(copy.deny.admin_only);
@@ -59,7 +73,7 @@ it("gives a local developer the admin-only reason and a local admin every link",
   expect(navLink(copy.nav.users)).toHaveAttribute("href", "/admin/users");
   expect(navLink(copy.nav.notice)).toHaveAttribute("href", "/admin/notice");
   expect(navLink(copy.nav.settings)).toHaveAttribute("href", "/admin/settings");
-  expect(navLink(copy.nav.sessions)).toHaveAttribute("aria-disabled", "true"); // planned for everyone
+  expect(navLink(copy.nav.sessions)).toHaveAttribute("href", "/admin/sessions");
 });
 
 it("does not navigate from a disabled item", async () => {

@@ -29,6 +29,19 @@ const actionKind: Record<ActionKind, string> = { start: "시작", restart: "다�
 
 const LOCAL_ADDRESS = "http://127.0.0.1:8700";
 
+/** Windows logon types as the Korean Windows event viewer names them. */
+const LOGON_TYPES: Readonly<Record<number, string>> = {
+  2: "대화형",
+  3: "네트워크",
+  4: "일괄 작업",
+  5: "서비스",
+  7: "잠금 해제",
+  8: "네트워크 일반 텍스트",
+  9: "새 자격 증명",
+  10: "원격 대화형",
+  11: "캐시된 대화형",
+};
+
 export const copy = {
   common: {
     productName: "MCP Monitor",
@@ -222,11 +235,38 @@ export const copy = {
     failuresEmpty: "이 기간에는 로그인 실패가 없어요.",
     collectorOk: "수집 중",
     collectorDown: (error: string) => `수집 중단: ${error}`,
+    /** Stopped without an error text from the collector. */
+    collectorStopped: "수집 중단",
+    collectorsEmpty: "켜진 수집기가 없어요.",
+    /** The period buttons govern the history and the failures, not the current sessions. */
+    periodLabel: "기록 기간",
+    currentEmpty: "지금 접속한 세션이 없어요.",
+    disconnectedAt: "연결 끊긴 시각",
+    loadError: "불러오지 못했어요. 새로 고친 뒤 다시 시도하세요.",
+    moreError: "다음 기록을 불러오지 못했어요. 더 보기를 다시 누르세요.",
+    columns: {
+      kind: "종류",
+      end: "종료",
+      at: "시각",
+      workstation: "워크스테이션",
+      logonType: "로그온 유형",
+      status: "상태 코드",
+      collector: "수집기",
+      collectorState: "상태",
+      since: "바뀐 시각",
+    },
+    /** Windows logon type (event 4625) in words, with the number an operator looks up. */
+    logonType: (n: number) => {
+      const name = LOGON_TYPES[n];
+      return name ? `${name}(${n})` : String(n);
+    },
   },
 
   /** Bypass detection (Global Constraints `tamper` events); the dashboard card is `dashboard.bypassEvents`. */
   tamper: {
     empty: "최근 우회 탐지 이벤트가 없어요.",
+    /** The Windows session an event is about. */
+    session: (id: number) => `세션 ${id}`,
     events: {
       agent_exited: "세션 에이전트 종료",
       agent_unresponsive: "세션 에이전트 응답 없음",

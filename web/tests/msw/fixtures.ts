@@ -1,9 +1,9 @@
 // Typed response builders shared by every component test. Values follow web/src/lib/api-types.ts
 // (server code is the source); later tasks override per test with server.use(...).
 import type {
-  ActionDetail, ActionRecord, AdminUser, Board, BoardItem, Channel, McpActivity, McpDetail, McpHistory, McpState,
+  ActionDetail, ActionRecord, AdminUser, Board, BoardItem, Channel, CollectorStatus, CurrentSession, LogonFailure, McpActivity, McpDetail, McpHistory, McpState,
   Me, Notice, NoticeDisplayContent, NoticeVersionSummary, RdpSession, RetentionPreview, Role, ScriptContent, ScriptKind, ScriptListItem,
-  ScriptVersion, Settings, UserSummary,
+  ScriptVersion, SessionConnection, SessionsHistory, Settings, TamperEvent, UserSummary,
 } from "@/lib/api-types";
 import type { SseEvent } from "@/lib/sse";
 
@@ -75,6 +75,80 @@ export function rdpSession(p: Partial<RdpSession> = {}): RdpSession {
     first_seen_device: false,
     ...p,
   };
+}
+
+/** GET /api/sessions/current row: an active RDP session (matches rdpSession's defaults). */
+export function currentSessionFixture(p: Partial<CurrentSession> = {}): CurrentSession {
+  return {
+    session_id: 2,
+    user: "hong",
+    domain: "CORP",
+    state: "active",
+    client_name: "HONG-PC",
+    client_ip: "10.0.3.21",
+    protocol: "rdp",
+    logon_at: NOW,
+    connected_at: NOW,
+    disconnected_at: null,
+    idle_sec: 0,
+    connection_id: 1,
+    ...p,
+  };
+}
+
+/** One connection of the history: still connected, nothing first-seen, no notice display. */
+export function connectionFixture(p: Partial<SessionConnection> = {}): SessionConnection {
+  return {
+    id: 1,
+    session_id: 2,
+    user: "hong",
+    domain: "CORP",
+    client_name: "HONG-PC",
+    client_ip: "10.0.3.21",
+    reverse_dns: null,
+    client_build: 26100,
+    protocol: "rdp",
+    resolution: "1920x1080@32",
+    kind: "logon",
+    logon_at: NOW,
+    connected_at: NOW,
+    ended_at: null,
+    end_reason: null,
+    first_seen_ip: false,
+    first_seen_device: false,
+    notice: null,
+    ...p,
+  };
+}
+
+export function failureFixture(p: Partial<LogonFailure> = {}): LogonFailure {
+  return {
+    id: 1,
+    at: NOW,
+    user: "hong",
+    domain: "CORP",
+    client_ip: "192.0.2.10",
+    workstation: "HONG-PC",
+    logon_type: 10,
+    status: "0xc000006d",
+    sub_status: "0xc000006a",
+    source: "eventlog:4625",
+    ...p,
+  };
+}
+
+/** One page: a single connection, no failures, no next page. */
+export function sessionsHistoryFixture(p: Partial<SessionsHistory> = {}): SessionsHistory {
+  return { connections: [connectionFixture()], failures: [], next_before_id: null, ...p };
+}
+
+export function collectorFixture(p: Partial<CollectorStatus> = {}): CollectorStatus {
+  return { name: "wts", ok: true, error: null, since: NOW, ...p };
+}
+
+/** A tamper record as TamperMonitor.report() writes it (KST time, event, the event's own fields). */
+export function tamperFixture(p: Partial<TamperEvent> = {}): TamperEvent {
+  return { at: NOW, event: "agent_exited", session_id: 2, user: "CORP\\hong", pid: 4100, exit_code: 1, restarts: 0, ...p };
 }
 
 export function mcpDetailFixture(p: Partial<McpDetail> = {}): McpDetail {

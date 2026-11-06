@@ -1,12 +1,12 @@
 // One hook per GET (plan Appendix B) plus the shared mutations. Local-only reads run only when the
 // policy mirror allows them (`can(me, action)`): on the external channel they are never requested,
 // so a 404 there is never mistaken for "nothing here" (Global Constraints).
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { McpConfig, McpDetail, ScriptKind } from "@/lib/api-types";
 import * as ep from "@/lib/endpoints";
 import { can, type Action } from "@/lib/permissions";
 import { useSession } from "@/lib/session";
-import { qk } from "./query-keys";
+import { TAMPER_LIMIT, qk } from "./query-keys";
 
 export interface QueryGate {
   /** Extra condition from the caller (a dialog is open, a tab is selected…); default true. */
@@ -54,6 +54,44 @@ export function useMcpActivity(gate: QueryGate = {}) {
     queryKey: qk.activity,
     queryFn: () => ep.mcpActivity(ACTIVITY_LIMIT),
     enabled: useAllowed("view_mcp_history", gate),
+  });
+}
+
+/** Remote desktop sessions now, disconnected ones included (the sessions screen). */
+export function useSessionsCurrent(gate: QueryGate = {}) {
+  return useQuery({
+    queryKey: qk.sessionsCurrent,
+    queryFn: ep.sessionsCurrent,
+    enabled: useAllowed("view_session_history", gate),
+  });
+}
+
+/**
+ * Connection history of the last `days`, one page per "더 보기" (cursor `before_id`); the logon
+ * failures come with the first page. Switching the period keeps the previous one on screen until
+ * the new one arrives.
+ */
+export function useSessionsHistory(days: number, gate: QueryGate = {}) {
+  return useInfiniteQuery({
+    queryKey: qk.sessionsHistory(days),
+    queryFn: ({ pageParam }) => ep.sessionsHistory(days, pageParam),
+    initialPageParam: undefined as number | undefined,
+    getNextPageParam: (p) => p.next_before_id ?? undefined,
+    enabled: useAllowed("view_session_history", gate),
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useCollectors(gate: QueryGate = {}) {
+  return useQuery({ queryKey: qk.collectors, queryFn: ep.collectorsStatus, enabled: useAllowed("view_session_history", gate) });
+}
+
+/** Newest first; SSE `tamper` events are put in front by connectLive (at most TAMPER_LIMIT). */
+export function useTamperRecent(gate: QueryGate = {}) {
+  return useQuery({
+    queryKey: qk.tamper,
+    queryFn: () => ep.tamperRecent(TAMPER_LIMIT),
+    enabled: useAllowed("view_logs", gate),
   });
 }
 

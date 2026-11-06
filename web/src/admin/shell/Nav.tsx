@@ -22,7 +22,7 @@ import type { Me } from "@/lib/api-types";
 import { denyReason, type Action } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 
-export type NavTo = "/admin" | "/admin/mcps" | "/admin/users" | "/admin/notice" | "/admin/settings";
+export type NavTo = "/admin" | "/admin/mcps" | "/admin/sessions" | "/admin/users" | "/admin/notice" | "/admin/settings";
 export type PlannedReason = Extract<DisabledReason, `planned_${string}`>;
 
 export interface NavItem {
@@ -41,7 +41,8 @@ export interface NavItem {
 export const NAV_ITEMS: readonly NavItem[] = [
   { key: "dashboard", icon: LayoutDashboardIcon, to: "/admin", gate: null, planned: null },
   { key: "mcps", icon: ServerIcon, to: "/admin/mcps", gate: null, planned: null },
-  { key: "sessions", icon: MonitorSmartphoneIcon, to: null, gate: null, planned: "planned_sessions" },
+  // both channels (V31); `planned_sessions` stays in DisabledReason but is no longer used
+  { key: "sessions", icon: MonitorSmartphoneIcon, to: "/admin/sessions", gate: "view_session_history", planned: null },
   { key: "logs", icon: ScrollTextIcon, to: null, gate: null, planned: "planned_logs" },
   { key: "audit", icon: ShieldCheckIcon, to: null, gate: null, planned: "planned_audit" },
   { key: "users", icon: UsersIcon, to: "/admin/users", gate: "manage_users", planned: null, groupStart: true },

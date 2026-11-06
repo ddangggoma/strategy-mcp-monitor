@@ -9,6 +9,7 @@ const PAGES = [
   "/admin/mcps/{id}?tab=settings",
   "/admin/mcps/{id}?tab=history",
   "/admin/mcps/{id}?tab=scripts",
+  "/admin/sessions",
   "/admin/users",
   "/admin/settings",
   "/admin/notice",
@@ -59,10 +60,10 @@ test("keyboard-only: command palette opens with Ctrl+K, skips blocked screens, a
   const dialog = page.getByRole("dialog", { name: copy.common.commandTitle });
   await page.keyboard.press("Control+k");
   await expect(dialog).toBeVisible();
-  await page.keyboard.type(copy.nav.sessions);
-  const sessions = dialog.getByRole("option", { name: new RegExp(copy.nav.sessions) });
-  await expect(sessions).toHaveAttribute("aria-disabled", "true");
-  await expect(sessions).toContainText(copy.deny.planned_sessions); // the reason, readable (not dimmed text)
+  await page.keyboard.type(copy.nav.audit);
+  const audit = dialog.getByRole("option", { name: new RegExp(copy.nav.audit) });
+  await expect(audit).toHaveAttribute("aria-disabled", "true");
+  await expect(audit).toContainText(copy.deny.planned_audit); // the reason, readable (not dimmed text)
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(`${state.localUrl}/admin/mcps`); // a blocked screen does not open
 

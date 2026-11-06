@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { item, rdpSession } from "../../tests/msw/fixtures";
+import { item, rdpSession, tamperFixture } from "../../tests/msw/fixtures";
 import type { ActionEvent } from "./api-types";
 import { BoardStore, STATE_SEVERITY, sortBoard, useBoard } from "./board-store";
 
@@ -154,4 +154,25 @@ it("orders every state by U17 and does not mutate its input", () => {
   expect(sorted.map((i) => i.id)).toEqual([3, 1, 2]); // case-insensitive name, then id
   expect(input.map((i) => i.id)).toEqual([1, 2, 3]);
   expect(sortBoard(new Map(input.map((i) => [i.id, i])).values()).map((i) => i.id)).toEqual([3, 1, 2]);
+});
+
+it("routes tamper events to listeners", () => {
+  const s = new BoardStore(); const fn = vi.fn(); s.onTamper(fn);
+  s.apply({ event: "tamper", data: JSON.stringify(tamperFixture({ event: "log_cleared" })) });
+  expect(fn).toHaveBeenCalledWith(tamperFixture({ event: "log_cleared" }));
+});
+
+it("ignores malformed tamper events, keeps the snapshot and stops after unsubscribe", () => {
+  const s = new BoardStore(); const fn = vi.fn(); const off = s.onTamper(fn);
+  const before = s.getSnapshot();
+  s.apply({ event: "tamper", data: "not json" });
+  s.apply({ event: "tamper", data: JSON.stringify({ at: "2026-11-04T13:00:00.000+09:00" }) }); // no event name
+  s.apply({ event: "tamper", data: JSON.stringify({ event: "log_cleared" }) }); // no time
+  expect(fn).not.toHaveBeenCalled();
+  s.apply({ event: "tamper", data: JSON.stringify(tamperFixture()) });
+  expect(fn).toHaveBeenCalledTimes(1);
+  expect(s.getSnapshot()).toBe(before); // tamper events are not board state
+  off();
+  s.apply({ event: "tamper", data: JSON.stringify(tamperFixture()) });
+  expect(fn).toHaveBeenCalledTimes(1);
 });

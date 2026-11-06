@@ -11,6 +11,7 @@ const ADMIN_PAGES = [
   "/admin/mcps/{id}?tab=history",
   "/admin/mcps/{id}?tab=scripts",
   "/admin/mcps/new",
+  "/admin/sessions",
   "/admin/users",
   "/admin/settings",
   "/admin/notice",

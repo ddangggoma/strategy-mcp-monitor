@@ -2,9 +2,10 @@
 // Local-only routes (marked) must not be called on the external channel (Global Constraints).
 import { api } from "./api";
 import type {
-  ActionDetail, AdminUser, Board, McpActivity, McpConfig, McpCreate, McpDetail, McpHistory, Me, Notice,
+  ActionDetail, AdminUser, Board, CollectorStatus, CurrentSession, McpActivity, McpConfig, McpCreate, McpDetail, McpHistory, Me, Notice,
   NoticeContent, NoticeVersionSummary, RetentionPreview, ScriptContent, ScriptKind, ScriptListItem,
-  ScriptSummary, ScriptUpload, ScriptVersion, ScriptVersionContent, SessionUser, Settings, UserCreate, UserPatch,
+  ScriptSummary, ScriptUpload, ScriptVersion, ScriptVersionContent, SessionsHistory, SessionUser, Settings, TamperEvent,
+  UserCreate, UserPatch,
 } from "./api-types";
 
 // ---- auth (both channels) ------------------------------------------------------------
@@ -36,6 +37,16 @@ export const updateMcp = (id: number, patch: Partial<McpConfig>) =>
   api<McpDetail>(`/api/mcps/${id}`, { method: "PUT", body: patch });
 export const manualAction = (id: number, kind: ScriptKind) =>
   api<{ run_id: string }>(`/api/mcps/${id}/actions/${kind}`, { method: "POST" });
+
+// ---- remote desktop sessions, tamper events (both channels) ---------------------------
+
+export const sessionsCurrent = () => api<{ ready: boolean; sessions: CurrentSession[] }>("/api/sessions/current");
+/** Connections newest first; `beforeId` (the previous page's `next_before_id`) pages on. */
+export const sessionsHistory = (days: number, beforeId?: number) =>
+  api<SessionsHistory>("/api/sessions/history", { query: beforeId === undefined ? { days } : { days, before_id: beforeId } });
+export const collectorsStatus = () => api<CollectorStatus[]>("/api/sessions/collectors");
+export const tamperRecent = (limit?: number) =>
+  api<TamperEvent[]>("/api/tamper/recent", limit === undefined ? {} : { query: { limit } });
 
 // ---- MCP registration, ownership, scripts (Local) ------------------------------------
 

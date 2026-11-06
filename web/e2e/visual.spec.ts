@@ -1,12 +1,12 @@
 // Visual baselines, run in both the chromium-dark and chromium-light projects. Values that change
 // from run to run (times, latency, sparklines, countdowns, uptime, activity rows) carry
 // data-volatile and are masked (F32: earlier specs leave history behind).
-// A mask hides values but not how many rows there are, so the two reads whose length depends on
-// what earlier specs did (recent activity, notice versions) are answered with fixed data here: the
-// baselines are the same whether this spec runs alone or after the whole suite. The MCP's port is
-// fixed too (backend.ts MCP_PORT).
+// A mask hides values but not how many rows there are, so the reads whose length depends on what
+// earlier specs (or this PC) did (recent activity, notice versions, tamper events) are answered with
+// fixed data here: the baselines are the same whether this spec runs alone or after the whole
+// suite. The MCP's port is fixed too (backend.ts MCP_PORT).
 import type { Page, Route } from "@playwright/test";
-import type { McpActivity, Notice, NoticeVersionSummary } from "../src/lib/api-types";
+import type { McpActivity, Notice, NoticeVersionSummary, TamperEvent } from "../src/lib/api-types";
 import { MCP_NAME, copy, expect, test, type BackendState, type Who } from "./fixtures";
 
 const AT = "2026-11-06T09:00:00.000+09:00";
@@ -27,6 +27,11 @@ function activity(s: BackendState): McpActivity {
 /** A fresh backend's notice: the built-in text, no saved versions. */
 const NOTICE: Notice = { ...copy.notice.builtIn, version: 0, created_at: null, author: null, reverted_from: null };
 const NOTICE_VERSIONS: NoticeVersionSummary[] = [];
+/** Tamper events depend on what this PC and earlier specs did (log files, agents): fixed here. */
+const TAMPER: TamperEvent[] = [
+  { at: AT, event: "agent_exited", session_id: 3, user: "CORP\\kim", pid: 4100, exit_code: 1, restarts: 0 },
+  { at: AT, event: "log_file_truncated", file: "2026-11-06.jsonl", before: 4096, after: 0 },
+];
 
 async function fixHistoryReads(page: Page, s: BackendState): Promise<void> {
   // matched on the path alone: the activity read carries ?limit=
@@ -38,6 +43,7 @@ async function fixHistoryReads(page: Page, s: BackendState): Promise<void> {
   await fixed("/api/mcp-activity", activity(s));
   await fixed("/api/notice", NOTICE);
   await fixed("/api/notice/versions", NOTICE_VERSIONS);
+  await fixed("/api/tamper/recent", TAMPER);
 }
 
 interface Screen {

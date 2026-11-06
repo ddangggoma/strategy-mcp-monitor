@@ -8,6 +8,7 @@ const chunks = {
   login: () => import("@/admin/auth/LoginPage"),
   setup: () => import("@/admin/auth/SetupPage"),
   dashboard: () => import("@/admin/dashboard/DashboardPage"),
+  sessions: () => import("@/admin/sessions/SessionsPage"),
   mcpList: () => import("@/admin/mcps/McpListPage"),
   mcpCreate: () => import("@/admin/mcps/McpCreatePage"),
   mcpDetail: () => import("@/admin/mcps/McpDetailPage"),

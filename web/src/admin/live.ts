@@ -4,10 +4,10 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { createContext, createElement, useContext, useSyncExternalStore, type ReactNode } from "react";
 import type { ActionTracker } from "@/lib/action-tracker";
-import type { BoardItem, McpDetail } from "@/lib/api-types";
+import type { BoardItem, McpDetail, TamperEvent } from "@/lib/api-types";
 import type { BoardState, BoardStore } from "@/lib/board-store";
 import type { BoardStreamClient, StreamStatus } from "@/lib/board-stream";
-import { qk } from "./query-keys";
+import { TAMPER_LIMIT, qk } from "./query-keys";
 
 export interface LiveValue {
   store: BoardStore;
@@ -43,7 +43,9 @@ function withLive(detail: McpDetail, live: BoardItem | null): McpDetail {
  * (all items) and `mcp_removed` apart without hooking into the parser:
  * - changed item → its `live` in `qk.mcps` and `qk.mcp(id)`; an id the list does not know → refetch the list;
  * - removed id → dropped from the list, `qk.mcp(id)` invalidated;
- * - `action` event → that MCP's history windows and the activity feed are refetched.
+ * - `action` event → that MCP's history windows and the activity feed are refetched;
+ * - sessions changed (`sessions` event, or a `board` event that carries them) → current sessions refetched;
+ * - `tamper` event → put in front of the recent tamper list (at most TAMPER_LIMIT); a reconnect refetches it.
  * Returns the unsubscribe function.
  */
 export function connectLive(store: BoardStore, qc: QueryClient): () => void {
@@ -51,6 +53,7 @@ export function connectLive(store: BoardStore, qc: QueryClient): () => void {
 
   const offState = store.subscribe(() => {
     const next = store.getSnapshot();
+    if (next.sessions !== prev.sessions) void qc.invalidateQueries({ queryKey: qk.sessionsCurrent, exact: true });
     if (next.items === prev.items) {
       prev = next;
       return; // status or sessions only
@@ -81,8 +84,19 @@ export function connectLive(store: BoardStore, qc: QueryClient): () => void {
     void qc.invalidateQueries({ queryKey: qk.activity });
   });
 
+  const offTamper = store.onTamper((e) => {
+    // not loaded yet: leave it to the first read, which includes this event
+    qc.setQueryData<TamperEvent[]>(qk.tamper, (list) => (list ? [e, ...list].slice(0, TAMPER_LIMIT) : list));
+  });
+
+  const offReconnected = store.onReconnected(() => {
+    void qc.invalidateQueries({ queryKey: qk.tamper, exact: true });
+  });
+
   return () => {
     offState();
     offAction();
+    offTamper();
+    offReconnected();
   };
 }

@@ -79,6 +79,10 @@ it("formats session numbers in words", () => {
   expect(copy.sessions.ackIn(125_000)).toBe("2분 5초 만에 확인");
   expect(copy.sessions.days(30)).toContain("30일");
   expect(copy.sessions.collectorDown("access denied")).toContain("access denied");
+  expect(copy.sessions.logonType(10)).toBe("원격 대화형(10)");
+  expect(copy.sessions.logonType(3)).toBe("네트워크(3)");
+  expect(copy.sessions.logonType(99)).toBe("99"); // unknown types keep the number alone
+  expect(copy.tamper.session(3)).toBe("세션 3");
 });
 
 it("tells the notice window what happened in display mode", () => {

@@ -73,6 +73,92 @@ export interface Board {
   sessions?: RdpSession[];
 }
 
+// ---- sessions screen (both channels, view_session_history) and tamper events --------
+
+/** GET /api/sessions/current: every watched session, disconnected ones included (`user` without the domain). */
+export interface CurrentSession {
+  session_id: number;
+  user: string;
+  domain: string | null;
+  /** `connected`: a client at the logon screen, not yet signed in. */
+  state: "active" | "locked" | "disconnected" | "connected";
+  client_name: string | null;
+  client_ip: string | null;
+  protocol: "rdp" | "console" | "other";
+  logon_at: string | null;
+  connected_at: string | null;
+  disconnected_at: string | null;
+  idle_sec: number | null;
+  connection_id: number | null;
+}
+/** The latest notice display of one connection. `ack_ms`: last showing to the button. */
+export interface ConnectionNotice {
+  version: number;
+  attempts: number;
+  first_shown_at: string | null;
+  acknowledged_at: string | null;
+  ack_ms: number | null;
+  /** null: still open. */
+  closed_reason: "acknowledged" | "superseded" | "logoff" | "service_restart" | null;
+}
+export interface SessionConnection {
+  id: number;
+  session_id: number;
+  user: string;
+  domain: string | null;
+  client_name: string | null;
+  client_ip: string | null;
+  reverse_dns: string | null;
+  client_build: number | null;
+  protocol: "rdp" | "console" | "other";
+  resolution: string | null;
+  kind: "logon" | "reconnect" | "existing";
+  logon_at: string | null;
+  connected_at: string;
+  /** null: still connected. */
+  ended_at: string | null;
+  end_reason: "disconnect" | "logoff" | "reconnected" | "service_stop" | null;
+  first_seen_ip: boolean;
+  first_seen_device: boolean;
+  notice: ConnectionNotice | null;
+}
+export interface LogonFailure {
+  id: number;
+  at: string;
+  user: string | null;
+  domain: string | null;
+  client_ip: string | null;
+  workstation: string | null;
+  logon_type: number | null;
+  /** NTSTATUS as the event log writes it ("0xc000006d"). */
+  status: string | null;
+  sub_status: string | null;
+  source: string;
+}
+/** One page of GET /api/sessions/history; `failures` come with the first page only. */
+export interface SessionsHistory {
+  connections: SessionConnection[];
+  failures: LogonFailure[];
+  next_before_id: number | null;
+}
+export interface CollectorStatus {
+  name: string;
+  ok: boolean;
+  error: string | null;
+  /** When `ok`/`error` last changed. */
+  since: string;
+}
+export type TamperEventName =
+  | "agent_exited" | "agent_unresponsive" | "agent_restart_storm" | "agent_impersonation" | "notice_token_misuse"
+  | "script_hash_mismatch" | "script_file_changed" | "script_file_missing" | "log_file_removed" | "log_file_truncated"
+  | "audit_policy_changed" | "log_cleared" | "audit_config_changed";
+/** GET /api/tamper/recent row and SSE `tamper` (authenticated streams only); other fields depend on the event. */
+export interface TamperEvent {
+  at: string;
+  event: TamperEventName;
+  [field: string]: unknown;
+}
+
 export interface McpConfig {
   name: string;
   host: string;

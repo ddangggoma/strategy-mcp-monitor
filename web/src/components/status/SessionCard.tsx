@@ -36,7 +36,7 @@ function formatIdle(sec: number | null): string {
 }
 
 /** A fact worth a second look (first time this IP / device was seen): icon + words, neutral ink. */
-function Badge({ icon: Icon, children }: { icon: LucideIcon; children: string }) {
+export function FactBadge({ icon: Icon, children }: { icon: LucideIcon; children: string }) {
   return (
     <span className="inline-flex items-center gap-1 rounded-sm border border-border-strong px-1.5 text-xs font-medium leading-5">
       <Icon aria-hidden="true" className="size-3.5 shrink-0" />
@@ -45,16 +45,20 @@ function Badge({ icon: Icon, children }: { icon: LucideIcon; children: string })
   );
 }
 
-function Notice({ ack }: { ack: boolean | null }) {
-  if (ack === null) return <span className="text-fg-muted">{copy.sessions.noticeUnknown}</span>;
-  if (ack) return <>{copy.sessions.noticeAcked}</>;
-  // not acknowledged yet: the one caution on the card (amber = the suspect hue, the house warning colour)
+/** The one caution of a session row or card (amber = the suspect hue, the house warning colour): icon + words. */
+export function Caution({ children }: { children: string }) {
   return (
     <span className="inline-flex items-center gap-1 font-medium text-state-suspect-fg">
       <TriangleAlertIcon aria-hidden="true" className="size-3.5 shrink-0 text-state-suspect" />
-      {copy.sessions.noticePending}
+      {children}
     </span>
   );
+}
+
+function Notice({ ack }: { ack: boolean | null }) {
+  if (ack === null) return <span className="text-fg-muted">{copy.sessions.noticeUnknown}</span>;
+  if (ack) return <>{copy.sessions.noticeAcked}</>;
+  return <Caution>{copy.sessions.noticePending}</Caution>; // not acknowledged yet
 }
 
 /**
@@ -83,8 +87,8 @@ export function SessionCard({ session, className }: { session: RdpSession; class
             </span>
             {badges ? (
               <span className="flex flex-wrap gap-1.5">
-                {session.first_seen_ip ? <Badge icon={GlobeIcon}>{copy.sessions.firstSeenIp}</Badge> : null}
-                {session.first_seen_device ? <Badge icon={MonitorIcon}>{copy.sessions.firstSeenDevice}</Badge> : null}
+                {session.first_seen_ip ? <FactBadge icon={GlobeIcon}>{copy.sessions.firstSeenIp}</FactBadge> : null}
+                {session.first_seen_device ? <FactBadge icon={MonitorIcon}>{copy.sessions.firstSeenDevice}</FactBadge> : null}
               </span>
             ) : null}
           </dd>

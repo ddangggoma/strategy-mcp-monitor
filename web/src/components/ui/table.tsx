@@ -1,11 +1,19 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
 
-function Table({ className, ...props }: React.ComponentProps<"table">) {
+function Table({
+  className,
+  containerProps,
+  ...props
+}: React.ComponentProps<"table"> & {
+  /** On the scroll container, e.g. tabIndex so a keyboard can scroll a wide table sideways. */
+  containerProps?: React.ComponentProps<"div">
+}) {
   return (
     <div
       data-slot="table-container"
-      className="relative w-full overflow-x-auto"
+      {...containerProps}
+      className={cn("relative w-full overflow-x-auto", containerProps?.className)}
     >
       <table
         data-slot="table"

@@ -1,6 +1,6 @@
-import type { McpDetail } from "@/lib/api-types";
+import type { McpDetail, TamperEvent } from "@/lib/api-types";
 import { BoardStore } from "@/lib/board-store";
-import { boardEvent, item, mcpDetailFixture } from "../../tests/msw/fixtures";
+import { boardEvent, item, mcpDetailFixture, rdpSession, tamperFixture } from "../../tests/msw/fixtures";
 import { createTestQueryClient } from "../../tests/render";
 import { connectLive } from "./live";
 import { qk } from "./query-keys";
@@ -75,4 +75,35 @@ it("status changes do not touch the cache, and unsubscribing stops the mirror", 
   off();
   store.apply(mcpEvent(1, "FAILED", "calc"));
   expect(qc.getQueryData<McpDetail[]>(qk.mcps)).toBe(before);
+});
+
+it("a sessions change refetches the current sessions; a board event without sessions does not", () => {
+  const { store, invalidate } = setup();
+  store.apply(boardEvent({ mcps: [item(1, "HEALTHY", "calc")] }));
+  expect(invalidate).not.toHaveBeenCalledWith({ queryKey: qk.sessionsCurrent, exact: true });
+  store.apply({ event: "sessions", data: JSON.stringify({ sessions: [rdpSession()] }) });
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: qk.sessionsCurrent, exact: true });
+  invalidate.mockClear();
+  store.apply(boardEvent({ mcps: [item(1, "HEALTHY", "calc")], sessions: [] }));
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: qk.sessionsCurrent, exact: true });
+});
+
+it("a tamper event goes to the front of the recent list, which keeps at most 50", () => {
+  const { store, qc } = setup();
+  store.apply({ event: "tamper", data: JSON.stringify(tamperFixture({ event: "log_cleared" })) });
+  expect(qc.getQueryData(qk.tamper)).toBeUndefined(); // not loaded yet: the first read brings it
+  qc.setQueryData<TamperEvent[]>(qk.tamper, Array.from({ length: 50 }, (_, i) => tamperFixture({ session_id: i })));
+  store.apply({ event: "tamper", data: JSON.stringify(tamperFixture({ event: "log_cleared" })) });
+  const list = qc.getQueryData<TamperEvent[]>(qk.tamper);
+  expect(list).toHaveLength(50);
+  expect(list?.[0]?.event).toBe("log_cleared");
+  expect(list?.[49]?.session_id).toBe(48);
+});
+
+it("a reconnect refetches the tamper list (events may have been missed)", () => {
+  const { store, invalidate } = setup();
+  store.setStatus("open");
+  store.setStatus("reconnecting");
+  store.setStatus("open");
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: qk.tamper, exact: true });
 });

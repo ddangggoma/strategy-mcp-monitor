@@ -21,6 +21,7 @@ import { session } from "@/lib/session";
 import { AppShell } from "./shell/AppShell";
 import { LiveProvider, type LiveValue } from "./live";
 import { qk } from "./query-keys";
+import { parseDays, type SessionDays } from "./sessions/period";
 
 export interface RouterContext {
   qc: QueryClient;
@@ -29,6 +30,10 @@ export interface RouterContext {
 export interface LoginSearch {
   redirect?: string;
   email?: string;
+}
+/** Sessions screen period (days); 7 when absent. */
+export interface SessionsSearch {
+  days?: SessionDays;
 }
 export type McpTab = "settings" | "scripts" | "history";
 export interface McpDetailSearch {
@@ -151,6 +156,13 @@ const mcpDetailRoute = createRoute({
   component: lazyRouteComponent(() => import("./mcps/McpDetailPage"), "McpDetailPage"),
 });
 
+const sessionsRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: "/admin/sessions",
+  validateSearch: (s: Record<string, unknown>): SessionsSearch => ({ days: parseDays(s.days) }),
+  component: lazyRouteComponent(() => import("./sessions/SessionsPage"), "SessionsPage"),
+});
+
 const usersRoute = createRoute({
   getParentRoute: () => authedRoute,
   path: "/admin/users",
@@ -177,6 +189,7 @@ const routeTree = rootRoute.addChildren([
     mcpListRoute,
     mcpCreateRoute,
     mcpDetailRoute,
+    sessionsRoute,
     usersRoute,
     settingsRoute,
     noticeRoute,
