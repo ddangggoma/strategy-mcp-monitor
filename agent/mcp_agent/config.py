@@ -10,12 +10,16 @@ from pathlib import Path
 from typing import Literal
 
 TOKEN_ENV = "MCPMON_AGENT_TOKEN"
+SERVER_KEY_ENV = "MCPMON_AGENT_SERVER_KEY"
+SERVER_KEY_BYTES = 32
 
 
 @dataclass(frozen=True)
 class AgentConfig:
     server: str
     token: str
+    server_key: str
+    """Hex key the server proves on every answer (I1)."""
     dialog: Literal["edge", "print"]
     url_file: Path | None
     edge_path: str | None
@@ -37,19 +41,31 @@ def _parser() -> argparse.ArgumentParser:
 def parse_args(argv: list[str], environ: MutableMapping[str, str]) -> AgentConfig:
     # Take the token out first, whatever happens next, so children (Edge) never inherit it (V17).
     token = environ.pop(TOKEN_ENV, None)
+    server_key = environ.pop(SERVER_KEY_ENV, None)
     parser = _parser()
     args = parser.parse_args(argv)
     if not token:
         parser.error(f"{TOKEN_ENV} is not set")
+    if not _valid_key(server_key):
+        parser.error(f"{SERVER_KEY_ENV} must be {SERVER_KEY_BYTES} bytes in hex")
+    assert server_key is not None
     if args.dialog == "print" and args.url_file is None:
         parser.error("--dialog print needs --url-file")
     local = environ.get("LOCALAPPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Local")
     return AgentConfig(
         server=args.server.rstrip("/"),
         token=token,
+        server_key=server_key,
         dialog=args.dialog,
         url_file=args.url_file,
         edge_path=args.edge_path,
         profile_dir=args.profile_dir or Path(local) / "mcp-monitor" / "notice-edge",
         unreachable_exit_sec=args.unreachable_exit_sec,
     )
+
+
+def _valid_key(key: str | None) -> bool:
+    try:
+        return key is not None and len(bytes.fromhex(key)) == SERVER_KEY_BYTES
+    except ValueError:
+        return False

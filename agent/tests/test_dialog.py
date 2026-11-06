@@ -20,9 +20,10 @@ class FakeProc:
 
 class FakeOps:
     """Win32 side of EdgeWindow. ``windows``: hwnd -> owner pid (captioned "MCP Monitor") or
-    (owner pid, caption); ``trees``: pid -> live descendants; ``alive``: live pids."""
+    (owner pid, caption); ``trees``: pid -> live descendants; ``alive``: live pids; ``foreign``:
+    pids NOT running on our notice profile in this session (M4)."""
     def __init__(self):
-        self.windows, self.trees, self.alive, self.placed = {}, {}, set(), []
+        self.windows, self.trees, self.alive, self.placed, self.foreign = {}, {}, set(), [], set()
     def edge_windows(self):
         return {h: v if isinstance(v, tuple) else (v, "MCP Monitor") for h, v in self.windows.items()}
     def process_tree(self, pid):
@@ -33,6 +34,8 @@ class FakeOps:
         return hwnd in self.windows
     def pid_alive(self, pid):
         return pid in self.alive
+    def ours(self, pid):
+        return pid not in self.foreign
 
 # C1/F10: the window is found by title across msedge processes, and "closed by the user" means
 # that window is gone, not that the launched pid exited. Plan test adapted accordingly.
@@ -70,7 +73,7 @@ import time  # noqa: E402
 import winreg  # noqa: E402
 
 from mcp_agent import win32  # noqa: E402
-from mcp_agent.dialog import find_edge, taskkill_tree  # noqa: E402
+from mcp_agent.dialog import Win32WindowOps, find_edge, taskkill_tree  # noqa: E402
 
 
 def wait_until(pred, timeout=5.0):
@@ -129,7 +132,7 @@ def test_a_tree_window_is_ours_whatever_its_caption_but_others_need_the_title():
     w = edge(ops, popen, retry_sec=0.01)
     w.open("u", 1)
     assert ops.placed == [556] and w.window_handle == 556  # empty captions (helper windows) are skipped
-    ops2 = FakeOps()
+    ops2 = FakeOps(); ops2.foreign = {900}
     w2 = edge(ops2, lambda argv, **kw: ops2.windows.update({554: (900, "Other site")}) or FakeProc(100), retry_sec=0.01)
     w2.open("u", 1)
     time.sleep(0.05)
@@ -309,6 +312,74 @@ def notice_page():
         httpd.shutdown(); httpd.server_close()
 
 
+# --- M4: notice windows are told apart by our profile, not by caption alone ---------------------
+
+def test_a_window_titled_like_ours_in_someone_elses_edge_is_never_adopted_or_killed():
+    """The user's own Edge (app/PWA) window titled "MCP Monitor" is not our notice window."""
+    ops, killed = FakeOps(), []
+    ops.foreign = {900}; ops.alive = {900}
+    def popen(argv, **kw):
+        ops.windows[555] = 900; p = FakeProc(100); p.code = 0; return p
+    w = edge(ops, popen, killed, retry_sec=0.01)
+    w.open("u", 1)
+    time.sleep(0.05)
+    assert ops.placed == [] and w.window_handle is None
+    w.close()
+    assert 900 not in killed
+
+
+def test_a_handed_off_window_of_our_profile_is_adopted_by_title():
+    ops = FakeOps()
+    def popen(argv, **kw):
+        ops.windows.update({555: 900, 556: (901, "Other")}); p = FakeProc(100); p.code = 0; return p
+    w = edge(ops, popen)
+    w.open("u", 1)
+    assert ops.placed == [555] and w.window_handle == 555
+
+
+def test_close_strays_kills_only_our_profiles_leftover_windows():
+    """X-3: a killed agent's notice window survives; the next agent closes it before showing its own."""
+    ops, killed = FakeOps(), []
+    ops.windows.update({777: 900, 778: (900, "MCP Monitor"), 779: 901, 780: (902, "Other")})
+    ops.foreign = {901}
+    w = edge(ops, lambda argv, **kw: FakeProc(100), killed)
+    w.close_strays()
+    assert killed == [900, 902]  # each of our profile's processes once; the foreign 901 is left alone
+
+
+def test_open_closes_leftover_windows_before_launching():
+    ops, order = FakeOps(), []  # kills and the launch, in order
+    ops.windows[777] = 900  # a stale notice window of a killed agent
+    def popen(argv, **kw):
+        order.append("launch"); ops.windows[555] = 100; return FakeProc(100)
+    w = edge(ops, popen, order)
+    w.open("u", 1)
+    assert order == [900, "launch"] and ops.placed == [555]
+
+
+def test_has_profile_matches_quoted_and_unquoted_paths():
+    from mcp_agent.dialog import has_profile
+    p = Path(r"C:\Users\A B\AppData\Local\mcp-monitor\notice-edge")
+    assert has_profile(r'"C:\Edge\msedge.exe" "--user-data-dir=C:\Users\A B\AppData\Local\mcp-monitor\notice-edge" --app=x', p)
+    assert has_profile(r'msedge.exe --type=renderer --user-data-dir="c:\users\a b\appdata\local\mcp-monitor\notice-edge"', p)
+    assert not has_profile(r'msedge.exe --user-data-dir=C:\Users\A B\AppData\Local\Microsoft\Edge\User Data', p)
+    assert not has_profile("msedge.exe", p)
+
+
+@pytest.mark.winlive
+def test_process_command_line_and_session_of_a_child():
+    marker = "mcp-monitor-cmdline-probe"
+    p = subprocess.Popen([os.sys.executable, "-c", "import time; time.sleep(30)", marker],
+                         creationflags=subprocess.CREATE_NO_WINDOW)
+    try:
+        line = win32.process_command_line(p.pid)
+        assert line is not None and marker in line and "time.sleep(30)" in line
+        assert win32.process_session_id(p.pid) == current_session_id()
+    finally:
+        p.kill(); p.wait(10)
+    assert win32.process_command_line(p.pid) is None  # gone
+
+
 def _desktop_locked() -> bool:
     """The lock screen (LockApp.exe) owns the foreground window while the workstation is locked."""
     hwnd = win32.foreground_window()
@@ -327,9 +398,9 @@ def test_real_edge_app_window_is_found_topmost_and_closed(tmp_path, notice_page)
         hwnd = w.window_handle
         ex_style = ctypes.WinDLL("user32").GetWindowLongW(ctypes.c_void_p(hwnd), -20)  # GWL_EXSTYLE
         assert win32.is_window(hwnd)
-        if not _desktop_locked():
-            # F06: on a locked desktop (unattended run) SetWindowPos succeeds but Edge's window keeps
-            # no WS_EX_TOPMOST (seen 2026-11-06, Edge 156); the rest of the flow is still exercised.
+        assert Win32WindowOps(tmp_path / "profile").ours(win32.window_pid(hwnd))  # M4: found by our profile
+        locked = _desktop_locked()
+        if not locked:
             assert ex_style & 0x8  # WS_EX_TOPMOST
         assert not w.closed_by_user()
         ctypes.WinDLL("user32").PostMessageW(ctypes.c_void_p(hwnd), 0x0010, 0, 0)  # WM_CLOSE, what the title bar X does
@@ -341,3 +412,7 @@ def test_real_edge_app_window_is_found_topmost_and_closed(tmp_path, notice_page)
         w.close()
     wait_until(lambda: not win32.is_window(second), 10)
     assert not w.closed_by_user()
+    if locked:
+        # F06: on a locked desktop (unattended run) SetWindowPos succeeds but Edge's window keeps no
+        # WS_EX_TOPMOST (seen 2026-11-06, Edge 156). The rest of the flow ran; say so instead of passing (M9).
+        pytest.skip("desktop locked: WS_EX_TOPMOST not checked (F06); find/close/reopen flow passed")

@@ -4,7 +4,13 @@ Every route authenticates with the per-launch ``X-Agent-Token`` header plus the 
 session, which the server resolves itself (``peer_of``); nothing the agent claims is trusted. A
 browser page cannot send the custom header cross-origin (no preflight is ever answered) and
 ``LocalHostGuard`` refuses rebound hosts. Errors: 401 ``login_required``, 403 ``forbidden``,
-422 ``validation`` only.
+422 ``validation``, and 503 ``unavailable`` when the peer cannot be resolved (M2: the agent retries;
+no tamper report).
+
+The other direction (I1): the agent sends a random ``X-Agent-Nonce`` with every request and
+accepts an answer only with ``X-Server-Proof`` = HMAC-SHA256 of that nonce under the key it was
+launched with (``AgentProofMiddleware``), so a process that grabs the port while the service is
+down cannot drive the agent.
 """
 from __future__ import annotations
 
@@ -13,10 +19,18 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Path, Query, Request, Response
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StrictBool, StrictInt
+from starlette.datastructures import Headers, MutableHeaders
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app.activity.agent_hub import AGENT_TOKEN_HEADER, AgentAuthError, AgentSlot
+from app.activity.agent_hub import (
+    AGENT_NONCE_HEADER,
+    AGENT_TOKEN_HEADER,
+    SERVER_PROOF_HEADER,
+    AgentAuthError,
+    AgentSlot,
+)
 from app.services import Services
-from app.web.deps import ApiError, get_services, peer_of
+from app.web.deps import ApiError, get_services, resolved_peer
 from app.win.peer import PeerInfo
 
 router = APIRouter()
@@ -71,15 +85,42 @@ class AgentCaller:
 async def agent_slot(request: Request) -> AgentCaller:
     services = get_services(request)
     token = request.headers.get(AGENT_TOKEN_HEADER)
+    if services.agents.lookup(token) is None:  # M1: no connection-table scan for a dead token
+        raise ApiError(401, "login_required")
+    peer = await resolved_peer(request)
     try:
-        if not token:  # no connection-table scan for a request that cannot authenticate
-            services.agents.authenticate(None, None)
-        peer = await peer_of(request)
         slot = services.agents.authenticate(token, peer)
     except AgentAuthError as exc:
         raise ApiError(exc.status, exc.code) from None
     assert peer is not None  # authenticate refuses a request without a resolved peer
     return AgentCaller(slot, peer)
+
+
+class AgentProofMiddleware:
+    """Pure ASGI middleware (Local channel): adds ``X-Server-Proof`` to every ``/api/agent/``
+    response for a live token and a nonce, except 401/403 (I1). The proof is computed when the
+    request arrives, so a response to a slot revoked meanwhile still proves the server."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or not scope["path"].startswith("/api/agent/"):
+            await self.app(scope, receive, send)
+            return
+        headers = Headers(scope=scope)
+        services = scope["app"].state.services
+        proof = services.agents.proof(headers.get(AGENT_TOKEN_HEADER), headers.get(AGENT_NONCE_HEADER))
+        if proof is None:
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_proof(message: Message) -> None:
+            if message["type"] == "http.response.start" and message["status"] not in (401, 403):
+                MutableHeaders(scope=message).append(SERVER_PROOF_HEADER, proof)
+            await send(message)
+
+        await self.app(scope, receive, send_with_proof)
 
 
 Caller = Annotated[AgentCaller, Depends(agent_slot)]

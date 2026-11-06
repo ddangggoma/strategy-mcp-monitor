@@ -59,7 +59,7 @@ async def test_wrong_token_or_other_session_is_not_found_and_reported(services, 
     with pytest.raises(DisplayNotFoundError):
         services.displays.acknowledge(tk.token, peer_session=None)
     misuse = [r for r in services.tamper.recent(10) if r["event"] == "notice_token_misuse"]
-    assert [(r["session_id"], r["peer_session"]) for r in misuse] == [(2, None), (2, 3)]
+    assert [(r["session_id"], r["peer_session"]) for r in misuse] == [(2, 3)]  # None: unresolved (M2)
 
 async def test_reissue_invalidates_old_token_and_counts_attempts(services, clock):
     services.rdp.apply(snap(clock.now(), ws(2)))

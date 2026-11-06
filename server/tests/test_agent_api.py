@@ -176,12 +176,87 @@ async def test_hello_with_a_pid_other_than_the_peer_is_403(local_client, service
         ("agent_impersonation", 2, 2, 500, r"C:\Python315\python.exe", "CORP\\hong")
     assert services.agents.slot(2).hello_at is None
 
-async def test_unresolved_peer_is_403_and_reported(local_client, services, agent):
+async def test_unresolved_peer_is_503_without_tamper(local_client, services, agent):
+    """M2: a resolver miss is not evidence of impersonation; the agent retries a 503."""
     services.peers = FakePeerResolver(None)
     r = await local_client.post("/api/agent/heartbeat", json={}, headers=H(agent))
-    assert r.status_code == 403
-    rec = services.tamper.recent(1)[0]
-    assert (rec["event"], rec["claimed_session"], rec["peer_session"], rec["peer_pid"]) == ("agent_impersonation", 2, None, None)
+    assert (r.status_code, r.json()) == (503, {"error": "unavailable"})
+    assert len(services.peers.calls) == 3  # looked up again briefly before giving up
+    assert services.tamper.recent() == []
+
+class FlakyPeerResolver:
+    def __init__(self, misses, info):
+        self.misses, self.info, self.calls = misses, info, 0
+    def resolve(self, client_ip, client_port, server_port):
+        self.calls += 1
+        if self.calls <= self.misses:
+            return None
+        return self.info
+
+async def test_a_peer_resolved_on_retry_is_accepted(local_client, services, agent):
+    services.peers = FlakyPeerResolver(1, AGENT2)
+    r = await local_client.post("/api/agent/heartbeat", json={}, headers=H(agent))
+    assert r.status_code == 204 and services.peers.calls == 2 and services.tamper.recent() == []
+
+async def test_unknown_token_is_refused_before_any_peer_lookup(local_client, services, agent):
+    """M1: a garbage token costs no connection-table scan."""
+    services.peers = FakePeerResolver(AGENT2)
+    for headers in ({}, H("nope")):
+        assert (await local_client.post("/api/agent/heartbeat", json={}, headers=headers)).status_code == 401
+    assert services.peers.calls == []
+
+async def test_impersonation_is_reported_once_per_minute_with_a_count(local_client, services, agent, clock):
+    """M3: a stolen token replayed in a loop does not flood the tamper log, ring and SSE."""
+    services.peers = FakePeerResolver(PeerInfo(900, 3, "CORP\\kim", None))
+    for _ in range(5):
+        assert (await local_client.post("/api/agent/heartbeat", json={}, headers=H(agent))).status_code == 403
+    assert [r["event"] for r in services.tamper.recent()] == ["agent_impersonation"]
+    clock.advance(61)
+    assert (await local_client.post("/api/agent/heartbeat", json={}, headers=H(agent))).status_code == 403
+    recs = services.tamper.recent()
+    assert [r["event"] for r in recs] == ["agent_impersonation"] * 2 and recs[0]["suppressed"] == 4
+    assert "suppressed" not in recs[1]
+    lines = [e for e in await audit_events(services, "tamper") if e["event"] == "agent_impersonation"]
+    assert len(lines) == 2
+
+
+# --- I1: the server proves itself to the agent ------------------------------------------------
+
+from app.activity.agent_hub import server_proof  # noqa: E402
+
+
+def HN(token, nonce):
+    return {"X-Agent-Token": token, "X-Agent-Nonce": nonce}
+
+async def test_every_agent_response_proves_the_server_key(local_client, services, agent):
+    key = services.agents.slot(2).server_key
+    r = await local_client.post("/api/agent/hello", json={"session_id": 2, "pid": 500, "version": "0.1.0"}, headers=HN(agent, "n1"))
+    assert r.status_code == 200 and r.headers["X-Server-Proof"] == server_proof(key, "n1")
+    r = await local_client.get("/api/agent/next", params={"timeout": 0}, headers=HN(agent, "n2"))
+    assert r.status_code == 200 and r.headers["X-Server-Proof"] == server_proof(key, "n2")
+    r = await local_client.get("/api/agent/next", params={"timeout": 0}, headers=HN(agent, "n3"))
+    assert r.status_code == 204 and r.headers["X-Server-Proof"] == server_proof(key, "n3")
+    r = await local_client.post("/api/agent/events", json={"events": "bad"}, headers=HN(agent, "n4"))
+    assert r.status_code == 422 and r.headers["X-Server-Proof"] == server_proof(key, "n4")
+
+async def test_no_proof_without_a_live_token_a_nonce_or_on_a_refusal(local_client, services, agent):
+    assert "X-Server-Proof" not in (await local_client.post("/api/agent/heartbeat", json={}, headers=HN("nope", "n"))).headers
+    assert "X-Server-Proof" not in (await local_client.post("/api/agent/heartbeat", json={}, headers=H(agent))).headers
+    assert "X-Server-Proof" not in (await local_client.post("/api/agent/heartbeat", json={}, headers=HN(agent, "n" * 129))).headers
+    services.peers = FakePeerResolver(PeerInfo(900, 3, None, None))  # another session: 403, no proof
+    r = await local_client.post("/api/agent/heartbeat", json={}, headers=HN(agent, "n"))
+    assert r.status_code == 403 and "X-Server-Proof" not in r.headers
+
+def test_server_proof_is_hmac_sha256_of_the_nonce():
+    import hashlib
+    import hmac
+    key = "ab" * 32
+    assert server_proof(key, "xyz") == hmac.new(bytes.fromhex(key), b"xyz", hashlib.sha256).hexdigest()
+
+def test_each_mint_has_its_own_server_key(services, agent):
+    first = services.agents.slot(2).server_key
+    services.agents.mint(2, "hong")
+    assert services.agents.slot(2).server_key != first and len(first) == 64
 
 async def test_authenticate_and_hello_record_the_agent(local_client, services, agent, clock):
     clock.advance(4)

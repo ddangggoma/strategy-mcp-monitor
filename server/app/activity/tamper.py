@@ -32,6 +32,11 @@ if TYPE_CHECKING:
     from app.monitor.store import McpStore
 
 
+_THROTTLE_KEYS_MAX = 1024
+MISUSE_REPORT_SEC = 60.0
+"""``agent_impersonation`` / ``notice_token_misuse`` are reported once per key per minute (M3)."""
+
+
 class TamperMonitor:
     """Loop thread only (collector threads go through the ``CollectorBridge``)."""
 
@@ -40,6 +45,32 @@ class TamperMonitor:
         self._bus = bus
         self._clock = clock
         self._ring: deque[dict[str, Any]] = deque(maxlen=keep)
+        self._throttle: dict[tuple[Any, ...], tuple[datetime, int]] = {}
+
+    def report_throttled(
+        self, event: str, *, key: tuple[Any, ...], window_sec: float = 60.0, **fields: Any
+    ) -> dict[str, Any] | None:
+        """``report`` at most once per (``event``, ``key``) per ``window_sec`` (M3): a token replayed
+        in a loop must not flood the log, the ring or the SSE stream. The next report after the
+        window carries ``suppressed`` = how many were swallowed since the last one. None when this
+        one was swallowed."""
+        now = self._clock.now()
+        full = (event, *key)
+        last = self._throttle.get(full)
+        if last is not None and (now - last[0]).total_seconds() < window_sec:
+            self._throttle[full] = (last[0], last[1] + 1)
+            return None
+        if len(self._throttle) >= _THROTTLE_KEYS_MAX:
+            self._throttle = {
+                k: v for k, v in self._throttle.items()
+                if (now - v[0]).total_seconds() < window_sec
+            }
+            while len(self._throttle) >= _THROTTLE_KEYS_MAX:
+                del self._throttle[next(iter(self._throttle))]
+        self._throttle.pop(full, None)
+        self._throttle[full] = (now, 0)
+        extra: dict[str, Any] = {"suppressed": last[1]} if last is not None and last[1] else {}
+        return self.report(event, **fields, **extra)
 
     def report(self, event: str, *, at: datetime | None = None, **fields: Any) -> dict[str, Any]:
         """Record one tamper event; ``at`` is the event time (default: now). Returns the record."""

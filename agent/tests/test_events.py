@@ -56,7 +56,7 @@ def test_payload_matches_the_server_fixture():
 class FakeClient:
     def __init__(self, fail=0):
         self.fail, self.posts = fail, []
-    def post(self, path, body=None):
+    def post(self, path, body=None, *, verified_only=False):
         if self.fail:
             self.fail -= 1; raise ServerUnavailable("down")
         self.posts.append((path, [e["idle_sec"] for e in body["events"]]))
@@ -142,7 +142,7 @@ def test_to_event_fits_the_server_limits_and_utf8():
 class RecordingClient:
     def __init__(self, raise_with=None):
         self.raise_with, self.posts = raise_with, []
-    def post(self, path, body=None):
+    def post(self, path, body=None, *, verified_only=False):
         self.posts.append((path, body))
         if self.raise_with is not None:
             raise self.raise_with
@@ -238,6 +238,7 @@ def test_pump_run_keeps_going_after_an_unexpected_flush_error(capsys):
 
 from mcp_agent.__main__ import WindowActivity  # noqa: E402
 from mcp_agent.client import ServerClient  # noqa: E402
+from tests.fake_server import KEY  # noqa: E402
 
 
 class FakeHooks:
@@ -251,16 +252,23 @@ class FakeHooks:
 
 def test_activity_skips_hooks_when_the_server_does_not_want_window_events(fake_server):
     FakeHooks.made = []
-    a = WindowActivity(ServerClient(fake_server.url, "tok"), hook_factory=FakeHooks, idle_seconds=lambda: 999.0)
+    a = WindowActivity(ServerClient(fake_server.url, "tok", KEY), hook_factory=FakeHooks, idle_seconds=lambda: 999.0)
     a.on_hello({"heartbeat_sec": 5, "events_max": 200, "idle_threshold_sec": 300, "window_events": False})
     a.stop()
     assert FakeHooks.made == [] and a.pump is None
     assert not any(r[1] == "/api/agent/events" for r in fake_server.requests)
 
 
+def verified_client(fake_server):
+    """A client that has had a proven answer (in the agent: the hello)."""
+    client = ServerClient(fake_server.url, "tok", KEY)
+    client.next(0)
+    return client
+
+
 def test_activity_runs_hooks_and_pump_and_flushes_on_stop(fake_server):
     FakeHooks.made = []
-    a = WindowActivity(ServerClient(fake_server.url, "tok"), hook_factory=FakeHooks, idle_seconds=lambda: 999.0)
+    a = WindowActivity(verified_client(fake_server), hook_factory=FakeHooks, idle_seconds=lambda: 999.0)
     a.on_hello({"heartbeat_sec": 5, "events_max": 200, "idle_threshold_sec": 300})  # missing key = on
     try:
         (hooks,) = FakeHooks.made
@@ -282,13 +290,26 @@ def test_activity_runs_hooks_and_pump_and_flushes_on_stop(fake_server):
 
 def test_activity_final_flush_sends_what_the_pump_left(fake_server):
     FakeHooks.made = []
-    a = WindowActivity(ServerClient(fake_server.url, "tok"), hook_factory=FakeHooks, idle_seconds=lambda: 999.0)
+    client = verified_client(fake_server)
+    a = WindowActivity(client, hook_factory=FakeHooks, idle_seconds=lambda: 999.0)
     fake_server.status_for["/api/agent/events"] = 503  # the pump cannot deliver
     a.on_hello({"events_max": 200, "idle_threshold_sec": 300, "window_events": True})
     deadline = time.monotonic() + 5
     while not any(r[1] == "/api/agent/events" for r in fake_server.requests) and time.monotonic() < deadline:
         time.sleep(0.05)
     del fake_server.status_for["/api/agent/events"]
+    client.next(0)  # the runner's long poll proves the server again after the outage
     a.stop()
     last = [r for r in fake_server.requests if r[1] == "/api/agent/events"][-1]
     assert [e["type"] for e in last[2]["events"]] == ["idle"]
+
+
+def test_sender_posts_window_events_only_to_a_verified_server():
+    """I1: the event batch asks the client to send only after a proven answer."""
+    seen = []
+    class Client:
+        def post(self, path, body=None, *, verified_only=False):
+            seen.append((path, verified_only))
+    s = EventSender(Client())
+    s.add({"type": "idle", "at": "2026-11-04T14:00:00.000+09:00", "idle_sec": 1}); s.flush()
+    assert seen == [("/api/agent/events", True)]

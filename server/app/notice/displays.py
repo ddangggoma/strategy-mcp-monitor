@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from app.activity.tamper import TamperMonitor
+from app.activity.tamper import MISUSE_REPORT_SEC, TamperMonitor
 from app.clock import Clock
 from app.db import Database
 from app.logstore.writer import LogSink
@@ -251,6 +251,10 @@ class NoticeDisplays:
         self._digest_of[display_id] = digest
         return Ticket(display_id, token, row["attempts"])
 
+    def knows(self, token: str) -> bool:
+        """Whether ``token`` is a live token: cheap, checked before the peer scan (M1)."""
+        return bool(token) and _digest(token) in self._issued
+
     def open(self, token: str, peer_session: int | None) -> tuple[Display, NoticeContent]:
         """The page reports it is showing: log ``notice_shown`` once per attempt; returns the
         display and its pinned notice text."""
@@ -304,10 +308,12 @@ class NoticeDisplays:
         reopen_ok = ack and display.closed_reason == "acknowledged"
         if display.closed_reason is not None and not reopen_ok:
             raise DisplayNotFoundError(display.id)
+        if peer_session is None:  # unresolved peer: no evidence of misuse (M2)
+            raise DisplayNotFoundError(display.id)
         if peer_session != display.session_id:
-            self._tamper.report(
-                "notice_token_misuse", display_id=display.id, session_id=display.session_id,
-                peer_session=peer_session,
+            self._tamper.report_throttled(  # M3: once per display and peer session per minute
+                "notice_token_misuse", key=(display.id, peer_session), window_sec=MISUSE_REPORT_SEC,
+                display_id=display.id, session_id=display.session_id, peer_session=peer_session,
             )
             raise DisplayNotFoundError(display.id)
         return display, issued

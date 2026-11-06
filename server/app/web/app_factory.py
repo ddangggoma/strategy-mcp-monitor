@@ -163,6 +163,7 @@ def create_app(channel: Channel, services: Services, static_dir: Path | None = N
     app.include_router(tamper_api.router)
     app.add_middleware(BodySizeLimit)
     if channel == "local":
+        app.add_middleware(agent_api.AgentProofMiddleware)
         app.add_middleware(LocalHostGuard)
         app.include_router(local_api.router)
         app.include_router(mcp_local.router)

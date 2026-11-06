@@ -126,7 +126,9 @@ async def test_launch_uses_account_token_and_edge_dialog_has_no_url_file(service
     services.rdp.apply(snap(clock.now(), ws(2)))
     [spec] = launcher.specs
     assert spec.argv == ["py.exe", "-m", "mcp_agent", "--server", "http://127.0.0.1:8700", "--dialog", "edge"]
-    assert set(spec.env) == {"MCPMON_AGENT_TOKEN", "PYTHONPATH"}
+    assert set(spec.env) == {"MCPMON_AGENT_TOKEN", "MCPMON_AGENT_SERVER_KEY", "PYTHONPATH"}
+    assert spec.env["MCPMON_AGENT_SERVER_KEY"] == services.agents.slot(2).server_key
+    assert len(bytes.fromhex(spec.env["MCPMON_AGENT_SERVER_KEY"])) == 32
     assert services.agents.slot(2).user == "CORP\\hong"
 
 def test_print_dialog_needs_a_url_dir(services, clock):

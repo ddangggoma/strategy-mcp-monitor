@@ -1,6 +1,7 @@
 """``python -m mcp_agent --server http://127.0.0.1:8700 [--dialog edge|print] ...``
 
-The per-launch token comes in ``MCPMON_AGENT_TOKEN`` and is removed from the environment at once.
+The per-launch token comes in ``MCPMON_AGENT_TOKEN`` and the key the server proves itself with in
+``MCPMON_AGENT_SERVER_KEY`` (I1); both are removed from the environment at once.
 """
 
 from __future__ import annotations
@@ -80,13 +81,18 @@ def _number[T: (int, float)](hello: dict[str, Any], key: str, default: T, kind: 
 
 def main(argv: list[str] | None = None) -> int:
     cfg = parse_args(sys.argv[1:] if argv is None else argv, os.environ)
-    client = ServerClient(cfg.server, cfg.token)
+    client = ServerClient(cfg.server, cfg.token, cfg.server_key)
     window: NoticeWindow
     if cfg.dialog == "print":
         assert cfg.url_file is not None  # parse_args requires it
         window = PrintWindow(cfg.url_file)
     else:
-        window = EdgeWindow(cfg.edge_path or find_edge(), cfg.profile_dir)
+        edge = EdgeWindow(cfg.edge_path or find_edge(), cfg.profile_dir)
+        try:
+            edge.close_strays()  # a notice window a killed predecessor left behind (M4)
+        except OSError as e:
+            print(f"mcp_agent: could not close leftover notice windows: {e!r}", file=sys.stderr)
+        window = edge
     activity = WindowActivity(client)
     try:
         return AgentRunner(cfg, client, window, session_id=win32.current_session_id(), pid=os.getpid(),

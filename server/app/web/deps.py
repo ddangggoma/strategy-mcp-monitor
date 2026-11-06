@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 from collections.abc import Awaitable, Callable, Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -85,6 +85,23 @@ async def peer_of(request: Request) -> PeerInfo | None:
         return await asyncio.to_thread(services.peers.resolve, client.host, client.port, server[1])
     except Exception:
         return None
+
+
+PEER_RETRY_SEC: Final = (0.05, 0.2)
+"""Pauses between peer lookups before a request is given up as unresolved (M2)."""
+
+
+async def resolved_peer(request: Request) -> PeerInfo | None:
+    """``peer_of``, looked up again briefly when the peer or its session could not be resolved (a
+    just-accepted connection can be missing from the table, M2); None, or a peer without a
+    session, when it never resolves."""
+    peer = await peer_of(request)
+    for pause in PEER_RETRY_SEC:
+        if peer is not None and peer.session_id is not None:
+            break
+        await asyncio.sleep(pause)
+        peer = await peer_of(request)
+    return peer
 
 
 async def windows_user_of(request: Request) -> str | None:

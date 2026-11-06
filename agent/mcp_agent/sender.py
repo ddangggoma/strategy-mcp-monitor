@@ -36,7 +36,8 @@ def to_payload(items: list[RawWinEvent | dict[str, Any]]) -> dict[str, Any]:
 
 
 class _Poster(Protocol):
-    def post(self, path: str, body: dict[str, Any] | None = None) -> dict[str, Any] | None: ...
+    def post(self, path: str, body: dict[str, Any] | None = None, *,
+             verified_only: bool = False) -> dict[str, Any] | None: ...
 
 
 class EventSender:
@@ -71,7 +72,8 @@ class EventSender:
             while self._buffer:
                 batch = [self._buffer[i] for i in range(min(self._events_max, len(self._buffer)))]
                 try:
-                    self._client.post(EVENTS_PATH, to_payload(batch))
+                    # Window titles only go to a server that proved itself since the last outage (I1).
+                    self._client.post(EVENTS_PATH, to_payload(batch), verified_only=True)
                 except ServerUnavailable:
                     return
                 except RuntimeError as e:

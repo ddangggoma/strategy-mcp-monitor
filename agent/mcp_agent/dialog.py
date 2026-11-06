@@ -102,8 +102,25 @@ class WindowOps(Protocol):
 
     def pid_alive(self, pid: int) -> bool: ...
 
+    def ours(self, pid: int) -> bool: ...  # an Edge process of our notice profile in our session (M4)
+
+
+def has_profile(command_line: str, profile_dir: Path) -> bool:
+    """Whether an Edge command line runs on ``profile_dir`` (``--user-data-dir=…``, quoted or not)."""
+    return f"--user-data-dir={profile_dir}".lower() in command_line.replace('"', "").lower()
+
 
 class Win32WindowOps:
+    def __init__(self, profile_dir: Path) -> None:
+        self._profile_dir = profile_dir
+        self._session = win32.current_session_id()
+
+    def ours(self, pid: int) -> bool:
+        if win32.process_session_id(pid) != self._session:
+            return False
+        line = win32.process_command_line(pid)
+        return line is not None and has_profile(line, self._profile_dir)
+
     def edge_windows(self) -> dict[int, tuple[int, str]]:
         return win32.edge_windows()
 
@@ -139,7 +156,10 @@ class EdgeWindow:
     PC), and Edge may also hand the URL to an unrelated browser process (F10). So the window is
     looked up among ALL msedge windows created after the launch: a window of the launched process
     tree wins (its caption should be ``title``; any non-empty caption is accepted there, since our
-    dedicated profile opens nothing else), otherwise a window captioned ``title`` anywhere.
+    dedicated profile opens nothing else), otherwise a window captioned ``title`` whose process runs
+    on our dedicated profile in this session (M4: never by caption alone; the board and admin pages
+    have the same title). Only processes of that profile are ever killed, and the notice windows a
+    killed predecessor agent left behind are closed before the next launch (``close_strays``).
 
     "Closed by the user" means that window is gone, never that the launched pid exited. If no
     window was found within ``locate_sec``, it means the launched tree has fully exited.
@@ -154,7 +174,7 @@ class EdgeWindow:
         self._profile_dir = profile_dir
         self._popen = popen
         self._kill_tree = kill_tree
-        self._ops: WindowOps = ops if ops is not None else Win32WindowOps()
+        self._ops: WindowOps = ops if ops is not None else Win32WindowOps(profile_dir)
         self._title = title
         self._locate_sec = locate_sec
         self._retry_sec = retry_sec
@@ -176,6 +196,7 @@ class EdgeWindow:
         if self._edge is None:
             self._browser_open(url)  # V25: no Edge, no window tracking
             return
+        self._close_strays()
         self._wait_for_exit()
         before = frozenset(self._ops.edge_windows())
         try:
@@ -198,7 +219,7 @@ class EdgeWindow:
             shown.stop.set()
         launcher = shown.proc.pid
         targets = [launcher] if shown.proc.poll() is None else []
-        if shown.owner is not None and shown.owner != launcher:
+        if shown.owner is not None and shown.owner != launcher and self._ops.ours(shown.owner):
             targets.append(shown.owner)  # e.g. the browser child the launcher handed over to
         if shown.owner is None and not targets:
             # The launcher is gone and no window was found: its browser child is an orphan in its tree.
@@ -224,6 +245,26 @@ class EdgeWindow:
         self._locate(shown)  # last look before calling it closed
         return shown.hwnd is None
 
+    def close_strays(self) -> None:
+        """Close notice windows left by an earlier agent of this session (killed before it could
+        close its window, M4/X-3): every Edge window of our profile here that is not the one shown."""
+        self._close_strays()
+        self._wait_for_exit()
+
+    def _close_strays(self) -> None:
+        with self._lock:
+            current = self._shown.owner if self._shown is not None else None
+        seen: set[int] = {*self._dying}
+        if current is not None:
+            seen.add(current)
+        for _hwnd, (pid, _caption) in self._ops.edge_windows().items():
+            if pid in seen:
+                continue
+            seen.add(pid)
+            if self._ops.ours(pid):
+                self._kill_tree(pid)
+                self._dying.append(pid)
+
     def _wait_for_exit(self) -> None:
         """After our close, let the old Edge go before relaunching on the same profile (F10, ≤ 2 s)."""
         dying, self._dying = self._dying, []
@@ -237,10 +278,12 @@ class EdgeWindow:
             return None
         tree = set(self._ops.process_tree(shown.proc.pid))
         ranked = sorted(new.items(), key=lambda kv: (kv[1][0] not in tree, kv[1][1] != self._title, kv[0]))
-        hwnd, (pid, caption) = ranked[0]
-        if pid not in tree and caption != self._title:
-            return None  # someone else's Edge window
-        return hwnd, pid
+        for hwnd, (pid, caption) in ranked:
+            if pid in tree:
+                return hwnd, pid
+            if caption == self._title and self._ops.ours(pid):
+                return hwnd, pid  # handed over to our profile's browser process (F10)
+        return None  # someone else's Edge windows only
 
     def _locate(self, shown: _Shown) -> bool:
         """Find (once) and place the window; True when there is nothing more to do."""

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import threading
 import time
@@ -12,6 +14,12 @@ from urllib.parse import urlsplit
 
 # The hub's HELLO (server/app/activity/agent_hub.py), "window_events" included (Task 12 carry).
 DEFAULT_HELLO = {"heartbeat_sec": 5, "events_max": 200, "idle_threshold_sec": 300, "window_events": True}
+# The key the agent is launched with (MCPMON_AGENT_SERVER_KEY); the fake proves it like the hub (I1).
+KEY = "11" * 32
+
+
+def proof(key: str, nonce: str) -> str:
+    return hmac.new(bytes.fromhex(key), nonce.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 class FakeServer:
@@ -20,6 +28,8 @@ class FakeServer:
         self.commands: deque[dict[str, Any]] = deque()
         self.status_for: dict[str, int] = {}
         self.hello_body: dict[str, Any] = dict(DEFAULT_HELLO)
+        self.server_key: str | None = KEY
+        """None: answer without any proof (a process that grabbed the port, I1)."""
         self._lock = threading.Lock()
         self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(self))
         self._httpd.daemon_threads = True
@@ -55,6 +65,9 @@ def _make_handler(fake: FakeServer) -> type[BaseHTTPRequestHandler]:
         def _send(self, status: int, payload: Any = None) -> None:
             data = b"" if payload is None else json.dumps(payload).encode("utf-8")
             self.send_response(status)
+            nonce = self.headers.get("X-Agent-Nonce")
+            if fake.server_key is not None and nonce and status not in (401, 403):
+                self.send_header("X-Server-Proof", proof(fake.server_key, nonce))
             if data:
                 self.send_header("Content-Type", "application/json")
             if status != 204:

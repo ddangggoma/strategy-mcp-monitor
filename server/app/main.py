@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import signal
+import socket
 import sys
 import threading
 from collections.abc import Awaitable, Callable, Iterator, Sequence
@@ -31,6 +33,44 @@ def server_configs(
         uvicorn.Config(local_app, host="127.0.0.1", port=local_port, **common),
         uvicorn.Config(external_app, host=external_host, port=external_port, **common),
     ]
+
+
+def bind_listener(host: str, port: int, backlog: int = 2048) -> socket.socket:
+    """A listening socket for ``host:port``, bound now (raises ``OSError`` when the port is taken).
+
+    Exclusive on Windows (``SO_EXCLUSIVEADDRUSE``): no other process can bind the same address
+    while we hold it, which uvicorn's own ``SO_REUSEADDR`` bind would allow (I1)."""
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    sock = socket.socket(family, socket.SOCK_STREAM)
+    try:
+        exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+        if exclusive is not None:
+            sock.setsockopt(socket.SOL_SOCKET, exclusive, 1)
+        else:  # pragma: no cover - not Windows
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((host, port))
+        sock.listen(backlog)
+    except BaseException:
+        sock.close()
+        raise
+    return sock
+
+
+def bind_listeners(configs: Sequence[uvicorn.Config]) -> list[socket.socket]:
+    """Both channels' sockets, bound before anything else starts: connections made meanwhile wait
+    in the backlog. All or nothing."""
+    sockets: list[socket.socket] = []
+    try:
+        for cfg in configs:
+            sockets.append(bind_listener(cfg.host, cfg.port, cfg.backlog))
+    except BaseException:
+        for sock in sockets:
+            sock.close()
+        raise
+    for sock in sockets:
+        host, port = sock.getsockname()[:2]
+        logging.getLogger("uvicorn.error").info("Uvicorn running on http://%s:%d", host, port)
+    return sockets
 
 
 class _Server(uvicorn.Server):
@@ -122,32 +162,41 @@ async def serve(
     services.agents.configure(local_url)
     if services.agent_supervisor is not None:
         services.agent_supervisor.configure(local_url)
+    configs = server_configs(
+        create_app("local", services, static_dir),
+        create_app("external", services, static_dir),
+        local_port,
+        external_port,
+        external_host,
+    )
     await services.log.start()
     try:
-        await services.monitor.start()
+        # I1: own both ports before the collectors start, so a session agent launched by the
+        # supervisor never finds the Local port unbound (or bound by another process).
+        sockets = bind_listeners(configs)
         try:
-            await services.collectors.start()
-            shutdown: ShutdownSequence | None = None
+            await services.monitor.start()
             try:
-                configs = server_configs(
-                    create_app("local", services, static_dir),
-                    create_app("external", services, static_dir),
-                    local_port,
-                    external_port,
-                    external_host,
-                )
-                servers = [_Server(cfg) for cfg in configs]
-                shutdown = ShutdownSequence(servers, services.collectors.stop)
-                with _stop_on_signals(shutdown.request):
-                    await asyncio.gather(*(s.serve() for s in servers))
-            finally:
+                await services.collectors.start()
+                shutdown: ShutdownSequence | None = None
                 try:
-                    if shutdown is not None:
-                        await shutdown.wait()
+                    servers = [_Server(cfg) for cfg in configs]
+                    shutdown = ShutdownSequence(servers, services.collectors.stop)
+                    with _stop_on_signals(shutdown.request):
+                        await asyncio.gather(
+                            *(s.serve(sockets=[sock]) for s, sock in zip(servers, sockets, strict=True))
+                        )
                 finally:
-                    await services.collectors.stop()  # a no-op after the sequence stopped them
+                    try:
+                        if shutdown is not None:
+                            await shutdown.wait()
+                    finally:
+                        await services.collectors.stop()  # a no-op after the sequence stopped them
+            finally:
+                await services.monitor.stop()
         finally:
-            await services.monitor.stop()
+            for sock in sockets:
+                sock.close()
     finally:
         await services.log.stop()
         services.db.close()

@@ -1,5 +1,9 @@
 """hello → heartbeat thread → long-poll command loop. Exit codes: 0 = told to exit, 3 = the server
-rejected our token, 4 = the server was unreachable for ``unreachable_exit_sec``."""
+rejected our token, 4 = the server was unreachable for ``unreachable_exit_sec``, 5 = whatever answers
+is not our service (it could not prove the launch key, I1).
+
+Only notice URLs of the configured server (``<server>/notice#…``) are ever opened (I1). A command
+or answer the agent cannot use is logged to stderr and skipped; it does not end the agent (M13)."""
 
 from __future__ import annotations
 
@@ -10,13 +14,14 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from mcp_agent import VERSION, win32
-from mcp_agent.client import AgentRejected, ServerClient, ServerUnavailable
+from mcp_agent.client import AgentRejected, ServerClient, ServerUnavailable, ServerUnverified
 from mcp_agent.config import AgentConfig
 from mcp_agent.dialog import NoticeWindow
 
 EXIT_OK = 0
 EXIT_REJECTED = 3
 EXIT_UNREACHABLE = 4
+EXIT_UNVERIFIED = 5
 BACKOFF_SEC = (1, 2, 4, 8, 10)
 POLL_SEC = 25.0
 POLL_WHILE_SHOWN_SEC = 2.0  # check for a user-closed window at least this often
@@ -68,6 +73,8 @@ class AgentRunner:
         self._backoff = _Backoff(cfg.unreachable_exit_sec, monotonic, sleep)
         self._stop = threading.Event()
         self._rejected = threading.Event()
+        self._rejection: AgentRejected | None = None
+        self._notice_prefix = cfg.server.rstrip("/") + "/notice#"
 
     def run(self) -> int:
         heartbeat: threading.Thread | None = None
@@ -79,6 +86,9 @@ class AgentRunner:
                                          daemon=True)
             heartbeat.start()
             return self._loop()
+        except ServerUnverified as e:
+            print(f"mcp_agent: {e}; stopping", file=sys.stderr)
+            return EXIT_UNVERIFIED
         except AgentRejected:
             return EXIT_REJECTED
         except _Unreachable:
@@ -99,6 +109,10 @@ class AgentRunner:
             except ServerUnavailable:
                 self._backoff.failed()
                 continue
+            except RuntimeError as e:  # a proven but unusable answer (M13): try again later
+                print(f"mcp_agent: hello: {e}", file=sys.stderr)
+                self._backoff.failed()
+                continue
             self._backoff.ok()
             return hello or {}
 
@@ -106,6 +120,8 @@ class AgentRunner:
         pending: int | None = None
         while True:
             if self._rejected.is_set():
+                if isinstance(self._rejection, ServerUnverified):
+                    raise self._rejection
                 return EXIT_REJECTED
             try:
                 if pending is not None and self._window.closed_by_user():
@@ -115,27 +131,44 @@ class AgentRunner:
             except ServerUnavailable:
                 self._backoff.failed()
                 continue
+            except RuntimeError as e:  # a proven but unexpected answer (M13): log, back off, go on
+                print(f"mcp_agent: {e}", file=sys.stderr)
+                self._backoff.failed()
+                continue
             self._backoff.ok()
             if cmd is None:
                 continue
-            kind = cmd.get("type")
-            if kind == "show_notice":
-                if pending is not None:
-                    self._window.close()
-                self._window.open(str(cmd["url"]), int(cmd["display_id"]))
-                pending = int(cmd["display_id"])
-            elif kind == "close_notice":
-                if pending is not None and pending == cmd.get("display_id"):
-                    self._window.close()
-                    pending = None
-            elif kind == "exit":
+            if cmd.get("type") == "exit":
                 return EXIT_OK  # run() closes the window
+            try:
+                pending = self._command(cmd, pending)
+            except Exception as e:  # noqa: BLE001 - one bad command (or window) must not end the agent (M13)
+                print(f"mcp_agent: command {cmd.get('type')!r} failed: {e!r}", file=sys.stderr)
+
+    def _command(self, cmd: dict[str, Any], pending: int | None) -> int | None:
+        """Run ``show_notice`` / ``close_notice``; returns the display now shown (or None)."""
+        kind = cmd.get("type")
+        if kind == "show_notice":
+            url, display_id = cmd.get("url"), int(cmd["display_id"])
+            if not isinstance(url, str) or not url.startswith(self._notice_prefix):
+                print(f"mcp_agent: refused notice url {url!r}: not under {self._notice_prefix}", file=sys.stderr)
+                return pending
+            if pending is not None:
+                self._window.close()
+                pending = None
+            self._window.open(url, display_id)
+            return display_id
+        if kind == "close_notice" and pending is not None and pending == cmd.get("display_id"):
+            self._window.close()
+            return None
+        return pending
 
     def _heartbeat(self, every: float) -> None:
         while not self._stop.wait(every):
             try:
                 self._client.post("/api/agent/heartbeat", {"idle_sec": int(self._idle()), "locked": None})
-            except AgentRejected:
+            except AgentRejected as e:  # ServerUnverified included: the loop exits with its code
+                self._rejection = e
                 self._rejected.set()
                 return
             except ServerUnavailable:

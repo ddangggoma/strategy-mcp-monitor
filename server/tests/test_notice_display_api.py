@@ -61,13 +61,32 @@ async def test_sec_fetch_site_none_and_same_site_rules(local_client, services, c
         assert (r.status_code, r.json()) == (403, {"error": "forbidden"})
     assert services.displays.get(tk.display_id).closed_reason is None
 
-async def test_unresolved_peer_is_not_found_and_reported(local_client, services, clock):
+async def test_unresolved_peer_is_503_and_not_reported(local_client, services, clock):
+    """M2: the lookup is retried briefly; a peer that never resolves is a retryable 503, not misuse."""
     services.peers = FakePeerResolver(None); tk = ticket(services, clock)
     r = await local_client.post("/api/notice/display/open", headers={"X-Notice-Token": tk.token})
-    assert (r.status_code, r.json()) == (404, {"error": "not_found"})
-    [rec] = services.tamper.recent(10)
-    assert (rec["event"], rec["display_id"], rec["session_id"], rec["peer_session"]) == \
-        ("notice_token_misuse", tk.display_id, 2, None)
+    assert (r.status_code, r.json()) == (503, {"error": "unavailable"})
+    assert len(services.peers.calls) == 3 and services.tamper.recent(10) == []
+    services.peers = FakePeerResolver(PeerInfo(100, None, None, None))  # resolved, session unknown
+    assert (await local_client.post("/api/notice/display/ack", headers={"X-Notice-Token": tk.token})).status_code == 503
+    assert services.displays.get(tk.display_id).closed_reason is None and services.tamper.recent(10) == []
+
+async def test_unknown_token_is_404_before_any_peer_lookup(local_client, services, clock):
+    """M1: no connection-table scan for a token that was never issued (or is gone)."""
+    peers = FakePeerResolver(EDGE2); services.peers = peers; ticket(services, clock)
+    assert (await local_client.post("/api/notice/display/open", headers={"X-Notice-Token": "bad"})).status_code == 404
+    assert peers.calls == []
+
+async def test_token_misuse_is_reported_once_per_minute(local_client, services, clock):
+    """M3: replaying a token from another session in a loop yields one report per minute."""
+    services.peers = FakePeerResolver(PeerInfo(100, 3, "CORP\\kim", "msedge.exe")); tk = ticket(services, clock)
+    for _ in range(4):
+        assert (await local_client.post("/api/notice/display/open", headers={"X-Notice-Token": tk.token})).status_code == 404
+    assert [r["event"] for r in services.tamper.recent(10)] == ["notice_token_misuse"]
+    clock.advance(60)
+    await local_client.post("/api/notice/display/open", headers={"X-Notice-Token": tk.token})
+    recs = services.tamper.recent(10)
+    assert len(recs) == 2 and recs[0]["suppressed"] == 3
 
 async def test_ack_is_idempotent_and_open_after_ack_is_not_found(local_client, services, clock):
     services.peers = FakePeerResolver(EDGE2); tk = ticket(services, clock)

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import secrets
 from collections import deque
 from collections.abc import Callable, Sequence
@@ -27,7 +28,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Final, NoReturn
 
 from app.activity.context import ActivityContext
-from app.activity.tamper import TamperMonitor
+from app.activity.tamper import MISUSE_REPORT_SEC, TamperMonitor
 from app.clock import Clock
 from app.logstore.writer import LogSink
 from app.notice.displays import Display, DisplayEvent, NoticeDisplays
@@ -38,6 +39,9 @@ if TYPE_CHECKING:
     from app.web.agent_api import IdleEventIn, WindowEventIn
 
 AGENT_TOKEN_HEADER: Final = "X-Agent-Token"
+AGENT_NONCE_HEADER: Final = "X-Agent-Nonce"
+SERVER_PROOF_HEADER: Final = "X-Server-Proof"
+NONCE_MAX: Final = 128
 HELLO: Final[dict[str, Any]] = {
     "heartbeat_sec": 5,
     "events_max": 200,
@@ -48,7 +52,8 @@ CLOCK_SKEW_SEC: Final = 300  # V28
 
 
 class AgentAuthError(Exception):
-    """401 ``login_required`` (no or unknown token) or 403 ``forbidden`` (wrong peer)."""
+    """401 ``login_required`` (no or unknown token), 403 ``forbidden`` (a peer in another
+    session) or 503 ``unavailable`` (the peer could not be resolved: the agent retries)."""
 
     def __init__(self, status: int, code: str) -> None:
         super().__init__(code)
@@ -62,6 +67,9 @@ class AgentSlot:
     user: str
     token_sha256: str
     minted_at: datetime
+    server_key: str = field(default_factory=lambda: secrets.token_hex(32), repr=False)
+    """Hex key handed to the agent at launch (never sent over the wire): the server proves it is
+    the real service by answering each request's nonce with ``HMAC-SHA256(key, nonce)`` (I1)."""
     pid: int | None = None
     hello_at: datetime | None = None
     last_seen: datetime | None = None
@@ -74,6 +82,11 @@ class AgentSlot:
 
 def _digest(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def server_proof(server_key: str, nonce: str) -> str:
+    """What the agent expects in ``X-Server-Proof`` for the ``X-Agent-Nonce`` it sent."""
+    return hmac.new(bytes.fromhex(server_key), nonce.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 class AgentHub:
@@ -129,11 +142,24 @@ class AgentHub:
     def slot(self, session_id: int) -> AgentSlot | None:
         return self._slots.get(session_id)
 
+    def lookup(self, token: str | None) -> AgentSlot | None:
+        """The slot of a live token (no peer check): cheap, so it runs before the peer scan (M1)."""
+        return self._by_digest.get(_digest(token)) if token else None
+
+    def proof(self, token: str | None, nonce: str | None) -> str | None:
+        """``X-Server-Proof`` for a request with a live token and a sane nonce, else None."""
+        if not nonce or len(nonce) > NONCE_MAX or not nonce.isascii():
+            return None
+        slot = self.lookup(token)
+        return server_proof(slot.server_key, nonce) if slot is not None else None
+
     def authenticate(self, token: str | None, peer: PeerInfo | None) -> AgentSlot:
-        slot = self._by_digest.get(_digest(token)) if token else None
+        slot = self.lookup(token)
         if slot is None:
             raise AgentAuthError(401, "login_required")
-        if peer is None or peer.session_id != slot.session_id:
+        if peer is None or peer.session_id is None:  # not evidence of anything (M2): retry later
+            raise AgentAuthError(503, "unavailable")
+        if peer.session_id != slot.session_id:
             self._impersonation(slot, peer)
         slot.last_seen = self._clock.now()
         return slot
@@ -149,14 +175,16 @@ class AgentHub:
         self.show_pending(slot.session_id)
         return {**HELLO, "window_events": self.window_events}
 
-    def _impersonation(self, slot: AgentSlot, peer: PeerInfo | None) -> NoReturn:
-        self._tamper.report(
+    def _impersonation(self, slot: AgentSlot, peer: PeerInfo) -> NoReturn:
+        self._tamper.report_throttled(
             "agent_impersonation",
+            key=(slot.session_id, peer.session_id),
+            window_sec=MISUSE_REPORT_SEC,
             claimed_session=slot.session_id,
-            peer_session=peer.session_id if peer is not None else None,
-            peer_pid=peer.pid if peer is not None else None,
-            peer_exe=peer.exe if peer is not None else None,
-            peer_user=peer.user if peer is not None else None,
+            peer_session=peer.session_id,
+            peer_pid=peer.pid,
+            peer_exe=peer.exe,
+            peer_user=peer.user,
         )
         raise AgentAuthError(403, "forbidden")
 

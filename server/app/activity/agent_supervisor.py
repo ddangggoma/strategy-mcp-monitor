@@ -178,7 +178,12 @@ class AgentSupervisor:
                 except OSError as exc:
                     raise LaunchError(repr(exc)) from exc
                 argv += ["--url-file", str(opts.url_dir / f"agent-{session_id}.url")]
-            env = {"MCPMON_AGENT_TOKEN": token, "PYTHONPATH": str(opts.agent_dir)}
+            slot = self._hub.slot(session_id)
+            assert slot is not None  # just minted
+            env = {
+                "MCPMON_AGENT_TOKEN": token, "MCPMON_AGENT_SERVER_KEY": slot.server_key,
+                "PYTHONPATH": str(opts.agent_dir),
+            }
             proc = self._launcher.launch(LaunchSpec(session_id, argv, env, opts.agent_dir))
         except LaunchError as exc:
             self._hub.revoke(session_id)

@@ -10,6 +10,7 @@ from typing import Any
 
 _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 _user32 = ctypes.WinDLL("user32", use_last_error=True)
+_ntdll = ctypes.WinDLL("ntdll")
 
 
 def _fn(dll: ctypes.WinDLL, name: str, restype: Any, *argtypes: Any) -> Any:
@@ -43,6 +44,10 @@ class MONITORINFO(ctypes.Structure):
                 ("dwFlags", wintypes.DWORD)]
 
 
+class UNICODE_STRING(ctypes.Structure):
+    _fields_ = [("Length", wintypes.USHORT), ("MaximumLength", wintypes.USHORT), ("Buffer", ctypes.c_void_p)]
+
+
 WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
 TH32CS_SNAPPROCESS = 0x00000002
@@ -53,6 +58,7 @@ HWND_TOPMOST = wintypes.HWND(-1)
 SWP_NOSIZE = 0x0001
 SWP_SHOWWINDOW = 0x0040
 MONITOR_DEFAULTTONEAREST = 0x00000002
+PROCESS_COMMAND_LINE_INFORMATION = 60  # PROCESSINFOCLASS, Windows 8.1+
 
 _GetCurrentProcessId = _fn(_kernel32, "GetCurrentProcessId", wintypes.DWORD)
 _ProcessIdToSessionId = _fn(_kernel32, "ProcessIdToSessionId", wintypes.BOOL, wintypes.DWORD, wintypes.LPDWORD)
@@ -65,6 +71,9 @@ _Process32FirstW = _fn(_kernel32, "Process32FirstW", wintypes.BOOL, wintypes.HAN
 _Process32NextW = _fn(_kernel32, "Process32NextW", wintypes.BOOL, wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W))
 _QueryFullProcessImageNameW = _fn(_kernel32, "QueryFullProcessImageNameW", wintypes.BOOL, wintypes.HANDLE,
                                   wintypes.DWORD, wintypes.LPWSTR, wintypes.LPDWORD)
+
+_NtQueryInformationProcess = _fn(_ntdll, "NtQueryInformationProcess", ctypes.c_long, wintypes.HANDLE, ctypes.c_int,
+                                 ctypes.c_void_p, wintypes.ULONG, ctypes.POINTER(wintypes.ULONG))
 
 _GetLastInputInfo = _fn(_user32, "GetLastInputInfo", wintypes.BOOL, ctypes.POINTER(LASTINPUTINFO))
 _EnumWindows = _fn(_user32, "EnumWindows", wintypes.BOOL, WNDENUMPROC, wintypes.LPARAM)
@@ -88,6 +97,33 @@ def current_session_id() -> int:
     if not _ProcessIdToSessionId(_GetCurrentProcessId(), ctypes.byref(sid)):
         raise ctypes.WinError(ctypes.get_last_error())
     return int(sid.value)
+
+
+def process_session_id(pid: int) -> int | None:
+    sid = wintypes.DWORD()
+    if not _ProcessIdToSessionId(pid, ctypes.byref(sid)):
+        return None
+    return int(sid.value)
+
+
+def process_command_line(pid: int) -> str | None:
+    """The command line of ``pid`` (``PROCESS_QUERY_LIMITED_INFORMATION``: our own user's processes),
+    or None when it cannot be read."""
+    handle = _OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return None
+    try:
+        size = wintypes.ULONG(0)
+        _NtQueryInformationProcess(handle, PROCESS_COMMAND_LINE_INFORMATION, None, 0, ctypes.byref(size))
+        if size.value < ctypes.sizeof(UNICODE_STRING):
+            return None
+        buf = ctypes.create_string_buffer(size.value)
+        if _NtQueryInformationProcess(handle, PROCESS_COMMAND_LINE_INFORMATION, buf, size, ctypes.byref(size)) < 0:
+            return None  # NTSTATUS error
+        text = UNICODE_STRING.from_buffer(buf)
+        return ctypes.wstring_at(text.Buffer, text.Length // 2) if text.Buffer else ""
+    finally:
+        _CloseHandle(handle)
 
 
 def idle_seconds() -> float:

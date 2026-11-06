@@ -156,3 +156,80 @@ def test_build_services_reuses_stored_otp_secret(tmp_path):
     second.db.close()
     assert len(rows) == 1 and rows[0]["value"] == secret1
     assert len(bytes.fromhex(secret1)) == 32
+
+
+# --- I1: both ports are ours before the collectors (and the agent launches) start ---------------
+
+import socket  # noqa: E402
+
+import app.main as main_mod  # noqa: E402
+from app.collect.config import CollectorConfig  # noqa: E402
+from app.main import bind_listener  # noqa: E402
+from tests.live import free_port  # noqa: E402
+
+
+class _CollectorsStarted(Exception):
+    pass
+
+
+def _connects(port: int) -> bool:
+    with socket.socket() as s:
+        s.settimeout(1)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+async def test_serve_binds_both_ports_before_the_collectors_start(tmp_path, monkeypatch):
+    lp, ep = free_port(), free_port()
+    seen = {}
+    real_build = main_mod.build_services
+
+    def build(root, **kw):
+        services = real_build(root, **kw)
+
+        async def start():
+            seen["local"], seen["external"] = _connects(lp), _connects(ep)
+            raise _CollectorsStarted
+
+        services.collectors.start = start
+        return services
+
+    monkeypatch.setattr(main_mod, "build_services", build)
+    with pytest.raises(_CollectorsStarted):
+        await main_mod.serve(tmp_path, lp, ep, external_host="127.0.0.1",
+                             collectors=CollectorConfig())
+    assert seen == {"local": True, "external": True}
+    assert not _connects(lp) and not _connects(ep)  # released again on the way out
+
+
+async def test_serve_starts_nothing_when_the_local_port_is_taken(tmp_path, monkeypatch):
+    holder = bind_listener("127.0.0.1", 0)
+    lp = holder.getsockname()[1]
+    started = []
+    real_build = main_mod.build_services
+
+    def build(root, **kw):
+        services = real_build(root, **kw)
+
+        async def start():
+            started.append(True)
+
+        services.collectors.start = start
+        return services
+
+    monkeypatch.setattr(main_mod, "build_services", build)
+    try:
+        with pytest.raises(OSError):
+            await main_mod.serve(tmp_path, lp, free_port(), external_host="127.0.0.1",
+                                 collectors=CollectorConfig())
+    finally:
+        holder.close()
+    assert started == []
+
+
+def test_bind_listener_is_exclusive():
+    first = bind_listener("127.0.0.1", 0)
+    try:
+        with pytest.raises(OSError):
+            bind_listener("127.0.0.1", first.getsockname()[1])
+    finally:
+        first.close()

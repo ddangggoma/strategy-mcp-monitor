@@ -4,7 +4,8 @@ The credential is the per-attempt ``X-Notice-Token`` header, not a session cooki
 CSRF cookie check: a custom header cannot be sent cross-origin without a preflight, which this
 app never answers. The request's TCP peer session (resolved by the server, never taken from the
 request) must be the display's session. Every failure is 404 ``not_found`` so a response never
-tells whether a token was valid; only a browser-marked cross-site fetch is 403 ``forbidden``.
+tells whether a token was valid; only a browser-marked cross-site fetch is 403 ``forbidden``, and
+a live token whose peer cannot be resolved is 503 ``unavailable`` (retried; M2).
 """
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ from fastapi import APIRouter, Depends, Request, Response
 
 from app.notice.displays import DisplayNotFoundError
 from app.services import Services
-from app.web.deps import ApiError, get_services, peer_of
+from app.web.deps import ApiError, get_services, resolved_peer
 
 router = APIRouter()
 
@@ -36,8 +37,14 @@ async def display_token(request: Request) -> DisplayCaller:
     site = request.headers.get("sec-fetch-site")
     if site is not None and site not in _ALLOWED_FETCH_SITES:
         raise ApiError(403, "forbidden")
-    peer = await peer_of(request)
-    return DisplayCaller(token, peer.session_id if peer is not None else None)
+    services = get_services(request)
+    if not services.displays.knows(token):  # M1: no connection-table scan for a dead token
+        raise ApiError(404, "not_found")
+    peer = await resolved_peer(request)
+    session = peer.session_id if peer is not None else None
+    if session is None:  # M2: unresolved is not misuse; the page offers a retry
+        raise ApiError(503, "unavailable")
+    return DisplayCaller(token, session)
 
 
 @router.post("/api/notice/display/open")
