@@ -337,8 +337,8 @@ async def test_build_services_adds_the_event_log_component_only_with_a_source(tm
             await svc.collectors.stop()
         expected = path if custom else svc.paths.data_dir / "collector-state.json"
         assert json.loads(expected.read_text("utf-8")) == {"System": 4}
-        # System via the test's handler; Security/LSM/RCM via the session handler (Task 8);
-        # the two PowerShell channels via the script-block handler (Task 10)
+        # System via the test's handler and the tamper handler (Task 14); Security/LSM/RCM via the
+        # session handler (Task 8); the two PowerShell channels via the script-block handler (Task 10)
         assert sorted(o[0] for o in src.opened) == sorted([
             "System", "Security", "Microsoft-Windows-TerminalServices-LocalSessionManager/Operational",
             "Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational",

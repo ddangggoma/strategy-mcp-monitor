@@ -183,8 +183,9 @@ async def test_build_services_registers_the_handler_on_the_three_session_channel
         try:
             await eventually(lambda: len(seen) == 3)
             # plus the two PowerShell channels of the script-block handler (Task 10, activity on)
+            # and System of the tamper handler (Task 14)
             assert sorted(o[0] for o in src.opened) == sorted([
-                SEC, LSM, RCM, "Microsoft-Windows-PowerShell/Operational", "PowerShellCore/Operational"])
+                SEC, LSM, RCM, "Microsoft-Windows-PowerShell/Operational", "PowerShellCore/Operational", "System"])
         finally:
             await svc.collectors.stop()
         assert [f.record_id for f in svc.rdp_history.failures(clock.now() - timedelta(days=1))] == [13]

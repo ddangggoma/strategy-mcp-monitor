@@ -10,7 +10,7 @@ from app.activity.agent_supervisor import AgentSupervisor
 from app.activity.context import ActivityContext
 from app.activity.powershell import PowerShellHandler, expire_every
 from app.activity.process import CommandHandler, ProcessActivityHandler, ProcessComponent
-from app.activity.tamper import TamperMonitor
+from app.activity.tamper import TamperEventHandler, TamperMonitor, TamperScanner, scan_every
 from app.audit import AuditLogger
 from app.auth.otp import DummyOtpProvider, OtpProvider, OtpService
 from app.auth.sessions import SessionStore
@@ -77,6 +77,9 @@ class Services:
     """Per-session agent slots behind ``/api/agent/*`` (Local only); a display listener."""
     agent_supervisor: AgentSupervisor | None
     """Launches and watches the session agents when ``CollectorConfig.launcher`` is set."""
+    tamper_scanner: TamperScanner
+    """Audit registry / script file / log file checks; scanned every 60 s by the ``tamper-scan``
+    collector task when collection is on (``CollectorConfig.wts``)."""
 
 
 def _load_or_create_otp_secret(db: Database) -> bytes:
@@ -155,7 +158,9 @@ def build_services(
         )
         rdp.add_listener(agent_supervisor.on_session_change)  # after displays: the display exists
         manager.add_task("agent-supervisor", agent_supervisor.run, stop=agent_supervisor.stop)
+    tamper_scanner = TamperScanner(tamper, scripts, mcps, paths.logs_dir, log)
     if config_collectors.wts is not None:
+        manager.add_task("tamper-scan", functools.partial(scan_every, tamper_scanner, manager))
         manager.add(SessionsComponent(
             config_collectors.wts, rdp, manager, ReverseDns(clock=clock), clock,
             interval_sec=config_collectors.poll_interval_sec, displays=displays,
@@ -169,6 +174,9 @@ def build_services(
         session_events = SessionEventHandler(rdp_history, log)
         for channel in ("eventlog:security", "eventlog:lsm", "eventlog:rcm"):
             eventlog.on(channel, session_events)
+        tamper_events = TamperEventHandler(tamper)
+        for channel in ("eventlog:security", "eventlog:system"):
+            eventlog.on(channel, tamper_events)
         if config_collectors.activity:
             eventlog.on("eventlog:security", CommandHandler(activity_context, log))
             script_blocks = PowerShellHandler(activity_context, log, clock)
@@ -209,4 +217,5 @@ def build_services(
         activity_context=activity_context,
         agents=agents,
         agent_supervisor=agent_supervisor,
+        tamper_scanner=tamper_scanner,
     )

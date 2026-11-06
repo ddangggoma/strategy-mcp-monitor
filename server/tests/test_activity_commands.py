@@ -247,14 +247,14 @@ async def test_build_services_registers_command_handlers_only_with_activity(tmp_
         try:
             await eventually(lambda: SEC in {o[0] for o in src.opened})
             if activity:
-                await eventually(lambda: {o[0] for o in src.opened} == {SEC, PS, PSC, *_SESSION_CHANNELS})
+                await eventually(lambda: {o[0] for o in src.opened} == {SEC, PS, PSC, SYS, *_SESSION_CHANNELS})
                 # the clock moves on until the 1 s expiry task completes the half block as incomplete
                 lines = await _command_lines_until(svc, clock, lambda ls: len(ls) == 2)
                 assert sorted((e["event"], e["record_id"]) for e in lines) == [("process_cmdline", 21), ("script_block", 22)]
                 assert [e["incomplete"] for e in lines if e["event"] == "script_block"] == [True]
             else:
                 await asyncio.sleep(0.2)
-                assert {o[0] for o in src.opened} == {SEC, *_SESSION_CHANNELS}
+                assert {o[0] for o in src.opened} == {SEC, SYS, *_SESSION_CHANNELS}
         finally:
             await svc.collectors.stop()
         if not activity:
@@ -263,6 +263,7 @@ async def test_build_services_registers_command_handlers_only_with_activity(tmp_
         await svc.log.stop()
         svc.db.close()
 
+SYS = "System"  # the tamper handler (Task 14) listens there whether activity is on or off
 _SESSION_CHANNELS = ("Microsoft-Windows-TerminalServices-LocalSessionManager/Operational",
                      "Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational")
 

@@ -1,16 +1,35 @@
 """Bypass (tamper) detection hub (V19): every detector reports here, so each event is written to the
 ``tamper`` log, kept in a small in-memory ring for ``GET /api/tamper/recent`` and pushed to logged-in
-board subscribers as the SSE ``tamper`` event (never to anonymous ones)."""
+board subscribers as the SSE ``tamper`` event (never to anonymous ones).
+
+Also here: the event log detectors (audit policy changed, log cleared) and the 60-second
+``TamperScanner`` (audit registry drift, MCP script files, daily log files)."""
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import itertools
+import re
 from collections import deque
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Protocol
 
 from app.clock import Clock, to_kst_iso
 from app.logstore.writer import LogSink
 from app.monitor.bus import BoardBus
+from app.win import IS_WINDOWS
+from app.win.eventlog import EventRecord
+
+if IS_WINDOWS:
+    import winreg
+
+if TYPE_CHECKING:
+    from app.collect.manager import Collectors
+    from app.monitor.scripts import ScriptStore
+    from app.monitor.store import McpStore
 
 
 class TamperMonitor:
@@ -33,3 +52,243 @@ class TamperMonitor:
     def recent(self, limit: int = 50) -> list[dict[str, Any]]:
         """The newest ``limit`` records, newest first."""
         return [dict(r) for r in itertools.islice(reversed(self._ring), limit)]
+
+
+# ---- event log: audit policy changed (Security 4719), log cleared (Security 1102, System 104) ----
+
+_EVENTLOG_PROVIDER = "Microsoft-Windows-Eventlog"
+
+
+def _subject(r: EventRecord) -> str | None:
+    """``SubjectDomainName\\SubjectUserName``, or just the name when there is no domain."""
+    name = r.data.get("SubjectUserName")
+    if not name:
+        return None
+    domain = r.data.get("SubjectDomainName")
+    return f"{domain}\\{name}" if domain else name
+
+
+def map_tamper_record(r: EventRecord) -> tuple[str, dict[str, Any]] | None:
+    """A Security/System event → ``(tamper event, fields)``; ``None`` for every other event."""
+    if r.channel == "Security" and r.event_id == 4719:
+        return "audit_policy_changed", {
+            "user": _subject(r),
+            "category": r.data.get("CategoryId"),
+            "subcategory": r.data.get("SubcategoryGuid"),
+            "changes": r.data.get("AuditPolicyChanges"),
+        }
+    if r.channel == "Security" and r.event_id == 1102 and r.provider == _EVENTLOG_PROVIDER:
+        return "log_cleared", {"channel": "Security", "user": _subject(r)}
+    if r.channel == "System" and r.event_id == 104 and r.provider == _EVENTLOG_PROVIDER:
+        return "log_cleared", {"channel": r.data.get("Channel"), "user": _subject(r)}
+    return None
+
+
+class TamperEventHandler:
+    """Event log handler (``eventlog:security``, ``eventlog:system``); loop thread."""
+
+    def __init__(self, tamper: TamperMonitor) -> None:
+        self._tamper = tamper
+
+    def __call__(self, records: list[EventRecord]) -> None:
+        for r in records:
+            mapped = map_tamper_record(r)
+            if mapped is None:
+                continue
+            name, fields = mapped
+            self._tamper.report(
+                name, at=r.time_created, source=f"eventlog:{r.event_id}", record_id=r.record_id,
+                **fields,
+            )
+
+
+# ---- the 60-second scan: audit registry, script files, log files ----
+
+@dataclass(frozen=True)
+class RegistryValue:
+    path: str
+    """Key path under ``HKEY_LOCAL_MACHINE``."""
+    name: str
+
+    @property
+    def key(self) -> str:
+        """``<path>\\<name>``: how the value is named in ``audit.config`` and ``audit_config_changed``."""
+        return f"{self.path}\\{self.name}"
+
+
+AUDIT_REGISTRY: tuple[RegistryValue, ...] = (
+    RegistryValue(
+        r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Audit",
+        "ProcessCreationIncludeCmdLine_Enabled",
+    ),
+    RegistryValue(
+        r"SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging",
+        "EnableScriptBlockLogging",
+    ),
+)
+
+
+def read_hklm(v: RegistryValue) -> int | str | None:
+    """One ``HKEY_LOCAL_MACHINE`` value (read-only); ``None`` when the key or value is missing (or
+    off Windows). Other ``OSError``s (e.g. access denied) propagate."""
+    if not IS_WINDOWS:
+        return None
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, v.path) as key:
+            value, _type = winreg.QueryValueEx(key, v.name)
+    except FileNotFoundError:
+        return None
+    if value is None or isinstance(value, int | str):
+        return value
+    return str(value)
+
+
+_LOG_FILE = re.compile(r"^\d{4}-\d{2}-\d{2}\.jsonl(\.gz)?$", re.ASCII)
+_MISSING = "missing"
+"""What ``TamperScanner`` remembers as reported for a script file that is gone."""
+
+
+class Scannable(Protocol):
+    def scan(self) -> None: ...
+
+
+class TamperScanner:
+    """Compares the audit registry, the MCP script files and the daily log files with what it saw
+    last time (``scan()`` every 60 s, loop thread; the files are small enough to read inline).
+
+    - Registry: the first scan only logs ``system`` ``audit.config`` with every value; afterwards a
+      changed value reports ``audit_config_changed`` once. A value that cannot be read is ``None``.
+    - Scripts: a file that is gone (``script_file_missing``) or whose sha256 differs from the DB
+      (``script_file_changed``) is reported once per ``(mcp_id, kind, actual)`` until it matches.
+    - Logs: a ``YYYY-MM-DD.jsonl[.gz]`` file that disappeared (``log_file_removed``, unless
+      announced by ``expect_log_removed``) or shrank (``log_file_truncated``). Growth is normal.
+    """
+
+    def __init__(
+        self,
+        tamper: TamperMonitor,
+        scripts: ScriptStore,
+        mcps: McpStore,
+        logs_dir: Path,
+        log: LogSink,
+        *,
+        read_value: Callable[[RegistryValue], int | str | None] = read_hklm,
+        registry: tuple[RegistryValue, ...] = AUDIT_REGISTRY,
+    ) -> None:
+        self._tamper = tamper
+        self._scripts = scripts
+        self._mcps = mcps
+        self._logs_dir = logs_dir
+        self._log = log
+        self._read_value = read_value
+        self._registry = registry
+        self._values: dict[str, int | str | None] | None = None
+        self._script_reported: dict[tuple[int, str], str] = {}
+        """``(mcp_id, kind)`` → the reported actual sha256, or ``_MISSING``."""
+        self._log_sizes: dict[str, int] | None = None
+        self._expected_removals: set[str] = set()
+
+    def expect_log_removed(self, file_name: str) -> None:
+        """Announce that ``file_name`` is about to be deleted on purpose (retention, Plan 5): its
+        disappearance is forgotten quietly instead of reported."""
+        self._expected_removals.add(file_name)
+
+    def scan(self) -> None:
+        self._scan_registry()
+        self._scan_scripts()
+        self._scan_logs()
+
+    def _read(self, v: RegistryValue) -> int | str | None:
+        try:
+            return self._read_value(v)
+        except OSError:
+            return None
+
+    def _scan_registry(self) -> None:
+        values = {v.key: self._read(v) for v in self._registry}
+        before, self._values = self._values, values
+        if before is None:
+            self._log.emit("system", event="audit.config", values=values)
+            return
+        for key, value in values.items():
+            if before.get(key) != value:
+                self._tamper.report("audit_config_changed", key=key, before=before.get(key), after=value)
+
+    def _scan_scripts(self) -> None:
+        seen: set[tuple[int, str]] = set()
+        for mcp in self._mcps.list():
+            for info in self._scripts.list(mcp.id):
+                slot = (mcp.id, info.kind)
+                seen.add(slot)
+                try:
+                    data = info.path.read_bytes()
+                except FileNotFoundError:
+                    actual = _MISSING
+                except OSError:  # e.g. a sharing violation: try again next scan
+                    continue
+                else:
+                    actual = hashlib.sha256(data).hexdigest()
+                if actual == info.sha256:
+                    self._script_reported.pop(slot, None)
+                    continue
+                if self._script_reported.get(slot) == actual:
+                    continue
+                self._script_reported[slot] = actual
+                fields: dict[str, Any] = {"mcp_id": mcp.id, "kind": info.kind, "path": str(info.path)}
+                if actual == _MISSING:
+                    self._tamper.report("script_file_missing", **fields)
+                else:
+                    self._tamper.report(
+                        "script_file_changed", **fields,
+                        expected_sha256=info.sha256, actual_sha256=actual,
+                    )
+        for slot in set(self._script_reported) - seen:  # MCP or script deleted
+            del self._script_reported[slot]
+
+    def _list_logs(self) -> dict[str, int] | None:
+        """``{file name: size}``; ``None`` when the directory cannot be read (skip this scan)."""
+        try:
+            entries = list(self._logs_dir.iterdir())
+        except FileNotFoundError:
+            return {}
+        except OSError:
+            return None
+        sizes: dict[str, int] = {}
+        for entry in entries:
+            if _LOG_FILE.match(entry.name) is None:
+                continue
+            try:
+                if entry.is_file():
+                    sizes[entry.name] = entry.stat().st_size
+            except OSError:  # deleted between listing and stat: treated as gone
+                continue
+        return sizes
+
+    def _scan_logs(self) -> None:
+        sizes = self._list_logs()
+        if sizes is None:
+            return
+        before, self._log_sizes = self._log_sizes, sizes
+        if before is not None:
+            for name, size in sorted(before.items()):
+                after = sizes.get(name)
+                if after is None:
+                    if name in self._expected_removals:
+                        continue
+                    self._tamper.report("log_file_removed", file=name)
+                elif after < size:
+                    self._tamper.report("log_file_truncated", file=name, before=size, after=after)
+        self._expected_removals &= set(sizes)  # announced files that are gone need no more notice
+
+
+async def scan_every(
+    scanner: Scannable, collectors: Collectors, *, interval_sec: float = 60.0
+) -> None:
+    """The ``tamper-scan`` collector task: a first scan at once (the baselines), then one every
+    ``interval_sec``; a failing scan is logged (``collector.handler_failed``) and the loop goes on."""
+    while True:
+        try:
+            scanner.scan()
+        except Exception as exc:
+            collectors.handler_failed("tamper-scan", exc)
+        await asyncio.sleep(interval_sec)
