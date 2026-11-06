@@ -350,8 +350,10 @@ class Monitor:
                     mcp_id,
                     TransitionRecord(self._clock.now(), effect.from_state, effect.to_state, effect.issue),
                 )
+                # "from" is a keyword; typed Any so mypy accepts it next to emit's `at=` parameter
+                from_field: dict[str, Any] = {"from": effect.from_state.value}
                 self._log.emit(
-                    "mcp.health", mcp_id=mcp_id, name=name, **{"from": effect.from_state.value},
+                    "mcp.health", mcp_id=mcp_id, name=name, **from_field,
                     to=effect.to_state.value, issue=issue,
                 )
                 self._bus.mark_dirty(mcp_id)

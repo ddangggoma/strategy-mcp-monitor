@@ -1,15 +1,23 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import sys
+import threading
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from app.clock import KST, Clock, to_kst_iso
+
+
+class LogSink(Protocol):
+    """Anything that takes log events like :meth:`LogWriter.emit` (loop thread only)."""
+
+    def emit(self, cat: str, *, at: datetime | None = None, **fields: Any) -> None: ...
 
 
 def _dumps(event: Mapping[str, Any]) -> str:
@@ -79,19 +87,23 @@ class LogWriter:
         self._lock = asyncio.Lock()
         self._retry: list[dict[str, Any]] | None = None  # failed batch awaiting its one retry
         self._task: asyncio.Task[None] | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None  # saved by start() for emit_threadsafe
+        self._loop_thread: int | None = None
         self._stopping = False
         self._stopped = False
 
-    def emit(self, cat: str, **fields: Any) -> None:
-        """Queue an event stamped with the current time. Never raises, never blocks.
+    def emit(self, cat: str, *, at: datetime | None = None, **fields: Any) -> None:
+        """Queue an event stamped ``at`` (the event time) or else the current time.
 
-        Not thread-safe (asyncio.Queue/Event): call only on the event-loop thread. From
-        other threads use ``loop.call_soon_threadsafe(writer.emit, cat, ...)``.
+        Never raises, never blocks. A ``ts`` key in ``fields`` is ignored. Not thread-safe
+        (asyncio.Queue/Event): call only on the event-loop thread; from other threads use
+        :meth:`emit_threadsafe`.
         """
         try:
             if self._stopped:
                 return
-            event: dict[str, Any] = {"ts": to_kst_iso(self._clock.now()), "cat": cat}
+            stamp = at if at is not None else self._clock.now()
+            event: dict[str, Any] = {"ts": to_kst_iso(stamp), "cat": cat}
             event.update((k, v) for k, v in fields.items() if k != "ts")
             self._queue.put_nowait(event)
             if self._queue.qsize() >= self._max_batch:
@@ -99,8 +111,32 @@ class LogWriter:
         except Exception as exc:
             _warn(f"emit failed: {exc!r}")
 
+    def emit_threadsafe(self, cat: str, *, at: datetime | None = None, **fields: Any) -> None:
+        """:meth:`emit` callable from any thread. Never raises.
+
+        On the loop thread it emits directly (keeps order with plain ``emit`` calls); from other
+        threads it schedules ``emit`` on the loop saved by :meth:`start`. Before ``start`` or
+        after the loop has closed the event is dropped with a stderr warning.
+        """
+        try:
+            loop = self._loop
+            if loop is None:
+                _warn("emit_threadsafe before start")
+                return
+            if threading.get_ident() == self._loop_thread:
+                self.emit(cat, at=at, **fields)
+                return
+            try:
+                loop.call_soon_threadsafe(functools.partial(self.emit, cat, at=at, **fields))
+            except RuntimeError:
+                _warn("emit_threadsafe after loop closed")
+        except Exception as exc:
+            _warn(f"emit_threadsafe failed: {exc!r}")
+
     async def start(self) -> None:
         if self._task is None and not self._stopped:
+            self._loop = asyncio.get_running_loop()
+            self._loop_thread = threading.get_ident()
             self._task = asyncio.create_task(self._run(), name="log-writer")
 
     async def flush(self) -> None:

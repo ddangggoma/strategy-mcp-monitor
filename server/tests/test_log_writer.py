@@ -1,5 +1,7 @@
 import asyncio
 import json
+import threading
+from datetime import UTC, datetime
 
 from app.logstore.writer import DailyJsonlWriter, LogWriter
 
@@ -181,3 +183,46 @@ def test_bad_event_does_not_drop_batch(paths):
     assert rows[0]["msg"] == "good1" and rows[3]["msg"] == "good2"
     assert "_unserializable" in rows[1] and rows[1]["cat"] == "system"
     assert rows[2]["cat"] == "system" and "surrogate" in rows[2]["msg"]
+
+
+async def test_emit_at_overrides_timestamp_and_day(paths, clock):
+    lw = LogWriter(DailyJsonlWriter(paths.logs_dir), clock, flush_interval=60)
+    await lw.start()
+    lw.emit("session", at=datetime(2026, 11, 3, 14, 59, 59, 500000, tzinfo=UTC), event="connect")  # 11-03 23:59:59.500 KST
+    lw.emit("session", ts="2000-01-01T00:00:00+09:00", event="x")  # a ts field is still ignored
+    await lw.stop()
+    assert read(paths, "2026-11-03")[0]["ts"] == "2026-11-03T23:59:59.500+09:00"
+    assert read(paths, "2026-11-04")[0]["ts"] == "2026-11-04T14:00:00.000+09:00"
+
+
+async def test_emit_threadsafe_from_worker_thread(paths, clock):
+    lw = LogWriter(DailyJsonlWriter(paths.logs_dir), clock, flush_interval=60)
+    await lw.start()
+    t = threading.Thread(target=lambda: [lw.emit_threadsafe("activity.process", n=i) for i in range(50)])
+    t.start(); t.join()
+    await asyncio.sleep(0.01)  # let the scheduled callbacks run
+    await lw.stop()
+    assert [r["n"] for r in read(paths, "2026-11-04")] == list(range(50))
+
+
+async def test_emit_threadsafe_on_loop_thread_keeps_order(paths, clock):
+    lw = LogWriter(DailyJsonlWriter(paths.logs_dir), clock, flush_interval=60)
+    await lw.start()
+    lw.emit_threadsafe("system", n=1); lw.emit("system", n=2)
+    await lw.stop()
+    assert [r["n"] for r in read(paths, "2026-11-04")] == [1, 2]
+
+
+def test_emit_threadsafe_before_start_is_dropped_with_warning(paths, clock, capsys):
+    lw = LogWriter(DailyJsonlWriter(paths.logs_dir), clock)
+    lw.emit_threadsafe("system", n=1)
+    assert "emit_threadsafe before start" in capsys.readouterr().err
+
+
+def test_emit_threadsafe_after_loop_closed_is_dropped_with_warning(paths, clock, capsys):
+    loop = asyncio.new_event_loop()
+    lw = LogWriter(DailyJsonlWriter(paths.logs_dir), clock)
+    loop.run_until_complete(lw.start()); loop.run_until_complete(lw.stop()); loop.close()
+    t = threading.Thread(target=lambda: lw.emit_threadsafe("system", n=1)); t.start(); t.join()
+    assert "emit_threadsafe after loop closed" in capsys.readouterr().err
+    assert not (paths.logs_dir / "2026-11-04.jsonl").exists()

@@ -14,6 +14,7 @@ dependencies = [
     "pydantic",
     "httpx",
     "psutil",
+    "pywin32==312 ; sys_platform == 'win32'",
 ]
 
 [dependency-groups]
@@ -32,8 +33,11 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 pythonpath = ["."]
-markers = ["integration: real subprocess scenario (Windows, needs dummy-mcps/.venv)"]
-addopts = "-m 'not integration'"
+markers = [
+    "integration: real subprocess scenario (Windows, needs dummy-mcps/.venv)",
+    "winlive: real Windows API on this PC, no admin rights",
+]
+addopts = "-m 'not integration and not winlive'"
 # Per-test cap (pytest-timeout): a hung real-process test fails instead of hanging the whole run.
 timeout = 120
 
