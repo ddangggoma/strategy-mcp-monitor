@@ -62,6 +62,7 @@ it("trackRequests lists the paths requested during this test only", async () => 
   await endpoints.mcps();
   await endpoints.mcpHistory(1, 24);
   expect(spy.paths()).toEqual(["/api/mcps", "/api/mcps/1/history"]);
+  expect(spy.urls()).toEqual(["/api/mcps", "/api/mcps/1/history?hours=24"]);
 });
 
 it("the default /api/stream handler feeds a real BoardStreamClient over fetch", async () => {

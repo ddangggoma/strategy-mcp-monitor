@@ -1,5 +1,7 @@
 // Reads tokens.css, picks the light-dark() branch per theme, composites translucent tokens
 // (the *-soft color-mix values) over their backdrop and checks WCAG contrast with culori.
+import { converter } from "culori";
+import { GROUP_STACK } from "@/admin/logs/categories";
 import { colorTokenNames, compositeOver, contrastPairs, isDisplayable, resolveToken } from "./contrast-helpers";
 
 const STATES = ["healthy", "suspect", "action", "recovering", "failed", "maintenance"] as const;
@@ -68,6 +70,41 @@ it.each(THEMES)("log category colors are told apart from each other in %s", (the
       const d = Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
       expect(d, `${a} vs ${b}`).toBeGreaterThanOrEqual(0.1);
     }
+  }
+});
+
+// Stacked histogram segments touch their neighbours in GROUP_STACK order (dataviz skill, check 4):
+// adjacent pairs stay apart under protan/deutan simulation (Machado 2009, severity 1) by ΔE ≥ 8
+// and under normal vision by ΔE ≥ 15 (OKLab ×100).
+const MACHADO = {
+  protan: [[0.152286, 1.052583, -0.204868], [0.114503, 0.786281, 0.099216], [-0.003882, -0.048116, 1.051998]],
+  deutan: [[0.367322, 0.860646, -0.227968], [0.280085, 0.672501, 0.047413], [-0.01182, 0.04294, 0.968881]],
+} as const;
+const toLrgb = converter("lrgb");
+const toLab = converter("oklab");
+
+function okLab(rgb: [number, number, number]): [number, number, number] {
+  const c = toLab({ mode: "lrgb", r: rgb[0], g: rgb[1], b: rgb[2] });
+  return [c.l, c.a, c.b];
+}
+
+function seen(theme: (typeof THEMES)[number], token: string, kind?: keyof typeof MACHADO): [number, number, number] {
+  const c = toLrgb(resolveToken(theme, token));
+  const v = [c.r, c.g, c.b].map((x) => Math.min(1, Math.max(0, x)));
+  if (!kind) return okLab(v as [number, number, number]);
+  const m = MACHADO[kind];
+  const sim = m.map((row) => Math.min(1, Math.max(0, row[0] * v[0]! + row[1] * v[1]! + row[2] * v[2]!)));
+  return okLab(sim as [number, number, number]);
+}
+
+it.each(THEMES)("stacked category neighbours stay apart for colour-blind and normal vision in %s", (theme) => {
+  const dist = (p: number[], q: number[]) => 100 * Math.hypot(p[0]! - q[0]!, p[1]! - q[1]!, p[2]! - q[2]!);
+  for (const [i, a] of GROUP_STACK.slice(0, -1).entries()) {
+    const b = GROUP_STACK[i + 1]!;
+    for (const kind of ["protan", "deutan"] as const) {
+      expect(dist(seen(theme, `cat-${a}`, kind), seen(theme, `cat-${b}`, kind)), `${a}/${b} ${kind}`).toBeGreaterThanOrEqual(8);
+    }
+    expect(dist(seen(theme, `cat-${a}`), seen(theme, `cat-${b}`)), `${a}/${b} normal`).toBeGreaterThanOrEqual(15);
   }
 });
 

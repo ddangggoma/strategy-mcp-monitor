@@ -47,6 +47,18 @@ it("CodeMirror is one lazy chunk, outside the admin entry and the page chunks", 
   expect(entryModules(DIST, "admin.html").filter((m) => editor.test(m))).toEqual([]);
 });
 
+it("the log viewer is its own lazy chunk with the virtualizer, outside the admin entry", () => {
+  const page = /[\\/]admin[\\/]logs[\\/]LogsPage\.tsx$/;
+  const virtual = /[\\/]@tanstack[\\/]virtual-core[\\/]|[\\/]@tanstack[\\/]react-virtual[\\/]/;
+  const chunks = Object.entries(chunkModules(DIST)).filter(([, ids]) => ids.some((id) => page.test(id)));
+  expect(chunks).toHaveLength(1);
+  const [, ids] = chunks[0]!;
+  expect(ids.some((id) => /[\\/]admin[\\/]logs[\\/]LogHistogram\.tsx$/.test(id))).toBe(true);
+  const admin = entryModules(DIST, "admin.html");
+  expect(admin.some((m) => /[\\/]admin[\\/]router\.tsx$/.test(m))).toBe(true); // the list is real
+  expect(admin.filter((m) => page.test(m) || virtual.test(m) || /[\\/]components[\\/]data[\\/]VirtualTable/.test(m))).toEqual([]);
+});
+
 it("every text asset has .br and .gz siblings", () => {
   const assets = join(DIST, "assets");
   expect(existsSync(assets)).toBe(true);

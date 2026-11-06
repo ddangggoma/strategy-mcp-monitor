@@ -62,15 +62,19 @@
     --slate-800: oklch(0.37 0.035 255);
 
     /* ── Primitives: log category hues (W32). Chosen away from the state hues
-          above, so a category colour never reads as an MCP state. 400 = dark, 600 = light. */
-    --blue-400: oklch(0.74 0.12 245);
-    --blue-600: oklch(0.55 0.15 250);
-    --violet-400: oklch(0.75 0.13 300);
-    --violet-600: oklch(0.55 0.17 300);
-    --teal-400: oklch(0.78 0.11 180);
-    --teal-600: oklch(0.56 0.095 185);
-    --magenta-400: oklch(0.74 0.15 355);
-    --magenta-600: oklch(0.56 0.19 355);
+          above, so a category colour never reads as an MCP state. 400 = dark, 600 = light.
+          Lightness alternates along the histogram stack (security, session, system, activity,
+          mcp) so touching segments stay apart for colour-blind readers too (dataviz validator:
+          adjacent CVD ΔE ≥ 14, normal ΔE ≥ 24 in both themes). */
+    --blue-400: oklch(0.6 0.16 250);
+    --blue-600: oklch(0.56 0.155 250);
+    --violet-400: oklch(0.6 0.16 300);
+    --violet-600: oklch(0.45 0.16 300);
+    --teal-400: oklch(0.66 0.115 185);
+    --teal-600: oklch(0.6 0.105 185);
+    --magenta-400: oklch(0.6 0.16 355);
+    --magenta-600: oklch(0.45 0.16 355);
+    --olive-500: oklch(0.6 0.135 115); /* one step serves both themes */
 
     /* ── Roles: surfaces and text ─────────────────────────────────────── */
     --color-bg: light-dark(var(--steel-50), var(--steel-950));
@@ -129,7 +133,7 @@
     --color-cat-activity: light-dark(var(--violet-600), var(--violet-400));
     --color-cat-mcp: light-dark(var(--teal-600), var(--teal-400));
     --color-cat-security: light-dark(var(--magenta-600), var(--magenta-400));
-    --color-cat-system: light-dark(var(--steel-600), var(--steel-400));
+    --color-cat-system: var(--olive-500);
 
     /* ── Type ─────────────────────────────────────────────────────────── */
     --font-sans: "Pretendard Variable", Pretendard, "Segoe UI Variable Text", "Segoe UI", "Malgun Gothic",

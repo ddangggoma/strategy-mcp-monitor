@@ -47,7 +47,7 @@ const CHANNELS: ReadonlySet<string> = new Set<Channel>(["local", "external"]);
 const OFFSET_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})$/;
 
 /** `YYYY-MM-DDTHH:mm:ss.SSS+09:00` for an epoch-ms instant. */
-function kstIso(ms: number): string {
+export function kstIso(ms: number): string {
   return new Date(ms + KST_OFFSET).toISOString().replace("Z", "+09:00");
 }
 
