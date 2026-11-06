@@ -1,8 +1,44 @@
 // Visual baselines, run in both the chromium-dark and chromium-light projects. Values that change
 // from run to run (times, latency, sparklines, countdowns, uptime, activity rows) carry
 // data-volatile and are masked (F32: earlier specs leave history behind).
-import type { Page } from "@playwright/test";
-import { MCP_NAME, copy, expect, test, type Who } from "./fixtures";
+// A mask hides values but not how many rows there are, so the two reads whose length depends on
+// what earlier specs did (recent activity, notice versions) are answered with fixed data here: the
+// baselines are the same whether this spec runs alone or after the whole suite. The MCP's port is
+// fixed too (backend.ts MCP_PORT).
+import type { Page, Route } from "@playwright/test";
+import type { McpActivity, Notice, NoticeVersionSummary } from "../src/lib/api-types";
+import { MCP_NAME, copy, expect, test, type BackendState, type Who } from "./fixtures";
+
+const AT = "2026-11-06T09:00:00.000+09:00";
+
+function activity(s: BackendState): McpActivity {
+  return {
+    transitions: [{ at: AT, from: "HEALTHY", to: "SUSPECT", issue: "UNRESPONSIVE", mcp_id: s.mcpId, name: MCP_NAME }],
+    actions: [
+      {
+        id: 1, run_id: "visual", at: AT, requested: "start", kind: "start", trigger: "manual", reason: "manual",
+        actor_id: 1, actor: { id: 1, email: s.adminEmail, name: "E2E Admin" }, status: "ok", exit_code: 0,
+        duration_ms: 1200, killed: 0, error: null, mcp_id: s.mcpId, name: MCP_NAME,
+      },
+    ],
+  };
+}
+
+/** A fresh backend's notice: the built-in text, no saved versions. */
+const NOTICE: Notice = { ...copy.notice.builtIn, version: 0, created_at: null, author: null, reverted_from: null };
+const NOTICE_VERSIONS: NoticeVersionSummary[] = [];
+
+async function fixHistoryReads(page: Page, s: BackendState): Promise<void> {
+  // matched on the path alone: the activity read carries ?limit=
+  const fixed = (path: string, body: unknown) =>
+    page.route(
+      (url) => url.pathname === path,
+      (route: Route) => (route.request().method() === "GET" ? route.fulfill({ json: body }) : route.fallback()),
+    );
+  await fixed("/api/mcp-activity", activity(s));
+  await fixed("/api/notice", NOTICE);
+  await fixed("/api/notice/versions", NOTICE_VERSIONS);
+}
 
 interface Screen {
   name: string;
@@ -58,6 +94,7 @@ const SCREENS: Screen[] = [
 
 for (const screen of SCREENS) {
   test(`screenshot ${screen.name}`, async ({ page, state, loginAs }) => {
+    await fixHistoryReads(page, state);
     if (screen.who) await loginAs(page, screen.who, "local");
     await page.goto(`${state.localUrl}${screen.path.replace("{id}", String(state.mcpId))}`);
     await screen.ready(page);

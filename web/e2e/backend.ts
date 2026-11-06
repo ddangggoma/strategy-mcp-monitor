@@ -87,6 +87,28 @@ async function freePorts(n: number): Promise<number[]> {
   return [...ports];
 }
 
+/**
+ * The MCP's port shows on screen (list, detail, settings form), so the visual baselines need the
+ * same number every run: a fixed port, or a free one only when something else holds it.
+ */
+export const MCP_PORT = 47815;
+
+async function portIsFree(port: number): Promise<boolean> {
+  return new Promise((ok) => {
+    const srv = createServer();
+    srv.once("error", () => ok(false));
+    srv.listen(port, "127.0.0.1", () => srv.close(() => ok(true)));
+  });
+}
+
+async function mcpPortAvoiding(taken: number[]): Promise<number> {
+  if (!taken.includes(MCP_PORT) && (await portIsFree(MCP_PORT))) return MCP_PORT;
+  for (;;) {
+    const p = await freePort();
+    if (!taken.includes(p)) return p;
+  }
+}
+
 async function pollUntil<T>(what: string, timeoutMs: number, probe: () => Promise<T | undefined>): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   let lastError: unknown = null;
@@ -199,7 +221,8 @@ export async function startBackend(): Promise<{ state: BackendState; adminLocal:
 
   const root = process.env.MCPMON_E2E_ROOT ?? (await mkdtemp(join(tmpdir(), "mcpmon-e2e-")));
   await mkdir(root, { recursive: true });
-  const [localPort, externalPort, mcpPort] = (await freePorts(3)) as [number, number, number];
+  const [localPort, externalPort] = (await freePorts(2)) as [number, number];
+  const mcpPort = await mcpPortAvoiding([localPort, externalPort]);
   const localUrl = `http://127.0.0.1:${localPort}`;
   const externalUrl = `http://127.0.0.1:${externalPort}`;
 
