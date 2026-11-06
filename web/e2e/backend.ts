@@ -58,6 +58,8 @@ export interface BackendState {
   mcpPort: number;
   adminEmail: typeof ADMIN_EMAIL;
   devEmail: typeof DEV_EMAIL;
+  /** KST days of the log files written before the server starts: [older, newer] (see seedOldLogs). */
+  oldLogDays: [string, string];
 }
 
 /** What `.auth/<who>-<channel>.json` holds: the session cookie and its CSRF token. */
@@ -215,6 +217,36 @@ function killStragglers(root: string): Promise<void> {
   );
 }
 
+const DAY_MS = 86_400_000;
+const KST_OFFSET_MS = 9 * 3_600_000; // no daylight saving time in Korea
+
+/** The KST calendar day `days` before today, `YYYY-MM-DD` (the log file name). */
+export function kstDaysAgo(days: number, now = Date.now()): string {
+  return new Date(now + KST_OFFSET_MS - days * DAY_MS).toISOString().slice(0, 10);
+}
+
+/** Days before today of the two seeded log files: older and newer. */
+export const OLD_LOG_AGES = [100, 30] as const;
+
+/**
+ * Writes `<root>/logs/<day>.jsonl` with three `system` lines for each of OLD_LOG_AGES before the
+ * server starts (retention.spec purges the older one). Both stay inside the default 180-day
+ * retention, so the server's own startup retention run (60 s after start, F05) leaves them alone;
+ * retention.spec's 60 days deletes only the older one.
+ */
+async function seedOldLogs(root: string): Promise<[string, string]> {
+  const logs = join(root, "logs");
+  await mkdir(logs, { recursive: true });
+  const days = OLD_LOG_AGES.map((age) => kstDaysAgo(age)) as [string, string];
+  for (const day of days) {
+    const lines = [1, 2, 3].map((n) =>
+      JSON.stringify({ ts: `${day}T09:0${n}:00.000+09:00`, cat: "system", event: "e2e.seed", n }),
+    );
+    await writeFile(join(logs, `${day}.jsonl`), `${lines.join("\n")}\n`, "utf-8");
+  }
+  return days;
+}
+
 /** Starts the server on a fresh root and seeds it. On any failure the process is killed. */
 export async function startBackend(): Promise<{ state: BackendState; adminLocal: SavedSession }> {
   if (!existsSync(join(DIST_DIR, "board.html"))) throw new Error(`no built web app in ${DIST_DIR}: run \`pnpm build\` first`);
@@ -229,6 +261,7 @@ export async function startBackend(): Promise<{ state: BackendState; adminLocal:
   const externalUrl = `http://127.0.0.1:${externalPort}`;
   const sessionsFile = join(root, SESSIONS_FILE);
   await writeFile(sessionsFile, JSON.stringify({ sessions: [] }), "utf-8");
+  const oldLogDays = await seedOldLogs(root);
 
   // a file, not a pipe: the dummy MCP the server starts inherits these handles, and a pipe it keeps
   // open would hold the test runner open after the server is gone
@@ -301,7 +334,7 @@ export async function startBackend(): Promise<{ state: BackendState; adminLocal:
     await waitForState(admin, mcp.id, "HEALTHY");
 
     const state: BackendState = {
-      root, localUrl, externalUrl, pid, mcpId: mcp.id, mcpPort, adminEmail: ADMIN_EMAIL, devEmail: DEV_EMAIL,
+      root, localUrl, externalUrl, pid, mcpId: mcp.id, mcpPort, adminEmail: ADMIN_EMAIL, devEmail: DEV_EMAIL, oldLogDays,
     };
     return { state, adminLocal };
   } catch (e) {

@@ -15,10 +15,19 @@ const PAGES = [
   "/admin/notice",
   "/admin/no-such-page",
   "/notice",
+  // Plan 5: the log and audit screens
+  "/admin/logs?range=today",
+  "/admin/logs?range=today&view=timeline",
+  "/admin/audit?range=today",
 ];
 
-for (const path of PAGES) {
-  test(`axe ${path}`, async ({ page, state, loginAs }) => {
+// the default 1280 x 800 window, and the smallest supported desktop window (W41): the 640 px
+// layouts (icon rail, wrapped filters, sideways table scroll) get the same checks
+const WINDOWS = [null, { width: 640, height: 600 }] as const;
+
+for (const [size, path] of WINDOWS.flatMap((w) => PAGES.map((p) => [w, p] as const))) {
+  test(`axe ${path}${size ? ` at ${size.width}x${size.height}` : ""}`, async ({ page, state, loginAs }) => {
+    if (size) await page.setViewportSize(size);
     if (path !== "/" && path !== "/admin/login") await loginAs(page, "admin", "local");
     await page.goto(`${state.localUrl}${path.replace("{id}", String(state.mcpId))}`);
     // analyse the loaded page, not its skeleton
@@ -51,7 +60,9 @@ test("keyboard-only: login and run an action", async ({ page, state }) => {
 });
 
 test("keyboard-only: command palette opens with Ctrl+K, skips blocked screens, and gives focus back to the page", async ({ page, state, loginAs }) => {
-  await loginAs(page, "admin", "local");
+  // every screen is open to an admin since Plan 5 (no planned items left): a developer still has
+  // a blocked one (user management is Admin only)
+  await loginAs(page, "dev", "local");
   await page.goto(`${state.localUrl}/admin/mcps`);
   await expect(page.locator("main h1")).toBeVisible();
   // nothing focused (the case that used to drop focus on <body>)
@@ -60,10 +71,10 @@ test("keyboard-only: command palette opens with Ctrl+K, skips blocked screens, a
   const dialog = page.getByRole("dialog", { name: copy.common.commandTitle });
   await page.keyboard.press("Control+k");
   await expect(dialog).toBeVisible();
-  await page.keyboard.type(copy.nav.audit);
-  const audit = dialog.getByRole("option", { name: new RegExp(copy.nav.audit) });
-  await expect(audit).toHaveAttribute("aria-disabled", "true");
-  await expect(audit).toContainText(copy.deny.planned_audit); // the reason, readable (not dimmed text)
+  await page.keyboard.type(copy.nav.users);
+  const users = dialog.getByRole("option", { name: new RegExp(copy.nav.users) });
+  await expect(users).toHaveAttribute("aria-disabled", "true");
+  await expect(users).toContainText(copy.deny.admin_only); // the reason, readable (not dimmed text)
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(`${state.localUrl}/admin/mcps`); // a blocked screen does not open
 
@@ -73,9 +84,9 @@ test("keyboard-only: command palette opens with Ctrl+K, skips blocked screens, a
 
   await page.keyboard.press("Control+k");
   await expect(dialog).toBeVisible();
-  await page.keyboard.type(copy.nav.settings);
+  await page.keyboard.type(copy.nav.sessions);
   await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(`${state.localUrl}/admin/settings`);
+  await expect(page).toHaveURL(`${state.localUrl}/admin/sessions`);
   await expect(dialog).toHaveCount(0);
   await expect(page.locator("main")).toBeFocused();
 });

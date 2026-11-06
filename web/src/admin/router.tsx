@@ -219,7 +219,10 @@ export function createAdminRouter({ qc, history }: { qc: QueryClient; history?: 
     routeTree,
     history,
     context: { qc },
-    defaultViewTransition: true,
+    // crossfade between screens, but not on the first load: there is no previous screen, and while
+    // a transition runs every click lands on the root element (the page would ignore input until
+    // the first route and its data had loaded and the fade had finished)
+    defaultViewTransition: { types: ({ fromLocation }) => (fromLocation ? [] : false) },
     // the API is the cache (React Query); route loaders do not cache anything themselves
     defaultPreloadStaleTime: 0,
     scrollRestoration: true,

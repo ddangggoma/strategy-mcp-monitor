@@ -16,6 +16,10 @@ const ADMIN_PAGES = [
   "/admin/users",
   "/admin/settings",
   "/admin/notice",
+  // Plan 5 (W41, F12): the log and audit screens join the same sweep instead of a second spec
+  "/admin/logs?range=today",
+  "/admin/logs?range=today&view=timeline",
+  "/admin/audit?range=today",
 ];
 
 // C4 / F11: the session screens are measured with content: a connected session with long values
@@ -74,6 +78,31 @@ for (const width of WIDTHS) {
     await expect(start).toBeInViewport();
   });
 }
+
+// W41: at 640 x 600 the log table is wider than the window; it scrolls inside its own frame, and a
+// row opened from the keyboard shows a detail dialog whose close button is on screen.
+test("the log table scrolls inside its own container at 640", async ({ page, state, loginAs }) => {
+  await page.setViewportSize({ width: 640, height: 600 });
+  await loginAs(page, "admin", "local");
+  await page.goto(`${state.localUrl}/admin/logs?range=today`);
+  const table = page.getByRole("table", { name: copy.logs.title });
+  await expect(table).toBeVisible({ timeout: 10_000 });
+  const scroller = table.locator("xpath=ancestor::*[@data-scroll-container][1]");
+  await expect(scroller).toBeVisible();
+  expect(await scroller.evaluate((el) => getComputedStyle(el).overflowX)).toMatch(/auto|scroll/);
+  expect(await scroller.evaluate((el) => el.scrollWidth > el.clientWidth), "the table is wider than its frame").toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+
+  await table.getByRole("row").nth(1).focus();
+  await page.keyboard.press("Enter");
+  const detail = page.getByRole("dialog", { name: copy.logs.detail });
+  // two ways out (the corner X and the footer button): both on screen
+  const closers = detail.getByRole("button", { name: copy.common.close });
+  await expect(closers).toHaveCount(2);
+  for (const closer of await closers.all()) await expect(closer).toBeInViewport();
+  await page.keyboard.press("Escape");
+  await expect(detail).toHaveCount(0);
+});
 
 // WCAG 1.4.10 Reflow: 200% zoom of a 1280 px window is the 640 px case above; 400% is 320 CSS px.
 // No phone layout is built for it (user ruling), but nothing may need a sideways page scroll.
