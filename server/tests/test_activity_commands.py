@@ -290,3 +290,64 @@ async def test_a_4688_command_line_with_a_notice_token_is_redacted(services, clo
              "msedge.exe --app=http://127.0.0.1:8700/notice#d=3&t=SECRETtoken123")])
     [line] = await audit_events(services, "activity.command")
     assert line["cmdline"] == "msedge.exe --app=http://127.0.0.1:8700/notice#d=3&t=<redacted>"
+
+
+# --- M6: no blocking account lookup on the loop; bounded script-block memory ----------------------
+
+def test_cached_account_never_looks_up_and_sid_to_account_fills_the_cache(monkeypatch):
+    from app.win import accounts
+    calls = []
+    monkeypatch.setattr(accounts, "_lookup", lambda sid: calls.append(sid) or "CORP\\hong")
+    monkeypatch.setattr(accounts, "_cache", {})
+    assert accounts.cached_account("S-1-5-21-9") is None and calls == []
+    assert accounts.sid_to_account("S-1-5-21-9") == "CORP\\hong" and calls == ["S-1-5-21-9"]
+    assert accounts.cached_account("S-1-5-21-9") == "CORP\\hong"
+    assert accounts.sid_to_account("S-1-5-21-9") == "CORP\\hong" and calls == ["S-1-5-21-9"]  # cached
+
+
+def test_the_handler_reads_accounts_from_the_cache_only():
+    import inspect
+
+    from app.activity import powershell
+    from app.win import accounts
+    default = inspect.signature(powershell.PowerShellHandler).parameters["sid_to_account"].default
+    assert default is accounts.cached_account
+
+
+def test_powershell_channels_resolve_the_user_sid_on_the_watcher_thread():
+    import threading
+
+    from app.collect.eventlog import CHANNELS, ChannelWatcher
+    specs = {c.name: c for c in CHANNELS}
+    assert specs["eventlog:powershell"].resolve_user_sid and specs["eventlog:pwsh"].resolve_user_sid
+    assert not specs["eventlog:security"].resolve_user_sid
+    seen = []
+    from pathlib import Path
+
+    from app.collect.eventlog import BookmarkStore
+    w = ChannelWatcher(specs["eventlog:powershell"], FakeEventLogSource(), lambda r: None, lambda s: None,
+                       BookmarkStore(Path("unused.json")), now=lambda: datetime(2026, 11, 4, 5, 0, tzinfo=UTC),
+                       resolve_sid=lambda sid: seen.append((sid, threading.current_thread().name)))
+    w._handle(evt_xml(PS, 4104, 1, "2026-11-04T04:59:50Z", provider="Microsoft-Windows-PowerShell",
+                      data={"MessageNumber": "1", "MessageTotal": "1", "ScriptBlockText": "x", "ScriptBlockId": "{a}"},
+                      pid=6000, user_sid="S-1-5-21-1-2-3-1001"))
+    assert [s for s, _t in seen] == ["S-1-5-21-1-2-3-1001"]
+
+
+def test_assembler_stops_storing_text_past_max_chars():
+    a = ScriptBlockAssembler(max_chars=10)
+    for n in (1, 2):
+        assert a.add(r4104("x" * 8, n=n, total=3, sbid="{big}"), NOW) == []
+    stored = sum(len(t) for p in a._pending.values() for t in p.texts.values())
+    assert stored <= 11  # not 16: the rest of a huge block is never held
+    [b] = a.add(r4104("y" * 8, n=3, total=3, sbid="{big}"), NOW)
+    assert (b.text, b.truncated, b.parts, b.incomplete) == ("x" * 10, True, 3, False)
+
+
+def test_assembler_caps_the_number_of_pending_blocks():
+    a = ScriptBlockAssembler(max_pending=2)
+    assert a.add(r4104("a", n=1, total=2, sbid="{1}"), NOW) == []
+    assert a.add(r4104("b", n=1, total=2, sbid="{2}"), NOW) == []
+    [old] = a.add(r4104("c", n=1, total=2, sbid="{3}"), NOW)  # the oldest is written as incomplete
+    assert (old.script_block_id, old.text, old.incomplete) == ("{1}", "a", True)
+    assert sorted(k[1] for k in a._pending) == ["{2}", "{3}"]

@@ -308,3 +308,65 @@ async def test_collectors_run_the_tick_loop_and_stop_the_agents_first(wired, clo
     await svc.collectors.stop()
     assert list(slot.commands)[-1] == {"type": "exit"} and launcher.procs[0].killed
     assert svc.agents.slot(2) is None
+
+
+# --- M5: a killed agent's process handle is closed even after its session is forgotten -----------
+
+from types import SimpleNamespace  # noqa: E402
+
+from app.win.launch import HandleProcess  # noqa: E402
+
+
+class _HandleLauncher:
+    """Hands out real ``HandleProcess``es over a fake WTS API: TerminateProcess takes effect on the
+    next exit-code query (like the real one, which returns before the process is gone)."""
+    name = "wts"
+
+    def __init__(self):
+        self.state, self.closed = {}, []
+        self.api = SimpleNamespace(
+            get_exit_code=lambda h: self.state[h], close_handle=self.closed.append,
+            terminate=lambda h: self.state.__setitem__(h, "dying"))
+        self._next = 0
+
+    def launch(self, spec):
+        self._next += 1
+        h = f"h{self._next}"
+        self.state[h] = 259
+        return HandleProcess(h, 100 + self._next, self._query(h))
+
+    def _query(self, h):
+        api = self.api
+        def get_exit_code(handle):
+            if self.state[handle] == "dying":
+                self.state[handle] = 1
+                return 259  # still running right after TerminateProcess
+            return self.state[handle]
+        return SimpleNamespace(get_exit_code=get_exit_code, close_handle=api.close_handle, terminate=api.terminate)
+
+
+async def test_forget_reaps_the_killed_process_so_its_handle_is_closed(services, clock, tmp_path):
+    launcher = _HandleLauncher()
+    s = AgentSupervisor(services.agents, launcher, services.rdp, services.tamper, services.log, clock,
+                        AgentOptions(dialog="print", url_dir=tmp_path, python="py.exe", agent_dir=Path("C:/agent")))
+    services.rdp.add_listener(s.on_session_change)
+    services.rdp.apply(snap(clock.now(), ws(2)))
+    services.rdp.apply(snap(clock.now()))  # logoff → forget → TerminateProcess
+    assert launcher.closed == []  # not gone yet
+    s.tick()
+    assert launcher.closed == []  # still exiting
+    s.tick()
+    assert launcher.closed == ["h1"]
+    s.tick()
+    assert launcher.closed == ["h1"]  # closed once
+
+
+async def test_stop_reaps_the_processes_it_killed(services, clock, tmp_path):
+    launcher = _HandleLauncher()
+    s = AgentSupervisor(services.agents, launcher, services.rdp, services.tamper, services.log, clock,
+                        AgentOptions(dialog="print", url_dir=tmp_path, python="py.exe", agent_dir=Path("C:/agent"),
+                                     stop_grace_sec=0.01))
+    services.rdp.add_listener(s.on_session_change)
+    services.rdp.apply(snap(clock.now(), ws(2)))
+    await s.stop()
+    assert launcher.closed == ["h1"]

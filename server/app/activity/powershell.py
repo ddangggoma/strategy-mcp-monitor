@@ -2,7 +2,9 @@
 
 PowerShell splits a long script block into several 4104 events (``MessageNumber`` of
 ``MessageTotal``); ``ScriptBlockAssembler`` joins them, gives up waiting after ``max_wait_sec`` and
-cuts the text at ``max_chars`` code points (V14). Everything here runs on the loop thread.
+cuts the text at ``max_chars`` code points (V14). It holds at most ``max_chars`` (+1) of text per
+block and ``max_pending`` blocks (the oldest is written early as incomplete; M6). Everything here
+runs on the loop thread; the account name comes from the cache the watcher thread fills.
 """
 
 from __future__ import annotations
@@ -48,6 +50,7 @@ class _Pending:
     total: int
     path: str | None
     texts: dict[int, str] = field(default_factory=dict)
+    chars: int = 0
 
 
 def _int(value: str | None, default: int) -> int:
@@ -58,9 +61,12 @@ def _int(value: str | None, default: int) -> int:
 
 
 class ScriptBlockAssembler:
-    def __init__(self, *, max_wait_sec: float = 5.0, max_chars: int = 65_536) -> None:
+    def __init__(
+        self, *, max_wait_sec: float = 5.0, max_chars: int = 65_536, max_pending: int = 256
+    ) -> None:
         self._max_wait = timedelta(seconds=max_wait_sec)
         self._max_chars = max_chars
+        self._max_pending = max(1, max_pending)
         self._pending: dict[tuple[str, str], _Pending] = {}
 
     def add(self, r: EventRecord, now: datetime) -> list[ScriptBlock]:
@@ -72,16 +78,26 @@ class ScriptBlockAssembler:
         number = _int(d.get("MessageNumber"), 1)
         total = max(_int(d.get("MessageTotal"), 1), 1)
         key = (r.channel, d.get("ScriptBlockId") or "")
+        out: list[ScriptBlock] = []
         pending = self._pending.get(key)
         if pending is None:
+            while len(self._pending) >= self._max_pending:  # the oldest goes out early
+                oldest = next(iter(self._pending))
+                out.append(self._block(oldest, self._pending.pop(oldest), incomplete=True))
             pending = self._pending[key] = _Pending(r, now, total, d.get("Path") or None)
-        pending.texts.setdefault(number, d.get("ScriptBlockText") or "")
+        if number not in pending.texts:
+            # Keep one character past the limit, so ``_block`` still sees that it was cut.
+            room = max(0, self._max_chars + 1 - pending.chars)
+            text = (d.get("ScriptBlockText") or "")[:room]
+            pending.texts[number] = text
+            pending.chars += len(text)
         if pending.path is None:
             pending.path = d.get("Path") or None
         if len(pending.texts) < pending.total:
-            return []
+            return out
         del self._pending[key]
-        return [self._block(key, pending, incomplete=False)]
+        out.append(self._block(key, pending, incomplete=False))
+        return out
 
     def expire(self, now: datetime) -> list[ScriptBlock]:
         """Blocks still missing fragments ``max_wait_sec`` after their first one, joined from what
@@ -124,7 +140,7 @@ class PowerShellHandler:
         log: LogSink,
         clock: Clock,
         *,
-        sid_to_account: Callable[[str], str | None] = accounts.sid_to_account,
+        sid_to_account: Callable[[str], str | None] = accounts.cached_account,
         assembler: ScriptBlockAssembler | None = None,
     ) -> None:
         self._context = context

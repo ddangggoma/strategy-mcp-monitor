@@ -116,6 +116,9 @@ class AgentSupervisor:
         self._options = options
         self._server_url = "http://127.0.0.1:8700"
         self._agents: dict[int, _Agent] = {}
+        self._reaping: list[AgentProcess] = []
+        """Killed processes no longer tracked as an agent (logoff, stop): polled until their exit is
+        seen, which closes a ``HandleProcess`` handle (M5)."""
         self._stopping = False
 
     def configure(self, server_url: str) -> None:
@@ -152,6 +155,7 @@ class AgentSupervisor:
         if agent.proc.poll() is None:
             agent.killed = True
             agent.proc.kill()
+            self._reaping.append(agent.proc)
         self._stopped_by_logoff(agent)
 
     # --- launching -------------------------------------------------------------------------
@@ -229,6 +233,7 @@ class AgentSupervisor:
             await asyncio.sleep(self._options.tick_sec)
 
     def tick(self) -> None:
+        self._reap()
         if self._stopping:
             return
         now = self._clock.now()
@@ -330,6 +335,9 @@ class AgentSupervisor:
             pid=agent.proc.pid, agent_pid=agent.agent_pid, reason="logoff",
         )
 
+    def _reap(self) -> None:
+        self._reaping = [p for p in self._reaping if p.poll() is None]
+
     def _drop(self, agent: _Agent) -> None:
         self._agents.pop(agent.session_id, None)
         self._hub.revoke(agent.session_id)
@@ -355,6 +363,13 @@ class AgentSupervisor:
             agent.killed = True
             assert agent.proc is not None
             await asyncio.to_thread(agent.proc.kill)
+            self._reaping.append(agent.proc)
         for session_id in list(self._agents):
             self._hub.revoke(session_id)
         self._agents.clear()
+        deadline = loop.time() + self._options.stop_grace_sec
+        while True:  # let the killed ones go, so their handles are closed (M5)
+            self._reap()
+            if not self._reaping or loop.time() >= deadline:
+                break
+            await asyncio.sleep(_STOP_POLL_SEC)

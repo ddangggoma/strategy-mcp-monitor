@@ -22,6 +22,7 @@ from pathlib import Path
 from app.clock import Clock
 from app.collect.bridge import CollectorBridge
 from app.collect.manager import Collectors
+from app.win import accounts
 from app.win.eventlog import EventLogSource, EventRecord, EventSubscription, parse_event_xml
 
 StatusItem = tuple[str, bool, str | None]
@@ -36,6 +37,9 @@ class ChannelSpec:
     """The bridge source and collector-status name, e.g. ``eventlog:lsm``."""
     channel: str
     event_ids: tuple[int, ...]
+    resolve_user_sid: bool = False
+    """Look up each record's user SID on the watcher thread, so the loop-side handler reads the
+    account from the cache (``accounts.cached_account``) without blocking (M6)."""
 
 
 CHANNELS: tuple[ChannelSpec, ...] = (
@@ -51,8 +55,9 @@ CHANNELS: tuple[ChannelSpec, ...] = (
         "eventlog:rcm", "Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational",
         (1149,),
     ),
-    ChannelSpec("eventlog:powershell", "Microsoft-Windows-PowerShell/Operational", (4104,)),
-    ChannelSpec("eventlog:pwsh", "PowerShellCore/Operational", (4104,)),
+    ChannelSpec("eventlog:powershell", "Microsoft-Windows-PowerShell/Operational", (4104,),
+                resolve_user_sid=True),
+    ChannelSpec("eventlog:pwsh", "PowerShellCore/Operational", (4104,), resolve_user_sid=True),
     ChannelSpec("eventlog:system", "System", (104,)),
 )
 
@@ -129,8 +134,10 @@ class ChannelWatcher:
         retry_sec: float = 60,
         save_every_sec: float = 5,
         max_age: timedelta = timedelta(hours=24),
+        resolve_sid: Callable[[str], object] = accounts.sid_to_account,
     ) -> None:
         self.spec = spec
+        self._resolve_sid = resolve_sid
         self._source = source
         self._post_record = post_record
         self._post_status = post_status
@@ -212,6 +219,11 @@ class ChannelWatcher:
         self._last = record.record_id
         if self.too_old(record):
             return
+        if self.spec.resolve_user_sid and record.user_sid:
+            try:
+                self._resolve_sid(record.user_sid)  # blocking: fills the account cache (M6)
+            except Exception:  # an account name is a nicety; the record still goes out
+                pass
         self._post_record(record)
 
     def _save(self) -> None:
