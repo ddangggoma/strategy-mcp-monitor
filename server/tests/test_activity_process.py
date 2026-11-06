@@ -203,3 +203,30 @@ async def test_real_wmi_component_logs_a_process_start_and_stop(services):
     assert "ping" in got["start"]["cmdline"].lower() and got["start"]["session_id"] == current_session_id()
     assert got["start"]["source"] in ("wmi:trace", "wmi:poll") and got["start"]["user"]
     assert not [t for t in threading.enumerate() if t.name.startswith("wmi:")]
+
+
+# --- I2: the notice token never reaches the log -------------------------------------------------
+
+EDGE_CMD = (r'"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" '
+            r'"--app=http://127.0.0.1:8700/notice#d=12&t=Xy-9_aBcDeF" "--user-data-dir=C:\Users\hong\AppData\Local\mcp-monitor\notice-edge" '
+            "--no-first-run")
+
+async def test_an_edge_notice_command_line_is_logged_without_its_token(services, clock):
+    services.rdp.apply(snap(clock.now(), ws(2)))
+    h = ProcessActivityHandler(ActivityContext(services.rdp, clock), services.log)
+    h([pev(name="msedge.exe", exe=r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe", cmdline=EDGE_CMD, at=clock.now())])
+    [line] = await audit_events(services, "activity.process")
+    assert "Xy-9_aBcDeF" not in json.dumps(line)
+    assert "--app=http://127.0.0.1:8700/notice#d=12&t=<redacted>" in line["cmdline"] and "--no-first-run" in line["cmdline"]
+
+
+@pytest.mark.parametrize("raw,clean", [
+    ("msedge --app=http://127.0.0.1:8700/notice#d=1&t=abc", "msedge --app=http://127.0.0.1:8700/notice#d=1&t=<redacted>"),
+    ("x http://localhost:8700/notice#t=abc&d=1 y", "x http://localhost:8700/notice#t=<redacted>&d=1 y"),
+    ("x 'http://[::1]:8700/notice#d=1&t=a%2Fb' y", "x 'http://[::1]:8700/notice#d=1&t=<redacted>' y"),
+    ("x https://example.com/watch?v=1&t=30 y", "x https://example.com/watch?v=1&t=30 y"),  # not our notice: untouched
+    ("notepad.exe a.txt", "notepad.exe a.txt"),
+])
+def test_redact_notice_tokens(raw, clean):
+    from app.activity.redact import redact_notice_tokens
+    assert redact_notice_tokens(raw) == clean

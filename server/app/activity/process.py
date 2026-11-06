@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from app.activity.context import ActivityContext
+from app.activity.redact import redact_notice_tokens
 from app.collect.bridge import CollectorBridge
 from app.collect.manager import Collectors
 from app.logstore.writer import LogSink
@@ -126,7 +127,7 @@ class CommandHandler:
                 ppid=c.ppid,
                 exe=c.exe,
                 parent_exe=c.parent_exe,
-                cmdline=c.cmdline,
+                cmdline=None if c.cmdline is None else redact_notice_tokens(c.cmdline),
                 source="eventlog:4688",
                 record_id=c.record_id,
                 **self._context.fields(session, user=_account(c.user, c.domain)),
@@ -157,7 +158,7 @@ class ProcessActivityHandler:
                 if ev.exe is not None:
                     fields["exe"] = ev.exe
                 if ev.cmdline is not None:
-                    fields["cmdline"] = ev.cmdline
+                    fields["cmdline"] = redact_notice_tokens(ev.cmdline)
             elif ev.exit_code is not None:
                 fields["exit_code"] = ev.exit_code
             fields["source"] = ev.source

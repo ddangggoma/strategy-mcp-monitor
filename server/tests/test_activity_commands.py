@@ -280,3 +280,13 @@ async def _command_lines_until(svc, clock, pred, timeout=5.0):
             raise AssertionError(f"activity.command lines so far: {lines}")
         clock.advance(1)
         await asyncio.sleep(0.02)
+
+
+async def test_a_4688_command_line_with_a_notice_token_is_redacted(services, clock):
+    """I2: ``start msedge --app=<notice url>`` from cmd must not write the token to the log."""
+    services.rdp.apply(snap(clock.now(), ws(2)))
+    h = CommandHandler(ActivityContext(services.rdp, clock), services.log)
+    h([r4688(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe", r"C:\Windows\System32\cmd.exe",
+             "msedge.exe --app=http://127.0.0.1:8700/notice#d=3&t=SECRETtoken123")])
+    [line] = await audit_events(services, "activity.command")
+    assert line["cmdline"] == "msedge.exe --app=http://127.0.0.1:8700/notice#d=3&t=<redacted>"

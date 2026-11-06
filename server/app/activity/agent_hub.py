@@ -28,6 +28,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Final, NoReturn
 
 from app.activity.context import ActivityContext
+from app.activity.redact import redact_notice_tokens
 from app.activity.tamper import MISUSE_REPORT_SEC, TamperMonitor
 from app.clock import Clock
 from app.logstore.writer import LogSink
@@ -268,8 +269,9 @@ class AgentHub:
                     **ctx, **skew,
                 )
             else:
-                self._log.emit(
-                    "activity.window", at=at, event=e.type, pid=e.pid, exe=e.exe, title=e.title,
+                self._log.emit(  # a loading notice window can be captioned with its URL (I2)
+                    "activity.window", at=at, event=e.type, pid=e.pid, exe=e.exe,
+                    title=redact_notice_tokens(e.title),
                     source="agent", **ctx, **skew,
                 )
 

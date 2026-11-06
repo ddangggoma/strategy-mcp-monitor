@@ -371,3 +371,13 @@ async def test_activity_off_disables_window_events(tmp_path, clock):
     finally:
         await svc.log.stop()
         svc.db.close()
+
+
+async def test_a_window_title_with_a_notice_token_is_redacted(local_client, services, agent):
+    """I2: an Edge --app window is captioned with its URL until the page title loads."""
+    await hello(local_client, agent)
+    ev = {"type": "title", "at": "2026-11-04T13:59:57+09:00", "pid": 1, "exe": "msedge.exe",
+          "title": "127.0.0.1:8700/notice#d=4&t=SeCrEt-123"}
+    assert (await local_client.post("/api/agent/events", json={"events": [ev]}, headers=H(agent))).status_code == 204
+    [line] = await audit_events(services, "activity.window")
+    assert line["title"] == "127.0.0.1:8700/notice#d=4&t=<redacted>"
