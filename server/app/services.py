@@ -21,6 +21,7 @@ from app.notice.store import NoticeStore
 from app.paths import AppPaths
 from app.settings.store import SettingsStore
 from app.users.store import UserStore
+from app.win.peer import PeerResolver, PsutilPeerResolver
 
 _OTP_SECRET_NAME = "otp_secret"
 
@@ -42,6 +43,7 @@ class Services:
     bus: BoardBus
     monitor: Monitor
     notice: NoticeStore
+    peers: PeerResolver
 
 
 def _load_or_create_otp_secret(db: Database) -> bytes:
@@ -65,6 +67,7 @@ def build_services(
     dev_fixed_code: str | None = None,
     runner: ScriptRunnerLike | None = None,
     prober: ProberLike | None = None,
+    peer_resolver: PeerResolver | None = None,
 ) -> Services:
     """Wire all backend services. Starts neither the log writer nor the monitor (serve() / fixtures do)."""
     paths = AppPaths(Path(root))
@@ -110,4 +113,5 @@ def build_services(
         bus=bus,
         monitor=monitor,
         notice=NoticeStore(db, clock),
+        peers=peer_resolver if peer_resolver is not None else PsutilPeerResolver(),
     )

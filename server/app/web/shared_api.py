@@ -16,6 +16,7 @@ from app.web.deps import (
     get_services,
     session_cookie_name,
     user_json,
+    windows_user_of,
 )
 
 router = APIRouter()
@@ -79,6 +80,7 @@ async def otp_request(
     ip = client_ip(request)
     email = _audit_email(body.email)
     user_agent = request.headers.get("user-agent")
+    windows_user = await windows_user_of(request)
     ok = False
     rate_limited: OtpRateLimitError | None = None
     try:
@@ -98,6 +100,7 @@ async def otp_request(
                 user_agent=user_agent,
                 now=services.clock.now(),
                 scope=rate_limited.scope,
+                windows_user=windows_user,
             )
         else:
             services.audit.auth(
@@ -107,6 +110,7 @@ async def otp_request(
                 ip=ip,
                 user_agent=user_agent,
                 ok=ok,
+                windows_user=windows_user,
             )
     if rate_limited is not None:
         raise ApiError(429, "rate_limited", {"Retry-After": str(rate_limited.retry_after)})
@@ -124,10 +128,17 @@ async def otp_verify(
 ) -> dict[str, object]:
     ip = client_ip(request)
     user_agent = request.headers.get("user-agent")
+    windows_user = await windows_user_of(request)
 
     def audit_login(email: str, ok: bool) -> None:
         services.audit.auth(
-            event="login", email=email, channel=channel, ip=ip, user_agent=user_agent, ok=ok
+            event="login",
+            email=email,
+            channel=channel,
+            ip=ip,
+            user_agent=user_agent,
+            ok=ok,
+            windows_user=windows_user,
         )
 
     try:
@@ -141,6 +152,7 @@ async def otp_verify(
             user_agent=user_agent,
             now=services.clock.now(),
             scope=exc.scope,
+            windows_user=windows_user,
         )
         raise ApiError(429, "rate_limited", {"Retry-After": str(exc.retry_after)}) from None
     if user is None:
@@ -178,6 +190,7 @@ async def logout(
             ip=client_ip(request),
             user_agent=request.headers.get("user-agent"),
             ok=True,
+            windows_user=await windows_user_of(request),
         )
     response = Response(status_code=204)
     response.delete_cookie(session_cookie_name(channel), **_cookie_args(request))

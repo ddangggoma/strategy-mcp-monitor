@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hmac
 from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING
@@ -11,6 +12,7 @@ from app.auth.policy import Action, can
 from app.auth.sessions import AuthSession
 from app.users.store import User
 from app.web.channels import Channel
+from app.win.peer import PeerInfo
 
 if TYPE_CHECKING:
     from app.services import Services
@@ -64,6 +66,31 @@ def user_summary(services: Services, user_id: int | None) -> dict[str, object] |
 
 def client_ip(request: Request) -> str | None:
     return request.client.host if request.client else None
+
+
+async def peer_of(request: Request) -> PeerInfo | None:
+    """The Windows process/session behind a Local-channel request's TCP peer, or None.
+
+    Resolved by the server from the connection itself (never from anything the client sends).
+    Always None on the external channel, without a client/server address, or on a resolver error.
+    """
+    if get_channel(request) != "local":
+        return None
+    client = request.client
+    server = request.scope.get("server")
+    if client is None or not server:
+        return None
+    services = get_services(request)
+    try:
+        return await asyncio.to_thread(services.peers.resolve, client.host, client.port, server[1])
+    except Exception:
+        return None
+
+
+async def windows_user_of(request: Request) -> str | None:
+    """The Windows account (``DOMAIN\\name``) of a Local-channel request's peer process, or None."""
+    peer = await peer_of(request)
+    return peer.user if peer is not None else None
 
 
 def _resolve(request: Request) -> User | None:

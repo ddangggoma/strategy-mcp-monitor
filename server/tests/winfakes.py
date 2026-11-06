@@ -7,6 +7,8 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
+from app.win.peer import PeerInfo
+
 
 class ListLog:
     """A ``LogSink`` that keeps ``(cat, at, fields)`` tuples in memory."""
@@ -26,3 +28,15 @@ async def eventually(pred: Callable[[], bool], timeout: float = 5.0, step: float
         if loop.time() >= deadline:
             raise AssertionError(f"condition not met within {timeout}s")
         await asyncio.sleep(step)
+
+
+class FakePeerResolver:
+    """A ``PeerResolver`` that returns ``info`` for any peer and records each call's arguments."""
+
+    def __init__(self, info: PeerInfo | None) -> None:
+        self.info = info
+        self.calls: list[tuple[str, int, int]] = []
+
+    def resolve(self, client_ip: str, client_port: int, server_port: int) -> PeerInfo | None:
+        self.calls.append((client_ip, client_port, server_port))
+        return self.info

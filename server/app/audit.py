@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Mapping
 from datetime import datetime, timedelta
-from typing import Literal
+from typing import Any, Literal
 
 from app.logstore.writer import LogWriter
 from app.users.store import User
@@ -43,6 +43,7 @@ class AuditLogger:
         user_agent: str | None,
         now: datetime,
         scope: Literal["ip", "email"] = "ip",
+        windows_user: str | None = None,
     ) -> None:
         """Audit a rate-limited (429) auth attempt, but only the first per throttle key per window.
 
@@ -66,7 +67,13 @@ class AuditLogger:
             del self._throttle[next(iter(self._throttle))]
         self._throttle[key] = now
         self.auth(
-            event=event, email=email, channel=channel, ip=ip, user_agent=user_agent, ok=False
+            event=event,
+            email=email,
+            channel=channel,
+            ip=ip,
+            user_agent=user_agent,
+            ok=False,
+            windows_user=windows_user,
         )
 
     def auth(
@@ -77,7 +84,11 @@ class AuditLogger:
         ip: str | None,
         user_agent: str | None,
         ok: bool,
+        windows_user: str | None = None,
     ) -> None:
+        """One ``auth`` line. Local-channel lines always carry ``windows_user`` (the Windows
+        account of the requesting process, None when unresolved); external lines never do."""
+        extra: dict[str, Any] = {"windows_user": windows_user} if channel == "local" else {}
         self._log.emit(
             "auth",
             event=event,
@@ -86,6 +97,7 @@ class AuditLogger:
             ip=ip,
             user_agent=cap_user_agent(user_agent),
             ok=ok,
+            **extra,
         )
 
     def admin(
