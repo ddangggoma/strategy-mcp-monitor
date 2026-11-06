@@ -4,6 +4,7 @@ import secrets
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.activity.tamper import TamperMonitor
 from app.audit import AuditLogger
 from app.auth.otp import DummyOtpProvider, OtpProvider, OtpService
 from app.auth.sessions import SessionStore
@@ -46,6 +47,7 @@ class Services:
     scripts: ScriptStore
     history: McpHistory
     bus: BoardBus
+    tamper: TamperMonitor
     monitor: Monitor
     notice: NoticeStore
     peers: PeerResolver
@@ -98,6 +100,7 @@ def build_services(
     scripts = ScriptStore(db, paths, clock, mcps)
     history = McpHistory(db, clock)
     bus = BoardBus()
+    tamper = TamperMonitor(log, bus, clock)
     monitor = Monitor(
         mcps=mcps,
         scripts=scripts,
@@ -108,6 +111,7 @@ def build_services(
         log=log,
         bus=bus,
         clock=clock,
+        tamper=tamper,
     )
     config_collectors = collectors or CollectorConfig()
     rdp_history = SessionHistory(db, clock)
@@ -134,6 +138,7 @@ def build_services(
         scripts=scripts,
         history=history,
         bus=bus,
+        tamper=tamper,
         monitor=monitor,
         notice=NoticeStore(db, clock),
         peers=peer_resolver if peer_resolver is not None else PsutilPeerResolver(),

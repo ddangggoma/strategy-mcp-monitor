@@ -12,7 +12,15 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.services import Services
-from app.web import local_api, mcp_local, mcp_shared, notice_api, sessions_api, shared_api
+from app.web import (
+    local_api,
+    mcp_local,
+    mcp_shared,
+    notice_api,
+    sessions_api,
+    shared_api,
+    tamper_api,
+)
 from app.web.channels import Channel
 from app.web.deps import ApiError, api_error_handler
 from app.web.static import HTML_PAGES, static_router
@@ -150,6 +158,7 @@ def create_app(channel: Channel, services: Services, static_dir: Path | None = N
     app.include_router(shared_api.router)
     app.include_router(mcp_shared.router)
     app.include_router(sessions_api.router)
+    app.include_router(tamper_api.router)
     app.add_middleware(BodySizeLimit)
     if channel == "local":
         app.add_middleware(LocalHostGuard)

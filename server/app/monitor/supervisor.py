@@ -19,6 +19,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
+from app.activity.tamper import TamperMonitor
 from app.clock import Clock, to_kst_iso
 from app.logstore.writer import LogWriter
 from app.monitor.bus import BoardBus
@@ -90,6 +91,7 @@ class Monitor:
         log: LogWriter,
         bus: BoardBus,
         clock: Clock,
+        tamper: TamperMonitor,
     ) -> None:
         self._mcps = mcps
         self._scripts_store = scripts
@@ -100,6 +102,7 @@ class Monitor:
         self._log = log
         self._bus = bus
         self._clock = clock
+        self._tamper = tamper
         self._config: dict[int, Mcp] = {}  # cached Mcp (refreshed on every config write path)
         self._engines: dict[int, McpEngine] = {}
         self._pids: dict[int, int | None] = {}
@@ -480,8 +483,8 @@ class Monitor:
             )
             if result.error == "hash_mismatch":
                 checked = resolved or info
-                self._log.emit(
-                    "tamper", mcp_id=mcp_id, kind=kind, path=str(checked.path),
+                self._tamper.report(
+                    "script_hash_mismatch", mcp_id=mcp_id, kind=kind, path=str(checked.path),
                     expected_sha256=checked.sha256, actual_sha256=result.actual_sha256,
                 )
             elif result.error == "internal":

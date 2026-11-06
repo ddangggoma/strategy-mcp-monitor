@@ -60,6 +60,8 @@ async def test_tamper_logged(services):
     t = (await logs(services, "tamper"))[0]
     assert (t["mcp_id"], t["kind"], t["actual_sha256"]) == (m.id, "start", "ab" * 32)
     assert services.monitor.engine(m.id).state == S.SUSPECT
+    assert t["event"] == "script_hash_mismatch"
+    assert services.tamper.recent(1)[0]["mcp_id"] == m.id
 
 async def test_slow_script_does_not_block_and_conflicts(services):
     owner = make_user(services, "o@x.com"); m = seed_mcp(services, owner)
