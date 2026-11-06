@@ -13,16 +13,20 @@ import sqlite3
 import threading
 import time
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import BinaryIO
 
 from app.clock import KST, Clock
+from app.logstore import query
 from app.logstore.files import LogFile, list_log_files
+from app.logstore.fts import InvalidQuery
 from app.logstore.index_db import open_reader, prepare_index
 from app.logstore.normalize import normalize
+from app.logstore.query import Cursor, Histogram, LogFilter, LogRow, Page
 from app.logstore.reader import open_log, parse_line, read_chunk
 from app.logstore.writer import LogSink
 
@@ -69,53 +73,131 @@ def _summary(conn: sqlite3.Connection) -> IndexSummary:
     return IndexSummary(int(rows), oldest, newest)
 
 
+class _Slot:
+    """A thread's reader connection and how many calls are using it right now."""
+
+    __slots__ = ("conn", "busy", "retired")
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+        self.busy = 0
+        self.retired = False  # close_all() ran: closed when the last call using it ends
+
+
+def _close_quietly(conn: sqlite3.Connection) -> None:
+    try:
+        conn.close()
+    except sqlite3.Error:
+        pass
+
+
 class IndexReader:
     """Read-only access to the index: one connection per thread, all closable at once.
 
-    Every method blocks; call them through ``asyncio.to_thread`` from the loop.
+    Every method blocks; call them through ``asyncio.to_thread`` from the loop. ``close_all()`` closes
+    the idle connections at once and a connection in use when its call ends, so a query running on
+    another thread during a stop or rebuild finishes instead of failing.
     """
 
     def __init__(self, path: Path) -> None:
         self._path = Path(path)
         self._local = threading.local()
         self._lock = threading.Lock()
-        self._conns: list[sqlite3.Connection] = []
-        self._generation = 0  # bumped by close_all(): a thread's older connection is closed
+        self._slots: list[_Slot] = []
 
-    def _conn(self) -> sqlite3.Connection:
+    @contextmanager
+    def _use(self) -> Iterator[sqlite3.Connection]:
         local = self._local
-        conn: sqlite3.Connection | None = getattr(local, "conn", None)
-        if conn is not None and local.generation == self._generation:
-            return conn
-        conn = open_reader(self._path)
-        with self._lock:
-            self._conns.append(conn)
-            local.conn, local.generation = conn, self._generation
-        return conn
+        slot: _Slot | None = getattr(local, "slot", None)
+        with self._lock:  # check and mark in one step: close_all() cannot close it in between
+            if slot is not None and not slot.retired:
+                slot.busy += 1
+            else:
+                slot = None
+        if slot is None:
+            conn = open_reader(self._path)
+            slot = _Slot(conn)
+            slot.busy = 1
+            with self._lock:
+                self._slots.append(slot)
+            local.slot = slot
+        try:
+            yield slot.conn
+        finally:
+            with self._lock:
+                slot.busy -= 1
+                close = slot.retired and slot.busy == 0
+            if close:
+                _close_quietly(slot.conn)
 
     def close_all(self) -> None:
         """Close every thread's connection (before the index file is deleted or rebuilt: Windows
-        cannot delete a file that a connection of this process holds open). Threads reopen on use."""
+        cannot delete a file that a connection of this process holds open). A connection in use is
+        closed by its thread when the call ends. Threads open a new connection on their next call."""
         with self._lock:
-            conns, self._conns = self._conns, []
-            self._generation += 1
-        for conn in conns:
-            try:
-                conn.close()
-            except sqlite3.Error:
-                pass
+            slots, self._slots = self._slots, []
+            idle = []
+            for slot in slots:
+                slot.retired = True
+                if slot.busy == 0:
+                    idle.append(slot)
+        for slot in idle:
+            _close_quietly(slot.conn)
 
     def summary(self) -> IndexSummary:
-        return _summary(self._conn())
+        with self._use() as conn:
+            return _summary(conn)
 
     def days(self) -> dict[str, int]:
         """Indexed rows per day."""
-        rows = self._conn().execute("SELECT day, COUNT(*) FROM events GROUP BY day").fetchall()
+        with self._use() as conn:
+            rows = conn.execute("SELECT day, COUNT(*) FROM events GROUP BY day").fetchall()
         return {day: int(n) for day, n in rows}
 
     def count_before_day(self, day: str) -> int:
         """Indexed rows of the days before ``day`` (``YYYY-MM-DD``)."""
-        return int(self._conn().execute("SELECT COUNT(*) FROM events WHERE day < ?", (day,)).fetchone()[0])
+        with self._use() as conn:
+            return int(conn.execute("SELECT COUNT(*) FROM events WHERE day < ?", (day,)).fetchone()[0])
+
+    # -- queries (app.logstore.query) ---------------------------------------------------------------
+
+    def page(self, f: LogFilter, cursor: Cursor | None, limit: int = query.DEFAULT_PAGE) -> Page:
+        """Newest-first rows older than ``cursor``, at most ``limit`` (1..MAX_PAGE)."""
+        if not 1 <= limit <= query.MAX_PAGE:
+            raise InvalidQuery(f"limit must be 1-{query.MAX_PAGE}")
+        with self._use() as conn:
+            return query.page(conn, f, cursor, limit)
+
+    def histogram(self, f: LogFilter, buckets: int = 60, group: query.Group = "none") -> Histogram:
+        with self._use() as conn:
+            return query.histogram(conn, f, buckets, group)
+
+    def users(self, f: LogFilter, limit: int = 200) -> list[tuple[str, int]]:
+        """Rows per user under ``f`` ignoring ``f.users``, most first."""
+        with self._use() as conn:
+            return query.users(conn, f, limit)
+
+    def iter_rows(self, f: LogFilter, limit: int, chunk: int = 5000) -> Iterator[LogRow]:
+        """Up to ``limit`` rows newest first, read ``chunk`` at a time through a connection of its
+        own (an export may run long), closed when the rows end or the generator is closed."""
+        if limit < 1 or chunk < 1:
+            raise InvalidQuery("limit and chunk must be positive")
+        return self._iter_rows(f, limit, chunk)
+
+    def _iter_rows(self, f: LogFilter, limit: int, chunk: int) -> Iterator[LogRow]:
+        conn = open_reader(self._path)
+        try:
+            cursor: Cursor | None = None
+            left = limit
+            while left > 0:
+                p = query.page(conn, f, cursor, min(chunk, left))
+                yield from p.rows
+                left -= len(p.rows)
+                if p.next_cursor is None:
+                    return
+                cursor = Cursor(p.rows[-1].ts_ms, p.rows[-1].id)
+        finally:
+            conn.close()
 
 
 class _FileCursor:

@@ -3,6 +3,7 @@
 __pycache__/
 *.pyc
 server/.pytest_cache/
+server/.cache/
 /logs/
 /data/
 /scripts/

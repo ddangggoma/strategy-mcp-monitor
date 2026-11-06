@@ -36,8 +36,10 @@ pythonpath = ["."]
 markers = [
     "integration: real subprocess scenario (Windows, needs dummy-mcps/.venv)",
     "winlive: real Windows API on this PC, no admin rights",
+    "perf: 1M-row log query performance (builds a cache under server/.cache/)",
+    "bundle: runs the built distribution bundle",
 ]
-addopts = "-m 'not integration and not winlive'"
+addopts = "-m 'not integration and not winlive and not perf and not bundle'"
 # Per-test cap (pytest-timeout): a hung real-process test fails instead of hanging the whole run.
 timeout = 120
 
