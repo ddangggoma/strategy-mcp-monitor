@@ -1,7 +1,8 @@
 // Where the notice bundle gets its text and where it reports the acknowledgement (U16).
 //   - display mode: the session agent opens `/notice#d=<display id>&t=<token>` in the notice window
 //     (Plan 4, V15/V16). The page reads the token, takes it out of the address at once, and talks
-//     to the Local-only display API with it — `fetch` directly, no cookies (V30).
+//     to the Local-only display API with it — `fetch` directly, no cookies (V30). The token stays
+//     only in the page's own history entry (`history.state`), so a reload (F5) is still the display.
 //   - preview mode: any other address — the local Admin's full-screen preview (Plan 3, F18).
 import { copy } from "@/copy/ko";
 import type { NoticeContent, NoticeDisplayContent } from "@/lib/api-types";
@@ -24,16 +25,33 @@ export function readNoticeSource(hash: string): NoticeSource {
   return Number.isSafeInteger(displayId) ? { mode: "display", displayId, token: t } : PREVIEW;
 }
 
+/** What the history entry keeps of a display source (`history.state`). */
+interface KeptSource {
+  noticeDisplay: { d: number; t: string };
+}
+
+function keptSource(state: unknown): NoticeSource {
+  const kept: unknown = (state as Partial<KeptSource> | null | undefined)?.noticeDisplay;
+  if (typeof kept !== "object" || kept === null) return PREVIEW;
+  const { d, t } = kept as Record<string, unknown>;
+  if (typeof d !== "number" || !Number.isSafeInteger(d) || d < 1 || typeof t !== "string" || !TOKEN.test(t)) return PREVIEW;
+  return { mode: "display", displayId: d, token: t };
+}
+
 /**
  * Reads the source once and, in display mode, removes the token from the address bar (and so from
- * history, a copied URL and the window title bar) before anything else runs.
+ * a copied URL and the window title bar) before anything else runs. The source moves into the
+ * history entry's state, which a reload of the notice window (F5) reads back: without it the reload
+ * would fall back to preview mode, and its button would record nothing. A new address always wins.
  */
 export function takeNoticeSource(
   loc: Pick<Location, "hash" | "pathname" | "search"> = window.location,
-  hist: Pick<History, "replaceState"> = window.history,
+  hist: Pick<History, "replaceState" | "state"> = window.history,
 ): NoticeSource {
   const src = readNoticeSource(loc.hash);
-  if (src.mode === "display") hist.replaceState(null, "", loc.pathname + loc.search);
+  if (src.mode !== "display") return keptSource(hist.state);
+  const kept: KeptSource = { noticeDisplay: { d: src.displayId, t: src.token } };
+  hist.replaceState(kept, "", loc.pathname + loc.search);
   return src;
 }
 
@@ -106,30 +124,39 @@ const ACK_RETRY_DELAYS_MS: readonly number[] = [1000, 2000];
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
- * Reports the acknowledgement; resolves whether it reached its receiver.
+ * How the acknowledgement report ended: `sent` reached its receiver; `expired` = the display is
+ * gone (acknowledged, replaced by a newer connection's notice, or not ours), so retrying cannot
+ * help; `failed` = it did not get through, and a retry may.
+ */
+export type AckResult = "sent" | "expired" | "failed";
+
+/**
+ * Reports the acknowledgement.
  *
- * Display mode: POST /api/notice/display/ack with the token. 204 → true; 404 → false at once (the
- * display is gone, retrying cannot help); anything else (no answer, 5xx, 403) is tried again after
- * each of `retryDelaysMs`, then false.
+ * Display mode: POST /api/notice/display/ack with the token. 204 → `sent`; 404 → `expired` at
+ * once; anything else (no answer, 5xx, 403) is tried again after each of `retryDelaysMs`, then
+ * `failed`.
  *
- * Preview mode: the WebView2 host bridge when there is one (true), otherwise nobody to tell (false).
+ * Preview mode: the WebView2 host bridge when there is one (`sent`), otherwise nobody to tell
+ * (`failed`).
  */
 export async function notifyHost(
   message: NoticeAck,
   src: NoticeSource = PREVIEW,
   opts: { retryDelaysMs?: readonly number[] } = {},
-): Promise<boolean> {
+): Promise<AckResult> {
   if (src.mode === "preview") {
     const host = window.chrome?.webview;
-    if (!host) return false;
+    if (!host) return "failed";
     host.postMessage(message);
-    return true;
+    return "sent";
   }
   const delays = opts.retryDelaysMs ?? ACK_RETRY_DELAYS_MS;
   for (let attempt = 0; ; attempt++) {
     const res = await displayPost("ack", src.token);
-    if (res?.status === 204) return true;
-    if (res?.status === 404 || attempt >= delays.length) return false;
+    if (res?.status === 204) return "sent";
+    if (res?.status === 404) return "expired";
+    if (attempt >= delays.length) return "failed";
     await wait(delays[attempt]!);
   }
 }

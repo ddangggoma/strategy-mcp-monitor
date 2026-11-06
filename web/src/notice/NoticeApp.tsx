@@ -11,7 +11,8 @@ type State =
   | { t: "acknowledged" }
   /** Display mode also offers a retry: the token has left the address, so a reload cannot help. */
   | { t: "loadFailed"; retry: boolean }
-  /** Display mode 404: acknowledged already, replaced by a newer connection's notice, or not this session's. */
+  /** Display mode 404, on load or on the acknowledgement: acknowledged already, replaced by a newer
+   * connection's notice, or not this session's. There is nothing to retry. */
   | { t: "expired" };
 
 /** Loads the text; never rejects: a failure becomes the state that explains it. */
@@ -29,7 +30,8 @@ async function loadState(source: NoticeSource): Promise<State> {
  * The `/notice` page: load the text, show it as the modal notice, and on the button report the
  * acknowledgement and close. Until the text arrives the page stays empty (no flash of a message).
  * In display mode (the notice window the session agent opens) the report goes to the server with
- * the display's token and can fail: then the page says so and offers a retry. In preview mode there
+ * the display's token and can fail: then the page says so and offers a retry (a 404 means the
+ * display is gone: the page says the notice is no longer open, with nothing to retry). In preview mode there
  * is nothing to record, so the button always ends in the acknowledged message.
  * React, react-dom and the notice files only — no Motion, Radix or Query (bundle < 100 KB).
  */
@@ -51,10 +53,12 @@ export function NoticeApp({ source }: { source: NoticeSource }) {
     if (sending.current) return; // one report at a time, however often the button is pressed
     sending.current = true;
     setState({ t: from, notice, sending: true });
-    const ok = await notifyHost({ type: "notice_ack", version: notice.version }, source);
+    const result = await notifyHost({ type: "notice_ack", version: notice.version }, source);
     sending.current = false;
     if (!alive.current) return;
-    setState(ok || source.mode === "preview" ? { t: "acknowledged" } : { t: "ackFailed", notice, sending: false });
+    if (result === "sent" || source.mode === "preview") setState({ t: "acknowledged" });
+    else if (result === "expired") setState({ t: "expired" });
+    else setState({ t: "ackFailed", notice, sending: false });
   };
 
   const retry = () => {

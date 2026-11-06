@@ -4,7 +4,7 @@ test("anonymous board updates live over SSE without a reload", async ({ page, st
   await page.goto(`${state.externalUrl}/`);
   const card = page.getByTestId("mcp-card").filter({ hasText: MCP_NAME });
   await expect(card.getByText(copy.states.HEALTHY)).toBeVisible();
-  await expect(page.getByText(copy.board.sessionsNotReady)).toBeVisible();
+  await expect(page.getByText(copy.board.noSession)).toBeVisible();
   // the anonymous board never shows where an MCP runs (F09: the exact host:port, not any digits)
   await expect(page.locator("body")).not.toContainText(`127.0.0.1:${state.mcpPort}`);
   await expect(page.locator("body")).not.toContainText(`:${state.mcpPort}`);

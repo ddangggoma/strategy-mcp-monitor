@@ -47,15 +47,15 @@ describe("preview mode (no display in the address)", () => {
     it("posts the acknowledgement to the WebView2 host", async () => {
       const postMessage = vi.fn();
       (window as { chrome?: unknown }).chrome = { webview: { postMessage } };
-      await expect(notifyHost({ type: "notice_ack", version: 3 })).resolves.toBe(true);
+      await expect(notifyHost({ type: "notice_ack", version: 3 })).resolves.toBe("sent");
       expect(postMessage).toHaveBeenCalledWith({ type: "notice_ack", version: 3 });
     });
 
     it("tells nobody in an ordinary browser, and makes no request", async () => {
       const spy = trackRequests();
-      await expect(notifyHost({ type: "notice_ack", version: null })).resolves.toBe(false);
+      await expect(notifyHost({ type: "notice_ack", version: null })).resolves.toBe("failed");
       (window as { chrome?: unknown }).chrome = {}; // Chrome's own window.chrome has no webview
-      await expect(notifyHost({ type: "notice_ack", version: null }, { mode: "preview" })).resolves.toBe(false);
+      await expect(notifyHost({ type: "notice_ack", version: null }, { mode: "preview" })).resolves.toBe("failed");
       expect(spy.paths()).toEqual([]);
     });
   });
@@ -82,19 +82,40 @@ describe("display mode (#d=<id>&t=<token>)", () => {
     }
   });
 
-  it("takes the token out of the address bar", () => {
+  it("takes the token out of the address bar and keeps it in the history entry only", () => {
     const replaceState = vi.fn();
-    expect(takeNoticeSource({ hash: "#d=12&t=tok_ABCDEFGHIJKLmnop", pathname: "/notice", search: "" }, { replaceState })).toEqual(SRC);
-    expect(replaceState).toHaveBeenCalledWith(null, "", "/notice");
+    expect(takeNoticeSource({ hash: "#d=12&t=tok_ABCDEFGHIJKLmnop", pathname: "/notice", search: "" }, { replaceState, state: null })).toEqual(SRC);
+    expect(replaceState).toHaveBeenCalledWith({ noticeDisplay: { d: 12, t: "tok_ABCDEFGHIJKLmnop" } }, "", "/notice");
     replaceState.mockClear();
-    takeNoticeSource({ hash: "#d=12&t=tok_ABCDEFGHIJKLmnop", pathname: "/notice", search: "?x=1" }, { replaceState });
-    expect(replaceState).toHaveBeenCalledWith(null, "", "/notice?x=1");
+    takeNoticeSource({ hash: "#d=12&t=tok_ABCDEFGHIJKLmnop", pathname: "/notice", search: "?x=1" }, { replaceState, state: null });
+    expect(replaceState).toHaveBeenCalledWith({ noticeDisplay: { d: 12, t: "tok_ABCDEFGHIJKLmnop" } }, "", "/notice?x=1");
   });
 
   it("leaves a preview address alone", () => {
     const replaceState = vi.fn();
-    expect(takeNoticeSource({ hash: "", pathname: "/notice", search: "" }, { replaceState })).toEqual({ mode: "preview" });
+    expect(takeNoticeSource({ hash: "", pathname: "/notice", search: "" }, { replaceState, state: null })).toEqual({ mode: "preview" });
     expect(replaceState).not.toHaveBeenCalled();
+  });
+
+  it("stays in display mode after a reload (F5 in the notice window): the history entry still has the source", () => {
+    const replaceState = vi.fn();
+    const state = { noticeDisplay: { d: 12, t: "tok_ABCDEFGHIJKLmnop" } };
+    expect(takeNoticeSource({ hash: "", pathname: "/notice", search: "" }, { replaceState, state })).toEqual(SRC);
+    expect(replaceState).not.toHaveBeenCalled();
+    // a new address wins over what the entry kept
+    const next = takeNoticeSource({ hash: "#d=13&t=tok_ZYXWVUTSRQPOnmlk", pathname: "/notice", search: "" }, { replaceState, state });
+    expect(next).toEqual({ mode: "display", displayId: 13, token: "tok_ZYXWVUTSRQPOnmlk" });
+  });
+
+  it("ignores a history entry that does not hold a valid source", () => {
+    const replaceState = vi.fn();
+    for (const state of [
+      undefined, "x", {}, { noticeDisplay: null }, { noticeDisplay: { d: "12", t: "tok_ABCDEFGHIJKLmnop" } },
+      { noticeDisplay: { d: 0, t: "tok_ABCDEFGHIJKLmnop" } }, { noticeDisplay: { d: 1.5, t: "tok_ABCDEFGHIJKLmnop" } },
+      { noticeDisplay: { d: 12, t: "short" } }, { noticeDisplay: { d: 12, t: 7 } },
+    ]) {
+      expect(takeNoticeSource({ hash: "", pathname: "/notice", search: "" }, { replaceState, state }), JSON.stringify(state)).toEqual({ mode: "preview" });
+    }
   });
 
   it("reads the real location by default", () => {
@@ -102,6 +123,8 @@ describe("display mode (#d=<id>&t=<token>)", () => {
     expect(takeNoticeSource()).toEqual(SRC);
     expect(window.location.hash).toBe("");
     expect(window.location.pathname).toBe("/notice");
+    expect(takeNoticeSource()).toEqual(SRC); // what a reload reads: the real history entry's state
+    window.history.replaceState(null, "", "/");
   });
 
   it("opens the display with the token header", async () => {
@@ -144,14 +167,14 @@ describe("display mode (#d=<id>&t=<token>)", () => {
     expect(err).toMatchObject({ status: 0 });
   });
 
-  it("acknowledges with retries and stops at 404", async () => {
+  it("acknowledges with retries and stops at 404 (expired: retrying cannot help)", async () => {
     let calls = 0;
     server.use(http.post("/api/notice/display/ack", () => (++calls < 3 ? HttpResponse.json({ error: "internal" }, { status: 503 }) : new HttpResponse(null, { status: 204 }))));
-    await expect(notifyHost({ type: "notice_ack", version: 3 }, SRC, { retryDelaysMs: [0, 0] })).resolves.toBe(true);
+    await expect(notifyHost({ type: "notice_ack", version: 3 }, SRC, { retryDelaysMs: [0, 0] })).resolves.toBe("sent");
     expect(calls).toBe(3);
     calls = 0;
     server.use(http.post("/api/notice/display/ack", () => { calls++; return HttpResponse.json({ error: "not_found" }, { status: 404 }); }));
-    await expect(notifyHost({ type: "notice_ack", version: 3 }, SRC, { retryDelaysMs: [0, 0] })).resolves.toBe(false);
+    await expect(notifyHost({ type: "notice_ack", version: 3 }, SRC, { retryDelaysMs: [0, 0] })).resolves.toBe("expired");
     expect(calls).toBe(1);
   });
 
@@ -161,7 +184,7 @@ describe("display mode (#d=<id>&t=<token>)", () => {
       tokens.push(request.headers.get("X-Notice-Token"));
       return tokens.length === 1 ? HttpResponse.error() : HttpResponse.json({ error: "internal" }, { status: 500 });
     }));
-    await expect(notifyHost({ type: "notice_ack", version: 3 }, SRC, { retryDelaysMs: [0, 0] })).resolves.toBe(false);
+    await expect(notifyHost({ type: "notice_ack", version: 3 }, SRC, { retryDelaysMs: [0, 0] })).resolves.toBe("failed");
     expect(tokens).toEqual(Array(3).fill(SRC.token));
   });
 
@@ -182,7 +205,7 @@ describe("display mode (#d=<id>&t=<token>)", () => {
         calls++;
         return HttpResponse.json({ error: "internal" }, { status: 503 });
       }));
-      await expect(notifyHost({ type: "notice_ack", version: 3 }, SRC)).resolves.toBe(false);
+      await expect(notifyHost({ type: "notice_ack", version: 3 }, SRC)).resolves.toBe("failed");
       expect(calls).toBe(3);
       expect(waits).toEqual([1000, 2000]); // between the attempts, none after the last
     } finally {
@@ -194,7 +217,7 @@ describe("display mode (#d=<id>&t=<token>)", () => {
     const postMessage = vi.fn();
     (window as { chrome?: unknown }).chrome = { webview: { postMessage } };
     try {
-      await expect(notifyHost({ type: "notice_ack", version: 3 }, SRC)).resolves.toBe(true); // default handler: 204
+      await expect(notifyHost({ type: "notice_ack", version: 3 }, SRC)).resolves.toBe("sent"); // default handler: 204
       expect(postMessage).not.toHaveBeenCalled();
     } finally {
       delete (window as { chrome?: unknown }).chrome;

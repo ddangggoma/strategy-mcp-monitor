@@ -15,7 +15,7 @@
 import { spawn } from "node:child_process";
 import { execFile } from "node:child_process";
 import { closeSync, existsSync, openSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -29,6 +29,8 @@ export const DUMMY_MCPS_DIR = join(REPO_DIR, "dummy-mcps");
 export const DIST_DIR = join(WEB_DIR, "dist");
 export const STATE_FILE = join(WEB_DIR, "e2e", ".state.json");
 export const AUTH_DIR = join(WEB_DIR, "e2e", ".auth");
+/** The JSON session source in the data root (`--session-source json:`), rewritten by e2e/sessions.ts. */
+export const SESSIONS_FILE = "sessions.json";
 
 export const DEV_OTP_CODE = "246810";
 export const ADMIN_EMAIL = "admin@e2e.test";
@@ -225,6 +227,8 @@ export async function startBackend(): Promise<{ state: BackendState; adminLocal:
   const mcpPort = await mcpPortAvoiding([localPort, externalPort]);
   const localUrl = `http://127.0.0.1:${localPort}`;
   const externalUrl = `http://127.0.0.1:${externalPort}`;
+  const sessionsFile = join(root, SESSIONS_FILE);
+  await writeFile(sessionsFile, JSON.stringify({ sessions: [] }), "utf-8");
 
   // a file, not a pipe: the dummy MCP the server starts inherits these handles, and a pipe it keeps
   // open would hold the test runner open after the server is gone
@@ -240,9 +244,13 @@ export async function startBackend(): Promise<{ state: BackendState; adminLocal:
       "--external-host", "127.0.0.1",
       "--dev-otp-code", DEV_OTP_CODE,
       "--static-dir", DIST_DIR,
-      // no RDP session collection (Plan 4 default: wts): the board's session banner must not depend
-      // on this PC's sessions. Plan 4 Task 19 replaces this with a json: dev session file.
-      "--session-source", "none",
+      // RDP sessions come from a file the tests rewrite (e2e/sessions.ts), never from this PC's
+      // own sessions; "self" sessions get the real agent, which prints each notice URL to
+      // <root>/run/agent-<session id>.url instead of opening Edge. No process/command collection.
+      "--session-source", `json:${sessionsFile}`,
+      "--agent-launcher", "local",
+      "--agent-dialog", "print",
+      "--activity", "off",
     ],
     {
       cwd: SERVER_DIR,

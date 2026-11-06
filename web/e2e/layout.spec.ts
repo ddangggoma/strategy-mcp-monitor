@@ -2,6 +2,7 @@
 // stays usable from 1920 down to 640 x 600: no horizontal page scroll (tables scroll in their own
 // container), and the admin sidebar folds to an icon rail below 1024 px.
 import { MCP_NAME, copy, expect, test } from "./fixtures";
+import { clearSessions, rdp, setSessions } from "./sessions";
 
 const WIDTHS = [1920, 1280, 1024, 800, 640] as const;
 const ADMIN_PAGES = [
@@ -17,16 +18,40 @@ const ADMIN_PAGES = [
   "/admin/notice",
 ];
 
+// C4 / F11: the session screens are measured with content: a connected session with long values
+// (a card on the board, the dashboard and the sessions page) and a disconnected one (the sessions
+// page's status line). Neither is this PC's own session, so no agent starts.
+const CARD_USER = "hong.gildong-contractor-account";
+const SEEDED = [
+  rdp({
+    session_id: 42, user: CARD_USER, domain: "CORPORATE-DOMAIN", client_name: "HONG-LAPTOP-WORKSTATION-01",
+    client_ip: "10.0.3.21", resolution: "1920x1080@32", idle_sec: 3725,
+  }),
+  rdp({ session_id: 43, user: "kim", client_ip: "10.0.3.22", state: "disconnected", disconnected_at: new Date().toISOString() }),
+];
+/** Pages that must show the seeded session before they are measured. */
+const WITH_CARD = new Set(["/", "/admin", "/admin/sessions"]);
+
+test.beforeEach(async ({ state }) => { await setSessions(state, SEEDED); });
+test.afterEach(async ({ state }) => { await clearSessions(state); });
+
 for (const width of WIDTHS) {
   test(`no horizontal page scroll at ${width} px`, async ({ page, state, loginAs }) => {
     await page.setViewportSize({ width, height: width === 640 ? 600 : 900 });
     const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    const card = page.getByRole("article", { name: CARD_USER });
 
     for (const path of ["/", "/admin/login"]) {
       await page.goto(`${state.localUrl}${path}`);
       await expect(page.locator("h1").first()).toBeVisible();
+      if (WITH_CARD.has(path)) await expect(card).toBeVisible();
       expect(await overflow(), path).toBeLessThanOrEqual(0);
     }
+
+    // the notice window is a 640 x 600 Edge app window; the page must fit it (and anything wider)
+    await page.goto(`${state.localUrl}/notice`);
+    await expect(page.getByRole("dialog")).toBeVisible();
+    expect(await overflow(), "/notice").toBeLessThanOrEqual(0);
 
     await loginAs(page, "admin", "local");
     const nav = page.getByRole("navigation", { name: copy.nav.label });
@@ -37,6 +62,8 @@ for (const width of WIDTHS) {
       await page.goto(`${state.localUrl}${path.replace("{id}", String(state.mcpId))}`);
       await expect(page.locator("main h1").first()).toBeVisible();
       await expect(page.locator("[role='status'] .sr-only", { hasText: copy.common.loading })).toHaveCount(0);
+      if (WITH_CARD.has(path)) await expect(card).toBeVisible();
+      if (path === "/admin/sessions") await expect(page.getByTestId("session-line").filter({ hasText: "kim" })).toBeVisible();
       expect(await overflow(), path).toBeLessThanOrEqual(0);
     }
 

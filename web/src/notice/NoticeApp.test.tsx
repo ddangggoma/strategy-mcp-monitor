@@ -16,7 +16,21 @@ const open = () => server.use(http.post("/api/notice/display/open", () =>
 
 afterEach(() => {
   delete (window as { chrome?: unknown }).chrome;
+  vi.restoreAllMocks();
 });
+
+/**
+ * The acknowledgement waits 1 s and 2 s between its tries (V30): run those waits at once. Only the
+ * waits source.ts asks for are skipped; Testing Library's own 1 s `findBy` timeout is left alone.
+ */
+function skipAckWaits() {
+  const realSetTimeout = globalThis.setTimeout;
+  vi.spyOn(globalThis, "setTimeout").mockImplementation(((fn: () => void, ms?: number, ...args: unknown[]) => {
+    const ackWait = (ms === 1000 || ms === 2000) && /notice[\\/]source\.ts/.test(new Error().stack ?? "");
+    return realSetTimeout(fn, ackWait ? 0 : ms, ...args);
+  }) as typeof setTimeout);
+}
+const ackUnavailable = () => HttpResponse.json({ error: "internal" }, { status: 503 });
 
 it("keeps the page title the session agent finds the notice window by (Task 15 NOTICE_TITLE)", () => {
   const html = new DOMParser().parseFromString(noticeHtml, "text/html");
@@ -132,8 +146,8 @@ describe("display mode", () => {
   });
 
   it("offers a retry when the acknowledgement fails", async () => {
-    open(); let ok = false;
-    server.use(http.post("/api/notice/display/ack", () => (ok ? new HttpResponse(null, { status: 204 }) : HttpResponse.json({ error: "not_found" }, { status: 404 }))));
+    open(); skipAckWaits(); let ok = false;
+    server.use(http.post("/api/notice/display/ack", () => (ok ? new HttpResponse(null, { status: 204 }) : ackUnavailable())));
     render(<NoticeApp source={SRC} />);
     await userEvent.click(await screen.findByRole("button", { name: "확인했습니다" }));
     expect(await screen.findByText(copy.notice.ackFailed)).toBeInTheDocument();
@@ -142,15 +156,31 @@ describe("display mode", () => {
   });
 
   it("announces the failure and puts the focus on the retry button", async () => {
-    open();
-    server.use(http.post("/api/notice/display/ack", () => HttpResponse.json({ error: "not_found" }, { status: 404 })));
+    open(); skipAckWaits();
+    server.use(http.post("/api/notice/display/ack", ackUnavailable));
     render(<NoticeApp source={SRC} />);
     await userEvent.click(await screen.findByRole("button", { name: "확인했습니다" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(copy.notice.ackFailed);
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByRole("button", { name: copy.notice.retry })).toHaveFocus();
     await userEvent.keyboard("{Enter}"); // still failing: stays on the retry, no acknowledgement
-    expect(await screen.findByRole("alert")).toHaveTextContent(copy.notice.ackFailed);
+    const retry = screen.getByRole("button", { name: copy.notice.retry });
+    expect(retry).toHaveAttribute("aria-busy", "true");
+    await waitFor(() => expect(retry).not.toHaveAttribute("aria-busy")); // all three tries are done
+    expect(screen.getByRole("alert")).toHaveTextContent(copy.notice.ackFailed);
     expect(screen.queryByText(copy.notice.acknowledged)).toBeNull();
+  });
+
+  it("says the notice is no longer open, with no retry, when the acknowledgement finds the display gone (404)", async () => {
+    open();
+    let calls = 0;
+    server.use(http.post("/api/notice/display/ack", () => { calls++; return HttpResponse.json({ error: "not_found" }, { status: 404 }); }));
+    render(<NoticeApp source={SRC} />);
+    await userEvent.click(await screen.findByRole("button", { name: "확인했습니다" }));
+    expect(await screen.findByText(copy.notice.displayExpired)).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull(); // retrying could never succeed
+    expect(calls).toBe(1);
   });
 });
