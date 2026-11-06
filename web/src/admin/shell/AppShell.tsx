@@ -86,6 +86,23 @@ export function AppShell() {
   }, [router, stream]);
 
   useEffect(() => {
+    // another tab put a different user in the shared cookie (session_changed): a user switch. The
+    // previous user's edits leave the screen and storage, past any unsaved-changes blocker, so the
+    // next save cannot store them as the new user's; the new user starts on the dashboard.
+    const handler = () => {
+      clearAllDrafts();
+      stream.restart(); // the stream keeps the user it connected as
+      toast.error(copy.errors.session_changed, { id: "session_changed" });
+      // nothing read as the previous user stays: every query starts over, the open ones as the new user
+      void router.navigate({ to: "/admin", ignoreBlocker: true }).finally(() => void qc.resetQueries());
+    };
+    session.onSessionChanged = handler;
+    return () => {
+      if (session.onSessionChanged === handler) session.onSessionChanged = null;
+    };
+  }, [qc, router, stream]);
+
+  useEffect(() => {
     tracker.activate();
     const offAction = store.onAction(tracker.handle);
     const offReconnected = store.onReconnected(() => void tracker.reconcile()); // events may have been missed

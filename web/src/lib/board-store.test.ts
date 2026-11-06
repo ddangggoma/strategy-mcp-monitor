@@ -176,3 +176,14 @@ it("ignores malformed tamper events, keeps the snapshot and stops after unsubscr
   s.apply({ event: "tamper", data: JSON.stringify(tamperFixture()) });
   expect(fn).toHaveBeenCalledTimes(1);
 });
+
+it("tells listeners when the sessions screen's data changed (sessions_changed, M16)", () => {
+  const s = new BoardStore(); const fn = vi.fn(); const off = s.onSessionsChanged(fn);
+  const before = s.getSnapshot();
+  s.apply({ event: "sessions_changed", data: "{}" });
+  expect(fn).toHaveBeenCalledTimes(1);
+  expect(s.getSnapshot()).toBe(before); // nothing on the board changes
+  off();
+  s.apply({ event: "sessions_changed", data: "{}" });
+  expect(fn).toHaveBeenCalledTimes(1);
+});

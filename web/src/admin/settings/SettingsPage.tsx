@@ -5,7 +5,7 @@ import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { WithReason } from "@/components/app/WithReason";
 import { Button } from "@/components/ui/button";
-import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel } from "@/components/ui/form";
+import { Form, FormControl, FormField, FormItem, FormLabel } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { copy, messageForError } from "@/copy/ko";
@@ -22,6 +22,7 @@ import { LocalOnlyPage } from "../shell/LocalOnlyPage";
 import { PlannedFeature } from "../shell/PlannedFeature";
 import { NumberField } from "./NumberField";
 import { RetentionConfirm, RetentionSection, type RetentionChange } from "./RetentionSection";
+import { ServiceSection } from "./ServiceSection";
 import {
   RETENTION_KEYS, START_TYPES, settingsSchema, type SettingsFormValues, type SettingsValues,
 } from "./settings-schema";
@@ -109,6 +110,8 @@ function SettingsForm({ settings }: { settings: Settings }) {
       form.reset(toValues(saved));
       // the usage line is measured against the saved value
       void qc.invalidateQueries({ queryKey: ["retention-preview"] });
+      // a new start type is applied to the service on save (W25)
+      if ("service_start_type" in patch) void qc.invalidateQueries({ queryKey: qk.service, exact: true });
       toast.success(copy.common.saved);
     } catch (err) {
       const code = err instanceof ApiError ? err.code : "internal";
@@ -191,10 +194,10 @@ function SettingsForm({ settings }: { settings: Settings }) {
                     ))}
                   </SelectContent>
                 </Select>
-                <FormDescription>{s.startTypeNote}</FormDescription>
               </FormItem>
             )}
           />
+          <ServiceSection />
         </Group>
 
         <Group legend={s.otp}>

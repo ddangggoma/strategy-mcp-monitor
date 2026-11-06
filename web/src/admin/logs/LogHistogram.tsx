@@ -60,7 +60,6 @@ function shape(data: Histogram): Shaped {
 }
 
 const colorOf = (g: Stack) => (g === "none" ? NONE_COLOR : GROUP_COLOR_VAR[g]);
-const nameOf = (g: Stack) => (g === "none" ? null : copy.logs.groups[g]);
 
 // ---- keyboard selection ----------------------------------------------------------------------
 
@@ -83,15 +82,24 @@ const span = (a: number, b: number): [number, number] => (a <= b ? [a, b] : [b, 
 
 export interface LogHistogramProps {
   data: Histogram;
-  /** A selected span: bucket-aligned KST bounds, the end never past `data.to`. */
-  onSelect(from: string, to: string): void;
+  /**
+   * A selected span: bucket-aligned KST bounds, the end never past `data.to`. Without it the chart
+   * is a picture (`role=img`, not focusable, no drag): only the hover tooltip remains.
+   */
+  onSelect?(from: string, to: string): void;
   /** Shorter bars, no legend (cards, the audit screen). */
   compact?: boolean;
   /** Fixed width for tests and SSR; otherwise the container's width. */
   width?: number;
+  /** The chart's accessible name (default: the selectable histogram's name with its keys). */
+  label?: string;
+  /** Names for the groups in the tooltip and legend (default: the category group names). */
+  names?: Partial<Record<LogGroup, string>>;
 }
 
-export function LogHistogram({ data, onSelect, compact = false, width }: LogHistogramProps) {
+export function LogHistogram({ data, onSelect, compact = false, width, label, names }: LogHistogramProps) {
+  const nameOf = (g: Stack) => (g === "none" ? null : (names?.[g] ?? copy.logs.groups[g]));
+  const selectable = onSelect !== undefined;
   const [wrapRef, W] = useElementWidth<HTMLDivElement>(width);
   const [cursor, move] = useReducer(cursorReducer, { focus: 0, anchor: null });
   const [drag, setDrag] = useState<{ a: number; b: number } | null>(null);
@@ -134,7 +142,7 @@ export function LogHistogram({ data, onSelect, compact = false, width }: LogHist
   const apply = (a: number, b: number) => {
     const [lo, hi] = span(a, b);
     const s = bucketSpan(data, lo, hi);
-    onSelect(s.from, s.to);
+    onSelect?.(s.from, s.to);
   };
 
   const onPointerDown = (e: PointerEvent<SVGSVGElement>) => {
@@ -208,18 +216,18 @@ export function LogHistogram({ data, onSelect, compact = false, width }: LogHist
       <div ref={wrapRef} className="relative min-w-0">
         <svg
           data-testid="log-histogram"
-          role="group"
-          tabIndex={0}
-          aria-label={copy.logs.histogramLabel(fmt(data.from), fmt(data.to), data.total)}
+          role={selectable ? "group" : "img"}
+          tabIndex={selectable ? 0 : undefined}
+          aria-label={label ?? copy.logs.histogramLabel(fmt(data.from), fmt(data.to), data.total)}
           width={W}
           height={H}
-          className="block cursor-crosshair touch-none select-none"
-          onPointerDown={onPointerDown}
+          className={selectable ? "block cursor-crosshair touch-none select-none" : "block select-none"}
+          onPointerDown={selectable ? onPointerDown : undefined}
           onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
+          onPointerUp={selectable ? onPointerUp : undefined}
           onPointerCancel={() => setDrag(null)}
           onPointerLeave={() => setHover(null)}
-          onKeyDown={onKeyDown}
+          onKeyDown={selectable ? onKeyDown : undefined}
           onFocus={() => setFocused(true)}
           onBlur={() => {
             setFocused(false);
@@ -304,7 +312,7 @@ export function LogHistogram({ data, onSelect, compact = false, width }: LogHist
             ))}
           </g>
         </svg>
-        {tipSpan ? <Tip data={data} span={tipSpan} slot={slot} W={W} fmt={fmt} stacks={stacks} counts={counts} /> : null}
+        {tipSpan ? <Tip data={data} span={tipSpan} slot={slot} W={W} fmt={fmt} stacks={stacks} counts={counts} nameOf={nameOf} /> : null}
       </div>
       {showLegend || !compact ? (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-fg-muted">
@@ -332,7 +340,7 @@ export function LogHistogram({ data, onSelect, compact = false, width }: LogHist
 
 /** Hover / drag / keyboard tooltip: the span's times and counts. For the eye only (the live region speaks). */
 function Tip({
-  data, span: [lo, hi], slot, W, fmt, stacks, counts,
+  data, span: [lo, hi], slot, W, fmt, stacks, counts, nameOf,
 }: {
   data: Histogram;
   span: [number, number];
@@ -341,6 +349,7 @@ function Tip({
   fmt(iso: string): string;
   stacks: Stack[];
   counts: Map<Stack, number[]>;
+  nameOf(g: Stack): string | null;
 }) {
   const { from, to } = bucketSpan(data, lo, hi);
   const by = stacks.map((g) => [g, counts.get(g)!.slice(lo, hi + 1).reduce((a, b) => a + b, 0)] as const);

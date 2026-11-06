@@ -73,11 +73,30 @@ async def test_board_sessions_shape(services, clock):
 async def test_publishes_sessions_only_on_visible_change(services, clock):
     sub = services.bus.subscribe(); t = services.rdp; li = clock.now()
     t.apply(snap(clock.now(), ws(2, last_input=li)))
-    assert [n for n, _ in sub.events] == ["sessions"]; sub.events.clear()
+    assert [n for n, _ in sub.events] == ["sessions"]; sub.events.clear()  # anonymous: no sessions_changed
     clock.advance(30); t.apply(snap(clock.now(), ws(2, last_input=li)))
     assert list(sub.events) == []
     clock.advance(31); t.apply(snap(clock.now(), ws(2, last_input=li)))
     assert [d["sessions"][0]["idle_sec"] for _, d in sub.events] == [61]
+
+async def test_publishes_sessions_changed_when_the_current_list_changes(services, clock):
+    # M16: the sessions screen lists disconnected sessions and the connection history, which the
+    # board's `sessions` event does not cover (a disconnected session that logs off changes no card)
+    authed, anon = services.bus.subscribe(authed=True), services.bus.subscribe(authed=False)
+    names = lambda: [n for n, _ in authed.events]  # noqa: E731
+    t = services.rdp; li = clock.now()
+    t.apply(snap(clock.now(), ws(2, last_input=li)))
+    assert names() == ["sessions", "sessions_changed"] and authed.events[1][1] == {}
+    authed.events.clear()
+    clock.advance(61); t.apply(snap(clock.now(), ws(2, last_input=li)))  # idle minutes only
+    assert names() == ["sessions"]; authed.events.clear()
+    clock.advance(5); t.apply(snap(clock.now(), ws(2, state="disconnected", last_input=li)))
+    assert names() == ["sessions", "sessions_changed"]; authed.events.clear()
+    clock.advance(5); t.apply(snap(clock.now(), ws(2, state="disconnected", last_input=li)))
+    assert names() == []
+    clock.advance(5); t.apply(snap(clock.now()))  # the disconnected session logs off: no board change
+    assert names() == ["sessions_changed"]
+    assert "sessions_changed" not in [n for n, _ in anon.events]
 
 async def test_first_seen_flags(services, clock):
     t = services.rdp; t.apply(snap(clock.now()))

@@ -365,7 +365,7 @@ export function logStatusFixture(p: Partial<LogIndexStatus> = {}): LogIndexStatu
 
 /** Installed and in step with the setting (`delayed-auto`, as settingsFixture). */
 export function serviceStatusFixture(p: Partial<ServiceStatus> = {}): ServiceStatus {
-  return { installed: true, running_as_service: true, start_type: "delayed-auto", desired: "delayed-auto", in_sync: true, ...p };
+  return { installed: true, running_as_service: true, start_type: "delayed-auto", desired: "delayed-auto", in_sync: true, bundle: true, ...p };
 }
 
 /** POST /api/notice/display/open: the notice page in display mode. */

@@ -73,7 +73,7 @@ const columns = helper.columns([
 ]);
 
 /** The scroller takes the rest of the window below it, never less than half the window or MIN_HEIGHT. */
-function useRestOfViewport(ref: RefObject<HTMLElement | null>): number {
+export function useRestOfViewport(ref: RefObject<HTMLElement | null>): number {
   const [height, setHeight] = useState(MIN_HEIGHT);
   useLayoutEffect(() => {
     const measure = () => {

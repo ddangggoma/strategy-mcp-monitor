@@ -12,8 +12,8 @@ import { STATE_SEVERITY, useBoard } from "@/lib/board-store";
 import { formatKst } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { useLive } from "../live";
-import { PlannedFeature } from "../shell/PlannedFeature";
 import { useMcpActivity } from "../queries";
+import { LoginFailuresCard } from "./LoginFailuresCard";
 import { TamperCard } from "./TamperCard";
 
 /** Rows shown in “최근 이슈와 조치” (the feed holds ACTIVITY_LIMIT). */
@@ -196,8 +196,7 @@ function ActionCell({ a }: { a: McpActivity["actions"][number] }) {
 
 /**
  * The admin landing page: what is wrong now (state counts from the live store), who is connected,
- * what happened recently, the recent bypass detections, and the login-failure trend whose data comes
- * with Plan 5 (U13: no fake numbers).
+ * what happened recently, the login-failure trend of the last 24 hours and the recent bypass detections.
  */
 export function DashboardPage() {
   const { store } = useLive();
@@ -224,7 +223,7 @@ export function DashboardPage() {
           <RecentActivity />
         </DashCard>
         <DashCard title={copy.dashboard.loginFailures.title}>
-          <PlannedFeature reason="planned_logs" />
+          <LoginFailuresCard />
         </DashCard>
         <DashCard title={copy.dashboard.bypassEvents}>
           <TamperCard />

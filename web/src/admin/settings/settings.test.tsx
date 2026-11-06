@@ -5,7 +5,7 @@ import type { ComponentType } from "react";
 import { copy } from "@/copy/ko";
 import type { Me, RetentionPreview, Settings } from "@/lib/api-types";
 import { formatBytes } from "@/lib/time";
-import { meFixture, previewFixture, settingsFixture } from "../../../tests/msw/fixtures";
+import { meFixture, previewFixture, serviceStatusFixture, settingsFixture } from "../../../tests/msw/fixtures";
 import { server, trackRequests } from "../../../tests/msw/server";
 import { renderWithProviders } from "../../../tests/render";
 import { UsersPage } from "../users/UsersPage";
@@ -195,7 +195,8 @@ it("sends both retention values when either changes, and only the changed field 
 it("saves the start type and shows the read-only and planned sections", async () => {
   const puts = capturePuts(settingsFixture());
   await renderSettings(settingsFixture({ service_start_type: "delayed-auto" }));
-  expect(screen.getByText(copy.settings.startTypeNote)).toBeInTheDocument();
+  expect(await screen.findByText(copy.settings.service.current("delayed-auto"))).toBeInTheDocument();
+  expect(screen.queryByText(copy.settings.service.mismatch)).toBeNull();
   expect(screen.getByText(copy.settings.otpDummy)).toBeInTheDocument();
   expect(screen.getByText(copy.deny.planned_alerts).closest("[data-planned]")).toHaveAttribute("data-planned", "planned_alerts");
   const select = screen.getByRole("combobox", { name: copy.settings.fields.service_start_type });
@@ -278,4 +279,63 @@ it("developer on local sees the admin-only reason", async () => {
   expect(screen.queryByText(copy.deny.local_only)).not.toBeInTheDocument();
   for (const qc of clients) expect(qc.getQueryCache().getAll().filter((q) => q.state.fetchStatus !== "idle")).toEqual([]);
   expect(spy.paths()).toEqual([]);
+});
+
+// ---- Plan 5 Task 12: index rows in the retention confirm, the Windows service -----------------
+
+it("the retention confirm shows index rows and that cleanup runs soon", async () => {
+  await renderSettings(settingsFixture({ log_retention_days: 180 }), previewFixture({ days: 90, delete_files: 3, delete_bytes: 3_000_000,
+    delete_from: "2026-05-09", delete_to: "2026-08-05", delete_events: 41_200 }));
+  await setNumber(copy.settings.fields.log_retention_days, 90); await userEvent.click(screen.getByRole("button", { name: copy.common.save }));
+  const dialog = await screen.findByRole("alertdialog");
+  expect(dialog).toHaveTextContent(copy.settings.retentionDeleteEvents(41_200)); expect(dialog).toHaveTextContent(copy.settings.retentionRunsSoon);
+});
+it("the retention confirm leaves out the row count while the index cannot tell", async () => {
+  await renderSettings(settingsFixture({ log_retention_days: 180 }), previewFixture({ days: 90, delete_files: 3, delete_events: null }));
+  await setNumber(copy.settings.fields.log_retention_days, 90); await userEvent.click(saveButton());
+  const dialog = await screen.findByRole("alertdialog");
+  expect(dialog).not.toHaveTextContent(new RegExp(copy.settings.retentionDeleteEvents(1).replace("1", "[\\d,]+")));
+  expect(dialog).toHaveTextContent(copy.settings.retentionRunsSoon);
+});
+it("shows the installed service start type and a mismatch", async () => {
+  server.use(http.get("/api/service", () => HttpResponse.json(serviceStatusFixture({ installed: true, start_type: "auto", desired: "delayed-auto", in_sync: false }))));
+  await renderSettings(settingsFixture());
+  expect(await screen.findByText(copy.settings.service.current("auto"))).toBeInTheDocument();
+  expect(screen.getByText(copy.settings.service.mismatch)).toBeInTheDocument();
+});
+it("tells a bundle without the service from a development run", async () => {
+  server.use(http.get("/api/service", () => HttpResponse.json(serviceStatusFixture({ installed: false, running_as_service: false, start_type: null, in_sync: false, bundle: true }))));
+  const { unmount } = await renderSettings(settingsFixture());
+  expect(await screen.findByText(copy.settings.service.notInstalled)).toBeInTheDocument();
+  expect(screen.queryByText(copy.settings.service.devMode)).toBeNull();
+  unmount();
+  server.use(http.get("/api/service", () => HttpResponse.json(serviceStatusFixture({ installed: false, running_as_service: false, start_type: null, in_sync: false, bundle: false }))));
+  await renderSettings(settingsFixture());
+  expect(await screen.findByText(copy.settings.service.devMode)).toBeInTheDocument();
+  expect(screen.queryByText(copy.settings.service.notInstalled)).toBeNull();
+});
+it("reads the service status again after saving a new start type", async () => {
+  capturePuts(settingsFixture());
+  let reads = 0;
+  server.use(http.get("/api/service", () => {
+    reads++;
+    return HttpResponse.json(serviceStatusFixture({ start_type: reads > 1 ? "manual" : "delayed-auto", desired: reads > 1 ? "manual" : "delayed-auto" }));
+  }));
+  await renderSettings(settingsFixture({ service_start_type: "delayed-auto" }));
+  expect(await screen.findByText(copy.settings.service.current("delayed-auto"))).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("combobox", { name: copy.settings.fields.service_start_type }));
+  await userEvent.click(await screen.findByRole("option", { name: copy.settings.startTypes.manual }));
+  await userEvent.click(saveButton());
+  expect(await screen.findByText(copy.settings.service.current("manual"))).toBeInTheDocument();
+});
+it("says when the service status cannot be read", async () => {
+  server.use(http.get("/api/service", () => HttpResponse.json({ error: "internal" }, { status: 500 })));
+  await renderSettings(settingsFixture());
+  expect(await screen.findByText(copy.settings.service.loadError)).toBeInTheDocument();
+});
+it("does not call /api/service on the external channel", async () => {
+  const tracker = trackRequests();
+  renderWithProviders(<SettingsPage />, { me: meFixture("admin", "external") });
+  await screen.findByText(copy.deny.local_only);
+  expect(tracker.paths()).not.toContain("/api/service");
 });

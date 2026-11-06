@@ -217,6 +217,29 @@ it("logging out from a page with unsaved edits still reaches the login page", as
   expect(clear).toHaveBeenCalled();
 });
 
+it("another user taking over the session leaves the editor like a user switch (session_changed)", async () => {
+  // Plan 3 review carry (F07): the previous user's edits must not stay on screen, or the next
+  // save would store them as the new user's
+  saveDraft("mcp-create", { name: "files" }, 1);
+  server.use(
+    http.put("/api/settings", () => HttpResponse.json({ error: "csrf" }, { status: 403 })),
+    http.get("/api/auth/me", () => HttpResponse.json(meFixture("admin", "local", 2))),
+  );
+  const { router, qc, stream } = renderWithProviders(null, { route: "/admin/settings", me: meFixture("admin", "local", 1) });
+  const field = await screen.findByLabelText(copy.settings.fields.confirm_interval_sec, {}, { timeout: 5000 });
+  await userEvent.clear(field);
+  await userEvent.type(field, "3"); // dirty: the leave guard is armed
+  const reset = vi.spyOn(qc, "resetQueries");
+  await userEvent.click(screen.getByRole("button", { name: copy.common.save }));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/admin"));
+  expect(screen.queryByRole("alertdialog")).toBeNull(); // past the unsaved-changes guard
+  await waitFor(() => expect(reset).toHaveBeenCalled());
+  expect(stream.restart).toHaveBeenCalledTimes(1);
+  expect(loadDraft("mcp-create", 1)).toBeNull();
+  expect(session.me?.user?.id).toBe(2);
+  expect(await screen.findByText(copy.errors.session_changed)).toBeInTheDocument();
+});
+
 it("opens the command palette with Ctrl+K and navigates to an MCP", async () => {
   server.use(http.get("/api/mcps", () => HttpResponse.json([mcpDetailFixture({ id: 1, name: "calc" }), mcpDetailFixture({ id: 2, name: "weather" })])));
   const { router } = await renderShell(meFixture("admin", "local"));

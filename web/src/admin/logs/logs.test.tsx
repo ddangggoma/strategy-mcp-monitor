@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { copy } from "@/copy/ko";
+import { logExportUrl } from "@/lib/endpoints";
 import { session } from "@/lib/session";
 import { histogramFixture, logItem, logPage, logStatusFixture, meFixture } from "../../../tests/msw/fixtures";
 import { server, trackRequests } from "../../../tests/msw/server";
@@ -200,7 +201,7 @@ it("says so when nothing matches", async () => {
 
 it("export stays visible with a reason when it is not allowed", async () => {
   session.me = null;
-  render(<ExportMenu query={{ from: "2026-11-04T13:00:00.000+09:00", to: "2026-11-04T14:00:00.000+09:00" }} />);
+  render(<ExportMenu hrefFor={(f) => logExportUrl({ from: "2026-11-04T13:00:00.000+09:00", to: "2026-11-04T14:00:00.000+09:00" }, f)} />);
   const button = screen.getByRole("button", { name: copy.logs.export.menu });
   expect(button).toHaveAttribute("aria-disabled", "true");
   expect(button).toHaveAccessibleDescription(copy.deny.login);

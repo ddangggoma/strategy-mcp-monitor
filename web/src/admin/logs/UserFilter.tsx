@@ -14,7 +14,15 @@ import { useLogUsers } from "../queries";
  * the user filter itself (server), so the query leaves it out and picking does not refetch. The
  * list is read only while the popover is open.
  */
-export function UserFilter({ query, selected, onToggle }: { query: LogQuery; selected: readonly string[]; onToggle(user: string): void }) {
+export function UserFilter({
+  query, selected, onToggle, label = copy.logs.users,
+}: {
+  query: LogQuery;
+  selected: readonly string[];
+  onToggle(user: string): void;
+  /** The trigger's name (the audit screen calls them 행위자). */
+  label?: string;
+}) {
   const [open, setOpen] = useState(false);
   const facetQuery = useMemo(() => ({ ...query, users: undefined }), [query]);
   const { data, isPending, isError } = useLogUsers(facetQuery, { enabled: open });
@@ -32,7 +40,7 @@ export function UserFilter({ query, selected, onToggle }: { query: LogQuery; sel
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button variant="outline">
-          {copy.logs.users}
+          {label}
           {selected.length > 0 ? (
             <>
               {" "}

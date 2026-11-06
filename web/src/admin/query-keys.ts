@@ -26,6 +26,8 @@ export const qk = {
   noticeVersions: ["notice", "versions"],
   noticeVersion: (v: number) => ["notice", "version", v] as const,
   sessionsCurrent: ["sessions", "current"],
+  /** Prefix of every history period (for invalidation). */
+  sessionsHistories: ["sessions", "history"],
   sessionsHistory: (days: number) => ["sessions", "history", days] as const,
   collectors: ["sessions", "collectors"],
   tamper: ["tamper"],

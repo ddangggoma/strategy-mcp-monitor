@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { copy } from "@/copy/ko";
 import type { LogCategory, LogQuery } from "@/lib/api-types";
+import { logExportUrl } from "@/lib/endpoints";
 import { CategoryChips } from "./CategoryChips";
 import { ExportMenu } from "./ExportMenu";
 import type { LogSearch, QuickRange } from "./search";
@@ -23,7 +24,7 @@ const toggle = <T,>(list: readonly T[] | undefined, v: T): T[] => {
  * A labelled text filter that writes itself to the URL after a pause. The URL value wins when it
  * changes from elsewhere (clear, "filter by this session"), except for the value this field sent.
  */
-function TypedFilter({
+export function TypedFilter({
   label, value, normalize, onCommit, hint, invalid, inputMode, className,
 }: {
   label: string;
@@ -87,7 +88,7 @@ function TypedFilter({
   );
 }
 
-const keepText = (t: string) => t.trim();
+export const keepText = (t: string) => t.trim();
 const sessionText = (t: string) => (t.trim() === "" || /^\d+$/.test(t.trim()) ? t.trim() : null);
 
 /** The filter rows above the histogram (a container: rows wrap inside it at any width, W41). */
@@ -175,7 +176,7 @@ export function FilterBar({
               {copy.logs.clear}
             </Button>
           ) : null}
-          <ExportMenu query={query} />
+          <ExportMenu hrefFor={(f) => logExportUrl(query, f)} />
         </div>
       </div>
     </div>

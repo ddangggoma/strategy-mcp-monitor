@@ -44,16 +44,25 @@ function withLive(detail: McpDetail, live: BoardItem | null): McpDetail {
  * - changed item → its `live` in `qk.mcps` and `qk.mcp(id)`; an id the list does not know → refetch the list;
  * - removed id → dropped from the list, `qk.mcp(id)` invalidated;
  * - `action` event → that MCP's history windows and the activity feed are refetched;
- * - sessions changed (`sessions` event, or a `board` event that carries them) → current sessions refetched;
+ * - sessions changed (`sessions` event, a `board` event that carries them, or `sessions_changed` for
+ *   the sessions screen) → current sessions and every history period refetched (M16);
  * - `tamper` event → put in front of the recent tamper list (at most TAMPER_LIMIT); a reconnect refetches it.
  * Returns the unsubscribe function.
  */
 export function connectLive(store: BoardStore, qc: QueryClient): () => void {
   let prev: BoardState = store.getSnapshot();
 
+  // M16: the sessions screen lists disconnected sessions and the connection history as well
+  const refetchSessions = () => {
+    void qc.invalidateQueries({ queryKey: qk.sessionsCurrent, exact: true });
+    void qc.invalidateQueries({ queryKey: qk.sessionsHistories });
+  };
+
   const offState = store.subscribe(() => {
     const next = store.getSnapshot();
-    if (next.sessions !== prev.sessions) void qc.invalidateQueries({ queryKey: qk.sessionsCurrent, exact: true });
+    // the board list changed: a session came, went or changed state; an acknowledged notice or a
+    // reverse DNS name also shows in the history
+    if (next.sessions !== prev.sessions) refetchSessions();
     if (next.items === prev.items) {
       prev = next;
       return; // status or sessions only
@@ -89,14 +98,18 @@ export function connectLive(store: BoardStore, qc: QueryClient): () => void {
     qc.setQueryData<TamperEvent[]>(qk.tamper, (list) => (list ? [e, ...list].slice(0, TAMPER_LIMIT) : list));
   });
 
+  const offSessions = store.onSessionsChanged(refetchSessions);
+
   const offReconnected = store.onReconnected(() => {
     void qc.invalidateQueries({ queryKey: qk.tamper, exact: true });
+    refetchSessions(); // sessions_changed may have been missed
   });
 
   return () => {
     offState();
     offAction();
     offTamper();
+    offSessions();
     offReconnected();
   };
 }

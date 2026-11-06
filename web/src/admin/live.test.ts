@@ -77,15 +77,32 @@ it("status changes do not touch the cache, and unsubscribing stops the mirror", 
   expect(qc.getQueryData<McpDetail[]>(qk.mcps)).toBe(before);
 });
 
-it("a sessions change refetches the current sessions; a board event without sessions does not", () => {
+it("a sessions change refetches the current sessions and the history; a board event without sessions does not", () => {
   const { store, invalidate } = setup();
   store.apply(boardEvent({ mcps: [item(1, "HEALTHY", "calc")] }));
   expect(invalidate).not.toHaveBeenCalledWith({ queryKey: qk.sessionsCurrent, exact: true });
+  expect(invalidate).not.toHaveBeenCalledWith({ queryKey: qk.sessionsHistories });
   store.apply({ event: "sessions", data: JSON.stringify({ sessions: [rdpSession()] }) });
   expect(invalidate).toHaveBeenCalledWith({ queryKey: qk.sessionsCurrent, exact: true });
+  // an acknowledged notice or a reverse DNS name shows in the history too (M16)
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: qk.sessionsHistories });
   invalidate.mockClear();
   store.apply(boardEvent({ mcps: [item(1, "HEALTHY", "calc")], sessions: [] }));
   expect(invalidate).toHaveBeenCalledWith({ queryKey: qk.sessionsCurrent, exact: true });
+});
+
+it("sessions_changed and a reconnect refetch the current sessions and every history period (M16)", () => {
+  const { store, invalidate } = setup();
+  store.apply({ event: "sessions_changed", data: "{}" });
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: qk.sessionsCurrent, exact: true });
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: qk.sessionsHistories });
+  invalidate.mockClear();
+  store.setStatus("open");
+  store.setStatus("reconnecting");
+  store.setStatus("open");
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: qk.sessionsCurrent, exact: true });
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: qk.sessionsHistories });
+  expect(qk.sessionsHistory(7).slice(0, qk.sessionsHistories.length)).toEqual([...qk.sessionsHistories]);
 });
 
 it("a tamper event goes to the front of the recent list, which keeps at most 50", () => {

@@ -368,6 +368,12 @@ export const copy = {
     columns: { ts: "시각", actor: "행위자", channel: "채널", ip: "IP", action: "작업", target: "대상", result: "결과" },
     results: { ok: "성공", fail: "실패", denied: "거부", error: "오류" },
     empty: "이 조건에 맞는 감사 기록이 없어요. 기간을 넓히거나 조건을 줄여 보세요.",
+    // beyond the Global Constraints list (Task 12)
+    tabsLabel: "감사 기록 종류",
+    channels: { all: "모든 채널", local: "로컬", external: "원격" },
+    /** The Windows account behind a local-channel login (Plan 4). */
+    windowsUser: (name: string) => `Windows 계정 ${name}`,
+    loadError: "감사 기록을 불러오지 못했어요. 잠시 뒤 다시 시도하세요.",
   },
 
   stream: {
@@ -427,6 +433,9 @@ export const copy = {
       rdp: "원격 데스크톱",
       openLogs: "로그에서 보기",
       empty: "최근 24시간 동안 로그인 실패가 없어요.",
+      // beyond the Global Constraints list (Task 12)
+      chartLabel: (total: number | string) => `최근 24시간 시간대별 로그인 실패, 모두 ${count(total)}건`,
+      error: "로그인 실패 추이를 불러오지 못했어요. 새로 고친 뒤 다시 시도하세요.",
     },
     bypassEvents: "우회 탐지 이벤트",
     viewAll: "모두 보기",
@@ -707,7 +716,6 @@ export const copy = {
     noDelete: "삭제될 로그 없음",
     confirmDelete: "줄이고 삭제",
     confirmReduce: "보존 기간 줄이기",
-    startTypeNote: "지금은 값만 저장돼요. 서비스를 설치할 때 이 값이 적용돼요.",
     startTypes: START_TYPES,
     /** The confirm dialog of a shorter retention: indexed lines in the days to delete. */
     retentionDeleteEvents: (n: number) => `로그 기록 ${n.toLocaleString("ko-KR")}건이 함께 삭제돼요.`,
@@ -717,8 +725,11 @@ export const copy = {
       title: "Windows 서비스",
       notInstalled: "Windows 서비스로 설치되어 있지 않아요. 설치하면 이 시작 유형이 적용돼요.",
       current: (type: StartType) => `지금 서비스 시작 유형: ${START_TYPES[type] ?? type}`,
-      mismatch: "서비스의 시작 유형이 이 설정과 달라요. 다시 저장하면 이 설정으로 맞춰요.",
+      // the server applies the setting when it is changed and when the service starts (W25), not on
+      // a save that leaves it as it is
+      mismatch: "서비스의 시작 유형이 이 설정과 달라요. 서비스가 다시 시작할 때 이 설정으로 맞춰요.",
       devMode: "개발용으로 실행 중이라 서비스가 없어요. 시작 유형은 저장만 돼요.",
+      loadError: "서비스 상태를 확인하지 못했어요. 새로 고친 뒤 다시 시도하세요.",
     },
     otpDummy: "Dummy(개발용)",
     fields: {

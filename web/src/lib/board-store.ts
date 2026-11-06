@@ -60,6 +60,7 @@ export class BoardStore {
   private readonly actionListeners = new Set<(e: ActionEvent) => void>();
   private readonly tamperListeners = new Set<(e: TamperEvent) => void>();
   private readonly reconnectedListeners = new Set<() => void>();
+  private readonly sessionsChangedListeners = new Set<() => void>();
 
   // arrow properties: stable references for useSyncExternalStore
   readonly getSnapshot = (): BoardState => this.state;
@@ -83,6 +84,17 @@ export class BoardStore {
     this.tamperListeners.add(fn);
     return () => {
       this.tamperListeners.delete(fn);
+    };
+  }
+
+  /**
+   * Signed-in streams: the sessions screen's data changed (current sessions incl. disconnected ones,
+   * connection history), which the board's own session list does not cover (M16).
+   */
+  onSessionsChanged(fn: () => void): () => void {
+    this.sessionsChangedListeners.add(fn);
+    return () => {
+      this.sessionsChangedListeners.delete(fn);
     };
   }
 
@@ -142,6 +154,10 @@ export class BoardStore {
       case "tamper": {
         if (!isObject(data) || typeof data.event !== "string" || typeof data.at !== "string") return;
         for (const fn of [...this.tamperListeners]) fn(data as TamperEvent);
+        return;
+      }
+      case "sessions_changed": {
+        for (const fn of [...this.sessionsChangedListeners]) fn();
         return;
       }
       default:

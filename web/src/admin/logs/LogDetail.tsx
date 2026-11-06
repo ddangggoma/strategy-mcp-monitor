@@ -31,7 +31,8 @@ export function LogDetail({
   /** Where focus goes back to (there is no trigger: a table row opened the dialog). */
   onCloseAutoFocus(e: Event): void;
   onFilterUser(user: string): void;
-  onFilterSession(id: number): void;
+  /** Without it (the audit screen: no session filter there) the session button is left out. */
+  onFilterSession?(id: number): void;
 }) {
   return (
     <Dialog open={open && item !== null} onOpenChange={(o) => !o && onClose()}>
@@ -75,7 +76,7 @@ export function LogDetail({
                 {copy.logs.byUser}
               </Button>
             ) : null}
-            {item.session_id !== null ? (
+            {item.session_id !== null && onFilterSession ? (
               <Button variant="outline" onClick={() => onFilterSession(item.session_id!)}>
                 {copy.logs.bySession}
               </Button>

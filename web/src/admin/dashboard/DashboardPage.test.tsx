@@ -1,10 +1,10 @@
-import { act, screen, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { copy } from "@/copy/ko";
 import type { BoardItem, McpActivity, RdpSession } from "@/lib/api-types";
 import { BoardStore } from "@/lib/board-store";
-import { NOW, activityFixture, boardEvent, item, meFixture, rdpSession, record, tamperFixture } from "../../../tests/msw/fixtures";
-import { server } from "../../../tests/msw/server";
+import { NOW, activityFixture, boardEvent, histogramFixture, item, meFixture, rdpSession, record, tamperFixture } from "../../../tests/msw/fixtures";
+import { server, trackRequests } from "../../../tests/msw/server";
 import { renderWithProviders } from "../../../tests/render";
 import { warmChunks } from "../../../tests/warm";
 import { connectLive } from "../live";
@@ -25,13 +25,10 @@ async function renderDashboard({ mcps, activity, sessions }: { mcps: BoardItem[]
 
 const card = (name: string) => screen.getByRole("region", { name });
 
-it("summarizes states, lists recent activity and keeps the login-failure card planned", async () => {
+it("summarizes states, lists recent activity and has no planned card left", async () => {
   await renderDashboard({ mcps: [item(1, "FAILED"), item(2, "HEALTHY"), item(3, "HEALTHY")], activity: activityFixture() });
   expect(screen.getByRole("link", { name: /실패\s*1/ })).toHaveAttribute("href", "/admin/mcps?state=FAILED");
-  // scoped to the page: the shell's disabled "로그" nav item carries the same reason
-  expect(within(screen.getByRole("main")).getAllByText(copy.deny.planned_logs)).toHaveLength(1);
-  expect(within(card(copy.dashboard.loginFailures.title)).getByText(copy.deny.planned_logs)).toBeInTheDocument();
-  expect(within(card(copy.dashboard.bypassEvents)).queryByText(copy.deny.planned_logs)).toBeNull();
+  expect(screen.queryByText(copy.deny.planned_logs)).toBeNull();
   const activity = card(copy.dashboard.recentActivity);
   expect(await within(activity).findAllByText("seoul-weather")).toHaveLength(2);
 });
@@ -111,7 +108,6 @@ it("shows recent tamper events and prepends live ones", async () => {
   expect(await screen.findByText(copy.tamper.events.log_cleared)).toBeInTheDocument();
   act(() => store.apply({ event: "tamper", data: JSON.stringify(tamperFixture({ event: "agent_exited" })) }));
   expect(await screen.findByText(copy.tamper.events.agent_exited)).toBeInTheDocument();
-  expect(within(screen.getByRole("main")).getAllByText(copy.deny.planned_logs)).toHaveLength(1);
   // newest first
   const items = within(card(copy.dashboard.bypassEvents)).getAllByRole("listitem");
   expect(items[0]).toHaveTextContent(copy.tamper.events.agent_exited);
@@ -166,4 +162,61 @@ it("refetches tamper events after the stream reconnects", async () => {
     store.setStatus("open");
   });
   expect(await screen.findByText(copy.tamper.events.audit_policy_changed)).toBeInTheDocument();
+});
+
+// ---- login failure trend (Plan 5 Task 12) ------------------------------------------------
+
+it("shows the login failure trend for web and RDP", async () => {
+  server.use(http.get("/api/logs/histogram", ({ request }) => {
+    const p = new URL(request.url).searchParams;
+    expect(p.getAll("outcome")).toEqual(["fail"]); expect(p.getAll("cat").sort()).toEqual(["auth", "session"]);
+    return HttpResponse.json(histogramFixture({ series: [{ key: "auth", counts: [1, 0, 2, 0, 0, 0] }, { key: "session", counts: [0, 0, 0, 0, 3, 0] }], total: 6 }));
+  }));
+  await renderDashboard({ mcps: [], activity: activityFixture() });
+  const card = (await screen.findByRole("heading", { name: copy.dashboard.loginFailures.title })).closest("section")!;
+  expect(card).toHaveTextContent(copy.dashboard.loginFailures.web); expect(card).toHaveTextContent(copy.dashboard.loginFailures.rdp);
+  expect(within(card).getByRole("link", { name: copy.dashboard.loginFailures.openLogs }).getAttribute("href")).toContain("/admin/logs");
+  expect(screen.queryByText(copy.deny.planned_logs)).toBeNull();
+});
+
+it("asks for the last 24 hours in 24 bars and links the same conditions in the log viewer", async () => {
+  const tracker = trackRequests();
+  server.use(http.get("/api/logs/histogram", () =>
+    HttpResponse.json(histogramFixture({ series: [{ key: "auth", counts: [1, 0, 2, 0, 0, 0] }, { key: "session", counts: [0, 0, 0, 0, 3, 0] }], total: 6 }))));
+  await renderDashboard({ mcps: [], activity: activityFixture() });
+  const region = card(copy.dashboard.loginFailures.title);
+  // per-series totals as text: the chart is never the only way to read them
+  await waitFor(() => expect(within(region).getByText(copy.dashboard.loginFailures.web).closest("li")).toHaveTextContent("3"));
+  expect(within(region).getByText(copy.dashboard.loginFailures.rdp).closest("li")).toHaveTextContent("3");
+  expect(region).toHaveTextContent(copy.logs.total(6));
+  const [req] = tracker.urls().map((u) => new URL(u, "http://x")).filter((u) => u.pathname === "/api/logs/histogram");
+  const p = req!.searchParams;
+  expect([p.get("buckets"), p.get("group")]).toEqual(["24", "cat"]);
+  expect(p.getAll("event").sort()).toEqual(["login", "logon_failed"]);
+  const from = p.get("from")!, to = p.get("to")!;
+  expect(to).toMatch(/:00\.000\+09:00$/);
+  expect(Date.parse(to) - Date.parse(from)).toBe(24 * 3_600_000);
+  // the link reproduces the same window and conditions (custom bounds, not "today")
+  const href = new URL(within(region).getByRole("link", { name: copy.dashboard.loginFailures.openLogs }).getAttribute("href")!, "http://x");
+  expect(href.pathname).toBe("/admin/logs");
+  // the router writes arrays as JSON and plain strings as they are
+  const value = (v: string): unknown => { try { return JSON.parse(v); } catch { return v; } };
+  const search = Object.fromEntries([...href.searchParams].map(([k, v]) => [k, value(v)]));
+  expect(search).toEqual({ from, to, cat: ["auth", "session"], event: ["login", "logon_failed"], outcome: ["fail"] });
+  // a picture with a name, not a control: no drag, no tab stop
+  const chart = within(region).getByRole("img", { name: copy.dashboard.loginFailures.chartLabel(6) });
+  expect(chart).not.toHaveAttribute("tabindex");
+});
+
+it("says when there were no login failures", async () => {
+  server.use(http.get("/api/logs/histogram", () => HttpResponse.json(histogramFixture({ series: [], total: 0 }))));
+  await renderDashboard({ mcps: [], activity: activityFixture() });
+  expect(await within(card(copy.dashboard.loginFailures.title)).findByText(copy.dashboard.loginFailures.empty)).toBeInTheDocument();
+  expect(within(card(copy.dashboard.loginFailures.title)).queryByRole("img")).toBeNull();
+});
+
+it("says when the trend cannot be read", async () => {
+  server.use(http.get("/api/logs/histogram", () => HttpResponse.json({ error: "internal" }, { status: 500 })));
+  await renderDashboard({ mcps: [], activity: activityFixture() });
+  expect(await within(card(copy.dashboard.loginFailures.title)).findByRole("alert")).toHaveTextContent(copy.dashboard.loginFailures.error);
 });

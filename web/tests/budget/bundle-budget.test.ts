@@ -50,11 +50,18 @@ it("CodeMirror is one lazy chunk, outside the admin entry and the page chunks", 
 it("the log viewer is its own lazy chunk with the virtualizer, outside the admin entry", () => {
   const page = /[\\/]admin[\\/]logs[\\/]LogsPage\.tsx$/;
   const virtual = /[\\/]@tanstack[\\/]virtual-core[\\/]|[\\/]@tanstack[\\/]react-virtual[\\/]/;
-  const chunks = Object.entries(chunkModules(DIST)).filter(([, ids]) => ids.some((id) => page.test(id)));
+  const histogram = /[\\/]admin[\\/]logs[\\/]LogHistogram\.tsx$/;
+  const all = Object.entries(chunkModules(DIST));
+  const chunks = all.filter(([, ids]) => ids.some((id) => page.test(id)));
   expect(chunks).toHaveLength(1);
-  const [, ids] = chunks[0]!;
-  expect(ids.some((id) => /[\\/]admin[\\/]logs[\\/]LogHistogram\.tsx$/.test(id))).toBe(true);
+  // Task 12: the histogram is shared with the dashboard's login-failure card, so it sits in a lazy
+  // chunk of its own; the dashboard chunk does not pull the virtual table in with it
+  expect(all.filter(([, ids]) => ids.some((id) => histogram.test(id)))).toHaveLength(1);
+  const dashboard = all.filter(([, ids]) => ids.some((id) => /[\\/]admin[\\/]dashboard[\\/]DashboardPage\.tsx$/.test(id)));
+  expect(dashboard).toHaveLength(1);
+  expect(dashboard[0]![1].filter((id) => virtual.test(id) || /VirtualTable|react-table/.test(id))).toEqual([]);
   const admin = entryModules(DIST, "admin.html");
+  expect(admin.filter((m) => histogram.test(m) || /[\\/]admin[\\/]audit[\\/]AuditPage/.test(m))).toEqual([]);
   expect(admin.some((m) => /[\\/]admin[\\/]router\.tsx$/.test(m))).toBe(true); // the list is real
   expect(admin.filter((m) => page.test(m) || virtual.test(m) || /[\\/]components[\\/]data[\\/]VirtualTable/.test(m))).toEqual([]);
 });

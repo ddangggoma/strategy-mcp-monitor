@@ -117,7 +117,10 @@ async function request<T>(path: string, init: ApiInit, csrfRetry: boolean): Prom
       if (!path.startsWith("/api/auth/")) session.onUnauthorized?.();
       throw new ApiError(401, "login_required");
     }
-    if (me.user.id !== actor.userId || me.channel !== actor.channel) throw new ApiError(403, "session_changed");
+    if (me.user.id !== actor.userId || me.channel !== actor.channel) {
+      session.onSessionChanged?.();
+      throw new ApiError(403, "session_changed");
+    }
     return request<T>(path, init, false);
   }
   if (res.status === 401 && code === "login_required" && !path.startsWith("/api/auth/")) {

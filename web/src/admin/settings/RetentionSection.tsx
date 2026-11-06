@@ -135,6 +135,11 @@ export function RetentionConfirm({
             </>
           )}
         </dl>
+        <div className="flex flex-col gap-1 text-sm text-fg-muted">
+          {/* the log index rows of those days go with them (null: the index cannot tell yet) */}
+          {!none && typeof preview.delete_events === "number" ? <p>{s.retentionDeleteEvents(preview.delete_events)}</p> : null}
+          <p>{s.retentionRunsSoon}</p>
+        </div>
         <AlertDialogFooter>
           <AlertDialogCancel>{copy.common.cancel}</AlertDialogCancel>
           <AlertDialogAction variant={none ? "default" : "destructive"} onClick={onConfirm}>

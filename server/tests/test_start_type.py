@@ -42,9 +42,19 @@ def test_null_configurator_is_not_installed(services):
     m = StartTypeManager(NullConfigurator(), services.settings, ListLog())
     assert m.reconcile() == "not_installed"
     assert m.status() == {"installed": False, "running_as_service": False, "start_type": None,
-                          "desired": "delayed-auto", "in_sync": False}
+                          "desired": "delayed-auto", "in_sync": False, "bundle": False}
     with pytest.raises(LookupError):
         NullConfigurator().apply("manual")
+
+
+def test_status_says_whether_this_is_a_deployment_bundle(services, monkeypatch, tmp_path):
+    # F20: the settings screen tells a development run (no service to install) from a bundle
+    from app import bundle
+    from app.winsvc import start_type as st_mod
+    assert StartTypeManager(NullConfigurator(), services.settings, ListLog()).status()["bundle"] is False
+    monkeypatch.setattr(st_mod, "find_bundle", lambda: bundle.Bundle(tmp_path, "runtime", "1.0.0"))
+    m = StartTypeManager(NullConfigurator(), services.settings, ListLog())
+    assert m.status()["bundle"] is True and m.bundled is True
 
 
 async def test_put_start_type_applies_and_audits(local_client, services):
@@ -56,7 +66,8 @@ async def test_put_start_type_applies_and_audits(local_client, services):
     e = [x for x in await audit_events(services, "admin.audit") if x["action"] == "service_start_type_apply"]
     assert e[-1]["target"] == {"start_type": "manual", "result": "applied"} and e[-1]["result"] == "ok"
     st = (await local_client.get("/api/service")).json()
-    assert st == {"installed": True, "running_as_service": False, "start_type": "manual", "desired": "manual", "in_sync": True}
+    assert st == {"installed": True, "running_as_service": False, "start_type": "manual", "desired": "manual", "in_sync": True,
+                  "bundle": False}
 
 
 async def test_put_start_type_denied_by_the_scm_is_audited_as_error(local_client, services):

@@ -374,6 +374,8 @@ export interface ServiceStatus {
   start_type: Settings["service_start_type"] | null;
   desired: Settings["service_start_type"];
   in_sync: boolean;
+  /** Running from a deployment bundle, which can be installed as the service; false in a development run (F20). */
+  bundle: boolean;
 }
 
 export interface NoticeContent {

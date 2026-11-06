@@ -110,6 +110,7 @@ class SessionTracker:
         self._snap_at: datetime | None = None
         self._last_failure_log: datetime | None = None
         self._published: list[dict[str, Any]] | None = None
+        self._published_current: list[dict[str, Any]] | None = None
         self.ready = False
 
     # --- lifecycle -------------------------------------------------------------------------
@@ -159,6 +160,7 @@ class SessionTracker:
             # listeners even when a later write failed.
             self._notify(changes)
             self._publish()
+            self._publish_current()
         return changes
 
     def _update(self, t: _Tracked, new: WtsSession, at: datetime, changes: list[Change]) -> None:
@@ -301,6 +303,18 @@ class SessionTracker:
             return
         self._published = key
         self._bus.publish("sessions", {"sessions": sessions})
+
+    def _publish_current(self) -> None:
+        """Publish ``sessions_changed`` (signed-in subscribers only, no payload) when :meth:`current`
+        changed apart from idle time: the sessions screen then reads the current sessions and the
+        connection history again. The board's ``sessions`` misses disconnected sessions (M16)."""
+        if not self.ready:
+            return
+        key = [{**s, "idle_sec": None} for s in self.current()]
+        if key == self._published_current:
+            return
+        self._published_current = key
+        self._bus.publish("sessions_changed", {}, public=False)
 
     def set_notice_state(self, connection_id: int, acknowledged: bool | None) -> None:
         """The notice state of an open connection (unknown or closed connections are ignored)."""

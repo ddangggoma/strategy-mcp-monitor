@@ -9,6 +9,7 @@ from __future__ import annotations
 import sys
 from typing import Any, Literal, Protocol
 
+from app.bundle import find_bundle
 from app.settings.store import SettingsStore
 from app.winsvc import SERVICE_NAME
 
@@ -124,6 +125,8 @@ class StartTypeManager:
         self._settings = settings
         self._log = log
         self.running_as_service = False
+        # F20: only a deployment bundle can be installed as the service; a development run cannot
+        self.bundled = find_bundle() is not None
 
     def status(self, desired: StartType | None = None) -> dict[str, Any]:
         """Blocking (SCM query). A query error reads as "not installed". Callers off the loop
@@ -140,6 +143,7 @@ class StartTypeManager:
             "start_type": current,
             "desired": desired,
             "in_sync": current is not None and current == desired,
+            "bundle": self.bundled,
         }
 
     def reconcile(self, desired: StartType | None = None) -> ReconcileResult:

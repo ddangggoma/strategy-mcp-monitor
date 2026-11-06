@@ -143,6 +143,24 @@ it("refetches current sessions when the board's sessions change", async () => {
   expect(calls).toBe(2);
 });
 
+it("drops a disconnected session that logs off and updates the history live (sessions_changed, M16)", async () => {
+  let phase = 0;
+  server.use(
+    http.get("/api/sessions/current", () =>
+      HttpResponse.json({ ready: true, sessions: phase === 0 ? [currentSessionFixture({ user: "kim", state: "disconnected" })] : [] })),
+    http.get("/api/sessions/history", () =>
+      HttpResponse.json(sessionsHistoryFixture({ connections: phase === 0 ? [] : [connectionFixture({ user: "kim", end_reason: "logoff", ended_at: "2026-11-04T14:00:00.000+09:00" })] }))),
+  );
+  const r = await renderSessions();
+  connectLive(r.store, r.qc);
+  await within(region(copy.sessions.current)).findByText(copy.sessions.state.disconnected);
+  phase = 1;
+  // the board's own session list does not change: only the sessions screen's signal arrives
+  act(() => r.store.apply({ event: "sessions_changed", data: "{}" }));
+  expect(await within(region(copy.sessions.current)).findByText(copy.sessions.currentEmpty)).toBeInTheDocument();
+  expect(await within(region(copy.sessions.history)).findByText(copy.sessions.endReasons.logoff)).toBeInTheDocument();
+});
+
 it("shows every column of a finished connection", async () => {
   server.use(http.get("/api/sessions/history", () => HttpResponse.json(sessionsHistoryFixture({ connections: [
     connectionFixture({ id: 3, user: "hong", domain: "CORP", client_name: "HONG-PC", client_ip: "10.0.3.21", reverse_dns: "hong.corp.example",

@@ -9,8 +9,13 @@ export const session: {
   me: Me | null;
   /** Called on a 401 outside /api/auth/ (session expired or revoked): the admin shell sends the user to login. */
   onUnauthorized: (() => void) | null;
+  /**
+   * Called when a CSRF refresh finds another user (or channel) in the shared cookie: the admin shell
+   * treats it like a user switch, so the previous users edits cannot be saved as the new ones.
+   */
+  onSessionChanged: (() => void) | null;
   onChange: Set<(me: Me) => void>;
-} = { csrf: null, me: null, onUnauthorized: null, onChange: new Set() };
+} = { csrf: null, me: null, onUnauthorized: null, onSessionChanged: null, onChange: new Set() };
 
 function setMe(me: Me): void {
   session.me = me;

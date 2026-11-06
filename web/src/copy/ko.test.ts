@@ -163,7 +163,9 @@ it("puts numbers and ranges into the log and audit sentences", () => {
 });
 
 it("has the login-failure card, retention and service sentences", () => {
-  expect(Object.keys(copy.dashboard.loginFailures).sort()).toEqual(["empty", "openLogs", "rdp", "title", "web"]);
+  // the Global Constraints keys plus the chart name and the read error (Task 12)
+  expect(Object.keys(copy.dashboard.loginFailures).sort()).toEqual(["chartLabel", "empty", "error", "openLogs", "rdp", "title", "web"]);
+  expect(copy.dashboard.loginFailures.chartLabel(1_204)).toContain("1,204");
   expect(copy.dashboard.loginFailures.title).toBe("로그인 실패 추이");
   expect(copy.settings.retentionDeleteEvents(41_200)).toContain("41,200");
   expect(copy.settings.retentionRunsSoon).toMatch(/\S/);
