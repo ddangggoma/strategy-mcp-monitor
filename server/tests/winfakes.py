@@ -6,11 +6,12 @@ import asyncio
 import threading
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from app.win.peer import PeerInfo
+from app.win.wmi import ProcessEvent
 from app.win.wts import WtsSnapshot
 
 
@@ -122,3 +123,83 @@ class FakeWtsSource:
         if isinstance(item, Exception):
             raise item
         return item
+
+
+class FakeLookup:
+    """A ``ProcessLookup`` over a ``{pid: (exe, cmdline, user)}`` table; other pids → all None.
+    ``calls`` records each looked-up pid."""
+
+    def __init__(self, table: dict[int, tuple[str | None, str | None, str | None]]) -> None:
+        self.table = dict(table)
+        self.calls: list[int] = []
+
+    def details(self, pid: int) -> tuple[str | None, str | None, str | None]:
+        self.calls.append(pid)
+        return self.table.get(pid, (None, None, None))
+
+
+class FakeProcessSource:
+    """A ``ProcessEventSource`` fed by the test.
+
+    Each kind has one queue shared by every watch of that kind: ``next`` returns its items in order
+    (an ``Exception`` among them is raised instead) and ``None`` after a 10 ms wait once it is
+    empty. ``fail_watch(kind, *errors)`` makes the next ``watch(kind)`` calls raise those errors.
+    ``watches`` keeps every watch handed out."""
+
+    def __init__(
+        self,
+        start: Sequence[ProcessEvent | Exception] = (),
+        stop: Sequence[ProcessEvent | Exception] = (),
+        mode: str = "poll",
+    ) -> None:
+        self.mode = mode
+        self.watches: list[FakeProcessWatch] = []
+        self._lock = threading.Lock()
+        self._items: dict[str, deque[ProcessEvent | Exception]] = {
+            "start": deque(start), "stop": deque(stop),
+        }
+        self._watch_errors: dict[str, deque[Exception]] = {"start": deque(), "stop": deque()}
+        self._calls: dict[str, int] = {"start": 0, "stop": 0}
+
+    def fail_watch(self, kind: str, *errors: Exception) -> None:
+        with self._lock:
+            self._watch_errors[kind].extend(errors)
+
+    def watch_count(self, kind: str) -> int:
+        """How many times ``watch(kind)`` was called (failed calls included)."""
+        with self._lock:
+            return self._calls[kind]
+
+    def watch(self, kind: Literal["start", "stop"]) -> FakeProcessWatch:
+        with self._lock:
+            self._calls[kind] += 1
+            errors = self._watch_errors[kind]
+            if errors:
+                raise errors.popleft()
+            w = FakeProcessWatch(self, kind)
+            self.watches.append(w)
+            return w
+
+    def _take(self, kind: str) -> ProcessEvent | Exception | None:
+        with self._lock:
+            items = self._items[kind]
+            return items.popleft() if items else None
+
+
+class FakeProcessWatch:
+    def __init__(self, source: FakeProcessSource, kind: str) -> None:
+        self._source = source
+        self.kind = kind
+        self.mode: Literal["trace", "poll"] = "trace" if source.mode == "trace" else "poll"
+        self.closed = False
+
+    def next(self, timeout_ms: int) -> ProcessEvent | None:
+        item = self._source._take(self.kind)
+        if isinstance(item, Exception):
+            raise item
+        if item is None:
+            time.sleep(min(timeout_ms, 10) / 1000)
+        return item
+
+    def close(self) -> None:
+        self.closed = True

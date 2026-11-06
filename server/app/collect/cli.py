@@ -1,4 +1,5 @@
-"""Collector command-line flags (``--session-source``, ``--collect-console``) → ``CollectorConfig``."""
+"""Collector command-line flags (``--session-source``, ``--collect-console``, ``--activity``)
+→ ``CollectorConfig``."""
 
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ from app.clock import Clock
 from app.collect.config import CollectorConfig
 from app.sessions.jsonsource import JsonFileWtsSource
 from app.win.eventlog import EventLogSource, PywinEventLogSource
+from app.win.wmi import ProcessEventSource, WmiProcessSource
 from app.win.wts import CtypesWtsSource, WtsSource
 
 _JSON_PREFIX = "json:"
@@ -36,25 +38,40 @@ def add_collector_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="DEV: also track the console session (a PC without RDP sessions)",
     )
+    parser.add_argument(
+        "--activity",
+        choices=("on", "off"),
+        default="on",
+        help="user activity collection (process events with --session-source wts); "
+        "off is for development and E2E runs",
+    )
 
 
 def collector_config(ns: argparse.Namespace, *, clock: Clock, root: Path) -> CollectorConfig:
     """Build the collector configuration from parsed flags.
 
-    ``wts`` also turns on the event log; ``none`` and ``json:`` (a PC without real RDP sessions)
-    leave it off. ``root`` is the data root: the event-log bookmarks default to its data folder
-    in ``build_services``, so nothing here needs it yet.
+    ``wts`` also turns on the event log and, unless ``--activity off``, WMI process events;
+    ``none`` and ``json:`` (a PC without real RDP sessions) leave both off. ``root`` is the data
+    root: the event-log bookmarks default to its data folder in ``build_services``, so nothing
+    here needs it yet.
     """
     source = ns.session_source
+    activity = ns.activity == "on"
     wts: WtsSource | None
     event_log: EventLogSource | None = None
+    process: ProcessEventSource | None = None
     if source == "wts":
         wts = CtypesWtsSource(clock)
         event_log = PywinEventLogSource()
+        if activity:
+            process = WmiProcessSource()
     elif source == "none":
         wts = None
     else:
         path = Path(source.removeprefix(_JSON_PREFIX))
         print(f"WARNING: dev session source {path}", file=sys.stderr, flush=True)
         wts = JsonFileWtsSource(path, clock)
-    return CollectorConfig(wts=wts, collect_console=ns.collect_console, event_log=event_log)
+    return CollectorConfig(
+        wts=wts, collect_console=ns.collect_console, event_log=event_log,
+        process=process, activity=activity,
+    )

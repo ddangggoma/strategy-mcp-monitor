@@ -4,6 +4,8 @@ import secrets
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.activity.context import ActivityContext
+from app.activity.process import ProcessActivityHandler, ProcessComponent
 from app.activity.tamper import TamperMonitor
 from app.audit import AuditLogger
 from app.auth.otp import DummyOtpProvider, OtpProvider, OtpService
@@ -62,6 +64,8 @@ class Services:
     eventlog: EventLogComponent | None
     """Event log subscriptions when ``CollectorConfig.event_log`` is set; mappers register their
     handlers with ``eventlog.on(...)`` inside ``build_services`` (before ``collectors.start()``)."""
+    activity_context: ActivityContext
+    """Process → session resolution and the session fields of every ``activity.*`` line."""
 
 
 def _load_or_create_otp_secret(db: Database) -> bytes:
@@ -139,6 +143,11 @@ def build_services(
         for channel in ("eventlog:security", "eventlog:lsm", "eventlog:rcm"):
             eventlog.on(channel, session_events)
         manager.add(eventlog)
+    activity_context = ActivityContext(rdp, clock)
+    if config_collectors.process is not None:
+        manager.add(ProcessComponent(
+            config_collectors.process, ProcessActivityHandler(activity_context, log), manager
+        ))
     return Services(
         paths=paths,
         db=db,
@@ -162,4 +171,5 @@ def build_services(
         rdp=rdp,
         collectors=manager,
         eventlog=eventlog,
+        activity_context=activity_context,
     )

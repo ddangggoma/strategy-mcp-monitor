@@ -51,6 +51,7 @@ class Collectors:
         self._task_fns: list[tuple[str, Callable[[], Awaitable[None]]]] = []
         self._tasks: list[asyncio.Task[None]] = []
         self._status: dict[str, CollectorStatus] = {}
+        self._modes: dict[str, str] = {}
         self._started = False
         self.bridge: CollectorBridge | None = None
 
@@ -97,6 +98,14 @@ class Collectors:
             return
         self._status[name] = CollectorStatus(name, ok, error, self._clock.now())
         self._log.emit("system", event="collector.status", source=name, ok=ok, error=error)
+
+    def report_mode(self, source: str, mode: str) -> None:
+        """Record how a collector reads (e.g. WMI ``trace`` or ``poll``); a ``collector.mode`` line
+        is written only when the mode of that source changes."""
+        if self._modes.get(source) == mode:
+            return
+        self._modes[source] = mode
+        self._log.emit("system", event="collector.mode", source=source, mode=mode)
 
     def handler_failed(self, source: str, exc: BaseException) -> None:
         """Log a loop-side handler error the way the bridge does (``collector.handler_failed``)."""

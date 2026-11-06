@@ -114,3 +114,21 @@ def test_event_log_source_follows_the_session_source(tmp_path, clock):
     assert collector_config(parse_args(["--session-source", "none"]), clock=clock, root=tmp_path).event_log is None
     path = tmp_path / "s.json"; path.write_text('{"sessions": []}', "utf-8")
     assert collector_config(parse_args(["--session-source", f"json:{path}"]), clock=clock, root=tmp_path).event_log is None
+
+
+def test_activity_flag_controls_process_collection(tmp_path, clock):
+    from app.win.wmi import WmiProcessSource
+    cfg = collector_config(parse_args([]), clock=clock, root=tmp_path)
+    assert isinstance(cfg.process, WmiProcessSource) and cfg.activity is True
+    off = collector_config(parse_args(["--activity", "off"]), clock=clock, root=tmp_path)
+    assert off.process is None and off.activity is False and isinstance(off.wts, CtypesWtsSource)
+    assert collector_config(parse_args(["--session-source", "none"]), clock=clock, root=tmp_path).process is None
+    path = tmp_path / "s.json"; path.write_text('{"sessions": []}', "utf-8")
+    dev = collector_config(parse_args(["--session-source", f"json:{path}", "--activity", "on"]), clock=clock, root=tmp_path)
+    assert dev.process is None and dev.activity is True
+
+
+def test_activity_flag_rejects_other_values(capsys):
+    with pytest.raises(SystemExit) as e:
+        parse_args(["--activity", "maybe"])
+    assert e.value.code == 2 and "--activity" in capsys.readouterr().err
