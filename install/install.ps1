@@ -10,6 +10,10 @@
   ACL은 이름이 아니라 SID로, 감사 정책은 하위 범주 GUID로 지정합니다(한국어 Windows에서도 같음, W30).
   방화벽 규칙은 -OpenFirewall일 때만 만듭니다(spec 2 #6).
 
+  데이터 루트(플랜 리뷰 C1, I3): 없는 폴더, 빈 폴더, 이전 데이터 루트만 받습니다(SYSTEM·Administrators·
+  설치하는 계정이 모든 항목의 소유자이고 정션·심볼릭 링크가 없을 때). 드라이브 루트·시스템 폴더와 설치
+  폴더·묶음과 겹치는 폴더도 거부합니다. ACL은 고치지 않고 처음부터 새로 만든 뒤 다시 읽어 확인합니다.
+
   종료 코드: 0 성공, 1 실패(관리자 아님 포함), 2 인자 오류.
 
 .EXAMPLE
@@ -49,7 +53,9 @@ function Stop-WithArgumentError([string]$Message) {
 }
 
 function Get-FullPath([string]$Path) {
-    $full = [System.IO.Path]::GetFullPath($ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path))
+    # A drive that does not exist (Q:) has no PowerShell provider path: .NET still makes it absolute.
+    try { $Path = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path) } catch { }
+    $full = [System.IO.Path]::GetFullPath($Path)
     if ($full.Length -gt 3) { $full = $full.TrimEnd('\') }
     return $full
 }
@@ -79,6 +85,150 @@ function Get-RegistryValue([string]$Key, [string]$Name) {
     $item = Get-ItemProperty -LiteralPath "Registry::$Key" -Name $Name -ErrorAction SilentlyContinue
     if ($null -eq $item) { return $null }
     return $item.$Name
+}
+
+# --- data root helpers (the same in install.ps1 and audit-policy.ps1; the first two also in uninstall.ps1) ---
+# uninstall -RemoveData deletes the data root whole: never a drive root, a system folder or a folder above one.
+function Get-UnsafeRootReason([string]$Root) {
+    $full = Get-FullPath $Root
+    if ($full.TrimEnd('\') -eq ([System.IO.Path]::GetPathRoot($full)).TrimEnd('\')) { return "$full 은(는) 드라이브 루트입니다" }
+    $system = @($env:SystemRoot, $env:ProgramData, $env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramW6432,
+        (Split-Path -Parent $env:PUBLIC), $env:PUBLIC, $env:USERPROFILE, $env:LOCALAPPDATA, $env:APPDATA) | Where-Object { $_ }
+    foreach ($s in $system) {
+        $s = Get-FullPath $s
+        if ($full -eq $s -or (Test-Inside $s $full)) { return "$full 은(는) 시스템 폴더($s)이거나 그 위 폴더입니다" }
+    }
+    if (Test-Inside $full (Get-FullPath $env:SystemRoot)) { return "$full 은(는) Windows 폴더 안입니다" }
+    return $null
+}
+
+# A data root this product made: install.ps1 / audit-policy.ps1 write the marker (an install before the
+# marker existed has install-state.json).
+function Test-DataRootMarker([string]$Root) {
+    return (Test-Path -LiteralPath (Join-Path $Root "data\mcp-monitor-data-root.json") -PathType Leaf) -or
+        (Test-Path -LiteralPath (Join-Path $Root "data\install-state.json") -PathType Leaf)
+}
+
+# Every file and folder below $Root, never entering a junction or symbolic link.
+function Get-TreeItems([string]$Root) {
+    $out = New-Object System.Collections.Generic.List[System.IO.FileSystemInfo]
+    $stack = New-Object System.Collections.Generic.Stack[System.IO.DirectoryInfo]
+    $stack.Push((New-Object System.IO.DirectoryInfo $Root))
+    while ($stack.Count -gt 0) {
+        foreach ($item in $stack.Pop().EnumerateFileSystemInfos()) {
+            $out.Add($item)
+            if ($item -is [System.IO.DirectoryInfo] -and -not ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { $stack.Push($item) }
+        }
+    }
+    return $out.ToArray()
+}
+
+# Why an existing folder must not become the data root ($null: safe). Only an empty folder or an earlier
+# data root (marker) is taken over, and only when SYSTEM, Administrators or the account running this script
+# ($Owners) own every item and nothing is a junction or symbolic link: a user who created the folder before
+# the install would otherwise keep write access to what the service runs as SYSTEM (finding C1).
+function Get-DataRootProblem([string]$Root, [string[]]$Owners) {
+    if (-not (Test-Path -LiteralPath $Root)) { return $null }
+    $info = New-Object System.IO.DirectoryInfo $Root
+    if (-not $info.Exists) { return "$Root 은(는) 폴더가 아닙니다" }
+    if ($info.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return "$Root 은(는) 정션 또는 심볼릭 링크입니다" }
+    try {
+        $items = @(Get-TreeItems $Root)
+        foreach ($item in @($info) + $items) {
+            if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return "$($item.FullName) 은(는) 정션 또는 심볼릭 링크입니다" }
+            $owner = $item.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Owner).GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+            if ($Owners -notcontains $owner) { return "$($item.FullName) 의 소유자($owner)가 SYSTEM·Administrators가 아닙니다" }
+        }
+    } catch {
+        return "$Root 을(를) 확인하지 못했습니다: $($_.Exception.Message)"
+    }
+    if ($items.Count -gt 0 -and -not (Test-DataRootMarker $Root)) { return "$Root 이(가) 비어 있지 않고 MCP Monitor 데이터 폴더도 아닙니다" }
+    return $null
+}
+
+# One item below the data root: no ACEs of its own (only those inherited from the root), owner $Owner.
+function Reset-ItemAcl([System.IO.FileSystemInfo]$Item, [string]$Owner) {
+    if ($Item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { throw "$($Item.FullName) 은(는) 정션 또는 심볼릭 링크입니다" }
+    $acl = $Item.GetAccessControl()
+    foreach ($rule in @($acl.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]))) { [void]$acl.RemoveAccessRuleSpecific($rule) }
+    $acl.SetAccessRuleProtection($false, $false)
+    $acl.SetOwner((New-Object System.Security.Principal.SecurityIdentifier $Owner))
+    $Item.SetAccessControl($acl)
+}
+
+# The data root's own ACL built from scratch (not edited: icacls /grant:r keeps every other explicit ACE):
+# owner $Owner, inheritance off, full control for $Sids only, inherited by everything below.
+function Set-RootAcl([string]$Root, [string]$Owner, [string[]]$Sids) {
+    $sec = New-Object System.Security.AccessControl.DirectorySecurity
+    $sec.SetOwner((New-Object System.Security.Principal.SecurityIdentifier $Owner))
+    $sec.SetAccessRuleProtection($true, $false)
+    foreach ($sid in $Sids) {
+        $sec.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule(
+            (New-Object System.Security.Principal.SecurityIdentifier $sid), "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")))
+    }
+    (New-Object System.IO.DirectoryInfo $Root).SetAccessControl($sec)
+}
+
+# What differs from the ACL Initialize-DataRoot sets (empty: exactly that), read back from the disk.
+function Get-DataRootAclProblems([string]$Root, [string]$Owner, [string[]]$Sids) {
+    $problems = New-Object System.Collections.Generic.List[string]
+    $sidType = [System.Security.Principal.SecurityIdentifier]
+    $full = [System.Security.AccessControl.FileSystemRights]::FullControl
+    $rootInfo = New-Object System.IO.DirectoryInfo $Root
+    foreach ($item in @($rootInfo) + @(Get-TreeItems $Root)) {
+        $name = $item.FullName
+        if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { $problems.Add("$($name): 정션 또는 심볼릭 링크"); continue }
+        $acl = $item.GetAccessControl()
+        $isRoot = $name.TrimEnd('\') -eq $rootInfo.FullName.TrimEnd('\')
+        $o = $acl.GetOwner($sidType).Value
+        if ($o -ne $Owner) { $problems.Add("$($name): 소유자 $o") }
+        $explicit = @($acl.GetAccessRules($true, $false, $sidType))
+        if ($isRoot) {
+            if (-not $acl.AreAccessRulesProtected) { $problems.Add("$($name): 상위 폴더의 권한을 상속함") }
+            foreach ($sid in $Sids) {
+                $ok = @($explicit | Where-Object { $_.IdentityReference.Value -eq $sid -and $_.AccessControlType -eq "Allow" -and
+                    ($_.FileSystemRights -band $full) -eq $full -and $_.InheritanceFlags -eq "ContainerInherit, ObjectInherit" })
+                if ($ok.Count -eq 0) { $problems.Add("$($name): $sid 의 모든 권한 없음") }
+            }
+        } elseif ($explicit.Count -gt 0) {
+            $problems.Add("$($name): 자체 ACE $($explicit.Count)개")
+        }
+        foreach ($rule in @($acl.GetAccessRules($true, $true, $sidType))) {
+            if ($rule.AccessControlType -ne "Allow" -or $Sids -notcontains $rule.IdentityReference.Value) {
+                $problems.Add("$($name): $($rule.IdentityReference.Value) $($rule.AccessControlType) $($rule.FileSystemRights)")
+            }
+        }
+    }
+    return $problems.ToArray()
+}
+
+# Creates or takes over the data root (finding C1): the checks of Get-DataRootProblem, the root's ACL from
+# scratch, the same checks again once nobody else can write, every item below reset, logs\ data\ scripts\
+# and the marker, then the ACL read back: any difference fails the step.
+function Initialize-DataRoot([string]$Root, [string]$Owner, [string[]]$Sids, [string[]]$Owners, [string]$CreatedBy) {
+    $problem = Get-DataRootProblem $Root $Owners
+    if ($problem) { throw $problem }
+    if (-not (Test-Path -LiteralPath $Root)) {
+        $parent = Split-Path -Parent $Root
+        if ($parent) { [void][System.IO.Directory]::CreateDirectory($parent) }
+        [void][System.IO.Directory]::CreateDirectory($Root)
+    }
+    Set-RootAcl $Root $Owner $Sids
+    $problem = Get-DataRootProblem $Root $Owners
+    if ($problem) { throw $problem }
+    foreach ($item in @(Get-TreeItems $Root)) { Reset-ItemAcl $item $Owner }
+    foreach ($d in "logs", "data", "scripts") {
+        $dir = New-Object System.IO.DirectoryInfo (Join-Path $Root $d)
+        if (-not $dir.Exists) { $dir.Create(); $dir.Refresh(); Reset-ItemAcl $dir $Owner }
+    }
+    $marker = Join-Path $Root "data\mcp-monitor-data-root.json"
+    if (-not (Test-Path -LiteralPath $marker)) {
+        $text = [ordered]@{ product = "mcp-monitor"; created_by = $CreatedBy; created_at = (Get-Date).ToString("yyyy-MM-ddTHH:mm:sszzz") } | ConvertTo-Json
+        [System.IO.File]::WriteAllText($marker, $text, (New-Object System.Text.UTF8Encoding $false))
+        Reset-ItemAcl (New-Object System.IO.FileInfo $marker) $Owner
+    }
+    $problems = @(Get-DataRootAclProblems $Root $Owner $Sids)
+    if ($problems.Count -gt 0) { throw "데이터 폴더 권한 확인 실패: $($problems -join '; ')" }
 }
 
 $Steps = New-Object System.Collections.Generic.List[object]
@@ -139,7 +289,7 @@ $Internal = @{
         }
         0
     }
-    "(mkdir)"       = { param($s) foreach ($d in $s.args) { [void][System.IO.Directory]::CreateDirectory($d) }; 0 }
+    "(secure-data-root)" = { param($s) Initialize-DataRoot $s.args[0] "S-1-5-32-544" @("S-1-5-18", "S-1-5-32-544") $DataRootOwners "install"; 0 }
     "(write-state)" = {
         param($s)
         $state = $s.args[1] | ConvertFrom-Json
@@ -223,16 +373,30 @@ if ((Test-Path -LiteralPath $InstallDir -PathType Container) -and
     Stop-WithArgumentError "-InstallDir($InstallDir)이(가) 비어 있지 않고 MCP Monitor 설치 폴더(bundle.json)도 아닙니다."
 }
 if ($LocalPort -eq $ExternalPort) { Stop-WithArgumentError "-LocalPort와 -ExternalPort가 같습니다($LocalPort)." }
+# The data root: never where robocopy /MIR copies or deletes (I3), nor a folder uninstall must not delete
+# whole, nor a folder someone else made (C1). Checked before anything is read from it.
+foreach ($other in @($InstallDir, $Source)) {
+    if ($DataRoot -eq $other -or (Test-Inside $DataRoot $other) -or (Test-Inside $other $DataRoot)) {
+        Stop-WithArgumentError "-DataRoot($DataRoot)는 $other 와(과) 겹치지 않는 폴더여야 합니다."
+    }
+}
+$unsafe = Get-UnsafeRootReason $DataRoot
+if ($unsafe) { Stop-WithArgumentError "-DataRoot: $unsafe" }
+$DataRootOwners = @("S-1-5-18", "S-1-5-32-544", [Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
+$problem = Get-DataRootProblem $DataRoot $DataRootOwners
+if ($problem) { Stop-WithArgumentError "-DataRoot: $problem" }
 
 $ServiceExists = $null -ne (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue)
 $BackupPath = "$DataRoot\data\auditpol-backup.csv"
 $StatePath = "$DataRoot\data\install-state.json"
 $OldState = Read-JsonFile $StatePath
 
-# The values before our first install: a reinstall keeps them (it would otherwise record our own 1s).
+# The values before our first install (or before audit-policy.ps1 -Enable): a reinstall keeps them (it
+# would otherwise record our own 1s).
 $RegistryValues = [ordered]@{ "$AuditKey\ProcessCreationIncludeCmdLine_Enabled" = $null; "$PsLogKey\EnableScriptBlockLogging" = $null }
 $RegistryBefore = [ordered]@{}
 $oldRegistry = Get-Prop $OldState "registry_before"
+if ($null -eq $oldRegistry) { $oldRegistry = Get-Prop (Read-JsonFile "$DataRoot\data\audit-policy-state.json") "registry_before" }
 if ($null -ne $oldRegistry) { foreach ($p in $oldRegistry.PSObject.Properties) { $RegistryBefore[$p.Name] = $p.Value } }
 if (-not $SkipAuditPolicy) {
     foreach ($key in $RegistryValues.Keys) {
@@ -254,10 +418,9 @@ Add-Step "check_os" "(check-os)"
 Add-Step "stop_existing" "sc.exe" @("stop", $ServiceName) -Ok @(0, 1062) -When "service_exists"
 Add-Step "copy_bundle" "robocopy" @($Source, $InstallDir, "/MIR", "/XD", "$InstallDir\logs", "$InstallDir\data", "$InstallDir\scripts",
     "/NFL", "/NDL", "/NJH", "/NJS", "/NP") -Ok @(0..7)
-Add-Step "create_dirs" "(mkdir)" @("$DataRoot\logs", "$DataRoot\data", "$DataRoot\scripts")
-Add-Step "acl_data" "icacls" @($DataRoot, "/inheritance:r", "/grant:r", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F")
-Add-Step "acl_children" "icacls" @("$DataRoot\*", "/reset", "/T", "/C", "/Q")
-Add-Step "acl_owner" "icacls" @($DataRoot, "/setowner", "*S-1-5-32-544", "/T", "/C", "/Q")
+# Data root ACL from scratch: owner Administrators, no inheritance, SYSTEM + Administrators full control
+# only; everything below inherits only that; read back and verified (Initialize-DataRoot, finding C1).
+Add-Step "secure_data_root" "(secure-data-root)" @($DataRoot)
 if (-not $SkipAuditPolicy) {
     Add-Step "audit_backup" "auditpol" @("/backup", "/file:$BackupPath") -When "no_backup_yet"
     Add-Step "audit_policy_success" "auditpol" @("/set", "/subcategory:$SuccessGuids", "/success:enable")

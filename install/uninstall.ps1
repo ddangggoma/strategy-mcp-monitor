@@ -35,10 +35,21 @@ $ServiceName = "mcp-monitor"
 $AdminMessage = "관리자 권한(Administrator)으로 PowerShell을 열고 다시 실행하세요."
 
 # --- common helpers (the same in install.ps1, uninstall.ps1 and audit-policy.ps1) ---------------
+function Stop-WithArgumentError([string]$Message) {
+    [Console]::Error.WriteLine("오류: $Message")
+    exit 2
+}
+
 function Get-FullPath([string]$Path) {
-    $full = [System.IO.Path]::GetFullPath($ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path))
+    # A drive that does not exist (Q:) has no PowerShell provider path: .NET still makes it absolute.
+    try { $Path = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path) } catch { }
+    $full = [System.IO.Path]::GetFullPath($Path)
     if ($full.Length -gt 3) { $full = $full.TrimEnd('\') }
     return $full
+}
+
+function Test-Inside([string]$Child, [string]$Parent) {
+    return $Child.StartsWith($Parent.TrimEnd('\') + '\', [System.StringComparison]::OrdinalIgnoreCase)
 }
 
 function Get-Prop($Object, [string]$Name) {
@@ -56,6 +67,28 @@ function Read-JsonFile([string]$Path) {
 function Test-Admin {
     $principal = New-Object Security.Principal.WindowsPrincipal ([Security.Principal.WindowsIdentity]::GetCurrent())
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+# --- data root helpers (the same in install.ps1 and audit-policy.ps1; the first two also in uninstall.ps1) ---
+# uninstall -RemoveData deletes the data root whole: never a drive root, a system folder or a folder above one.
+function Get-UnsafeRootReason([string]$Root) {
+    $full = Get-FullPath $Root
+    if ($full.TrimEnd('\') -eq ([System.IO.Path]::GetPathRoot($full)).TrimEnd('\')) { return "$full 은(는) 드라이브 루트입니다" }
+    $system = @($env:SystemRoot, $env:ProgramData, $env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramW6432,
+        (Split-Path -Parent $env:PUBLIC), $env:PUBLIC, $env:USERPROFILE, $env:LOCALAPPDATA, $env:APPDATA) | Where-Object { $_ }
+    foreach ($s in $system) {
+        $s = Get-FullPath $s
+        if ($full -eq $s -or (Test-Inside $s $full)) { return "$full 은(는) 시스템 폴더($s)이거나 그 위 폴더입니다" }
+    }
+    if (Test-Inside $full (Get-FullPath $env:SystemRoot)) { return "$full 은(는) Windows 폴더 안입니다" }
+    return $null
+}
+
+# A data root this product made: install.ps1 / audit-policy.ps1 write the marker (an install before the
+# marker existed has install-state.json).
+function Test-DataRootMarker([string]$Root) {
+    return (Test-Path -LiteralPath (Join-Path $Root "data\mcp-monitor-data-root.json") -PathType Leaf) -or
+        (Test-Path -LiteralPath (Join-Path $Root "data\install-state.json") -PathType Leaf)
 }
 
 $Steps = New-Object System.Collections.Generic.List[object]
@@ -104,12 +137,16 @@ function Wait-ServiceStopped([int]$Seconds) {
 }
 
 # "<key>\<value name>=<previous DWORD or null>" (install-state.json registry_before): put back or delete.
+# Only the two values install.ps1 sets, and only DWORDs: the state file must not choose what is written.
 function Restore-RegistryValues([string[]]$Entries) {
     if ($Entries.Count -eq 0) { Write-Host "  되돌릴 레지스트리 값이 없습니다(install-state.json 없음)." }
+    $known = @("HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Audit\ProcessCreationIncludeCmdLine_Enabled",
+        "HKLM\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging\EnableScriptBlockLogging")
     foreach ($entry in $Entries) {
         $at = $entry.LastIndexOf("=")
         $full = $entry.Substring(0, $at)
         $value = $entry.Substring($at + 1)
+        if ($known -notcontains $full -or ($value -ne "null" -and $value -notmatch '^\d{1,10}$')) { throw "알 수 없는 레지스트리 값 $entry" }
         $key = Split-Path -Parent $full
         $name = Split-Path -Leaf $full
         if ($value -eq "null") { $code = Invoke-Native "reg" @("delete", $key, "/v", $name, "/f"); $ok = @(0, 1) }
@@ -136,9 +173,10 @@ $Internal = @{
 
 $Conditions = @{
     audit_backup_exists   = { Test-Path -LiteralPath $AuditBackup -PathType Leaf }
-    # Guards against deleting the wrong folder: an install has bundle.json, a data root has data\.
-    install_dir_is_bundle = { Test-Path -LiteralPath (Join-Path $InstallDir "bundle.json") -PathType Leaf }
-    data_root_is_ours     = { Test-Path -LiteralPath (Join-Path $DataRoot "data") -PathType Container }
+    # Guards against deleting the wrong folder: an install has bundle.json, a data root our marker
+    # (or install-state.json); neither is ever a drive root or a system folder (finding I3).
+    install_dir_is_bundle = { (Test-Path -LiteralPath (Join-Path $InstallDir "bundle.json") -PathType Leaf) -and -not (Get-UnsafeRootReason $InstallDir) }
+    data_root_is_ours     = { (Test-DataRootMarker $DataRoot) -and -not (Get-UnsafeRootReason $DataRoot) }
 }
 
 $AfterStep = @{
@@ -171,15 +209,24 @@ function Invoke-Plan {
 
 # --- arguments ----------------------------------------------------------------------------------
 $DataRoot = Get-FullPath $DataRoot
+if ($RemoveData) {
+    $unsafe = Get-UnsafeRootReason $DataRoot
+    if ($unsafe) { Stop-WithArgumentError "-DataRoot: $unsafe -RemoveData는 이 폴더를 지우지 않습니다." }
+}
 $State = Read-JsonFile "$DataRoot\data\install-state.json"
 if (-not $PSBoundParameters.ContainsKey("InstallDir") -and (Get-Prop $State "install_dir")) { $InstallDir = Get-Prop $State "install_dir" }
 $InstallDir = Get-FullPath $InstallDir
+# Removing the install folder would take a data root inside it along (I3): only with -RemoveData.
+if (-not $RemoveData -and ($DataRoot -eq $InstallDir -or (Test-Inside $DataRoot $InstallDir))) {
+    Stop-WithArgumentError "-DataRoot($DataRoot)가 설치 폴더($InstallDir) 안에 있어 데이터를 남길 수 없습니다(-RemoveData로 함께 지우기)."
+}
 $ExternalPort = Get-Prop $State "external_port"
 if (-not $ExternalPort) { $ExternalPort = 8701 }
 $AuditBackup = Get-Prop $State "audit_backup"
 if (-not $AuditBackup) { $AuditBackup = "$DataRoot\data\auditpol-backup.csv" }
 $RegistryEntries = @()
 $before = Get-Prop $State "registry_before"
+if ($null -eq $before) { $before = Get-Prop (Read-JsonFile "$DataRoot\data\audit-policy-state.json") "registry_before" }
 if ($null -ne $before) {
     $RegistryEntries = @($before.PSObject.Properties | ForEach-Object { "$($_.Name)=$(if ($null -eq $_.Value) { 'null' } else { $_.Value })" })
 }

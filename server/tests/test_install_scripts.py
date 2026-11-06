@@ -94,7 +94,11 @@ def test_scripts_are_utf8_with_bom(name):
     raw.decode("utf-8")
 
 
-SHARED = ["Get-FullPath", "Get-Prop", "Read-JsonFile", "Test-Admin", "Add-Step", "ConvertTo-CommandLineArg", "Invoke-Native"]
+SHARED = ["Stop-WithArgumentError", "Get-FullPath", "Test-Inside", "Get-Prop", "Read-JsonFile", "Test-Admin", "Add-Step",
+          "ConvertTo-CommandLineArg", "Invoke-Native", "Get-UnsafeRootReason", "Test-DataRootMarker"]
+# The data root helpers install.ps1 and audit-policy.ps1 both use (C1): identical in the two.
+DATA_ROOT = ["Get-RegistryValue", "Get-TreeItems", "Get-DataRootProblem", "Reset-ItemAcl", "Set-RootAcl",
+             "Get-DataRootAclProblems", "Initialize-DataRoot"]
 
 
 def functions(name):
@@ -110,6 +114,8 @@ def test_shared_helpers_are_identical_in_the_three_scripts():
     install, uninstall, audit = (functions(n) for n in ("install.ps1", "uninstall.ps1", "audit-policy.ps1"))
     for name in SHARED:
         assert install[name] == uninstall[name] == audit[name], name
+    for name in DATA_ROOT:
+        assert install[name] == audit[name], name
     assert uninstall["Restore-RegistryValues"] == audit["Restore-RegistryValues"]
 
 
@@ -180,7 +186,7 @@ def test_install_runtime_actions(tmp_path):
     try:
         out = run_actions("install.ps1", tmp_path,
                           f"$InstallDir = '{tmp_path / 'i'}'; $ServiceName = 'mcp-monitor-test-absent'; $FirewallRule = 'MCP Monitor test-absent (1)'; $BackupPath = '{d / 'data' / 'b.csv'}'",
-                          f"Write-Output (& $Internal['(mkdir)'] @{{ args = @('{d / 'logs'}', '{d / 'data'}') }})\n"
+                          f"Write-Output ([IO.Directory]::CreateDirectory('{d / 'logs'}').Exists -and [IO.Directory]::CreateDirectory('{d / 'data'}').Exists)\n"
                           f"$st = [IO.File]::ReadAllText('{tmp_path / 'state.json'}')\n"
                           f"Write-Output (& $Internal['(write-state)'] @{{ args = @('{d / 'data' / 'install-state.json'}', $st) }})\n"
                           "Write-Output (& $Internal['(check-os)'] @{ args = @() })\n"
@@ -191,7 +197,7 @@ def test_install_runtime_actions(tmp_path):
                           "Write-Output (& $Conditions['firewall_rule_missing'])\n")
     finally:
         server.shutdown()
-    assert out[0] == "0" and (d / "logs").is_dir() and (d / "data").is_dir()
+    assert out[0] == "True" and (d / "logs").is_dir() and (d / "data").is_dir()
     assert out[1] == "0"
     written = json.loads((d / "data" / "install-state.json").read_bytes())
     assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d", written.pop("installed_at"))
@@ -206,6 +212,7 @@ def test_uninstall_runtime_actions(tmp_path):
     inst, data = tmp_path / "i", tmp_path / "d"
     (inst / "bin").mkdir(parents=True); (inst / "bundle.json").write_text("{}", "utf-8")
     (data / "data").mkdir(parents=True); (data / "data" / "tamper-baseline.json").write_text("{}", "utf-8")
+    (data / "data" / "mcp-monitor-data-root.json").write_text('{"product": "mcp-monitor"}', "utf-8")
     for user in ("alice", "bob"):
         (tmp_path / "Users" / user / "AppData" / "Local" / "mcp-monitor" / "notice-edge").mkdir(parents=True)
     (tmp_path / "Users" / "bob" / "AppData" / "Local" / "other").mkdir()
@@ -227,11 +234,12 @@ def test_install_plan_default(bundle, tmp_path):
     inst, data = str(tmp_path / "inst"), str(tmp_path / "data")
     plan = dry("install.ps1", "-Source", str(bundle), "-InstallDir", inst, "-DataRoot", data)
     assert [s["id"] for s in plan["steps"]] == [
-        "require_admin", "check_os", "stop_existing", "copy_bundle", "create_dirs", "acl_data", "acl_children", "acl_owner",
-        "audit_backup", "audit_policy_success", "audit_policy_failure", "registry_cmdline", "registry_scriptblock",
+        "require_admin", "check_os", "stop_existing", "copy_bundle", "secure_data_root", "audit_backup", "audit_policy_success", "audit_policy_failure", "registry_cmdline", "registry_scriptblock",
         "security_log_size", "powershell_log_size", "service_install", "service_description", "service_failure",
         "service_failureflag", "install_state", "service_start", "wait_ready"]
-    assert step(plan, "acl_data")["args"] == [data, "/inheritance:r", "/grant:r", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F"]
+    # C1: the ACL is built from scratch and verified inside the step (icacls /grant:r kept other ACEs)
+    assert (step(plan, "secure_data_root")["cmd"], step(plan, "secure_data_root")["args"]) == ("(secure-data-root)", [data])
+    assert not [s for s in plan["steps"] if s["cmd"] == "icacls"]
     subs = [a for a in step(plan, "audit_policy_success")["args"] if a.startswith("/subcategory:")][0]
     assert len(GUID.findall(subs)) == 5
     svc = step(plan, "service_install")["args"]
@@ -254,9 +262,6 @@ def test_install_plan_details(bundle, tmp_path):
     # Full destination paths: a bare "/XD data" would also skip any nested "data" folder in the bundle.
     xd = copy["args"].index("/XD")
     assert copy["args"][xd + 1:xd + 4] == [f"{inst}\\logs", f"{inst}\\data", f"{inst}\\scripts"]
-    assert step(plan, "create_dirs")["args"] == [f"{data}\\logs", f"{data}\\data", f"{data}\\scripts"]
-    assert step(plan, "acl_children")["args"] == [f"{data}\\*", "/reset", "/T", "/C", "/Q"]
-    assert step(plan, "acl_owner")["args"] == [data, "/setowner", "*S-1-5-32-544", "/T", "/C", "/Q"]
     backup = step(plan, "audit_backup")
     assert backup["args"] == ["/backup", f"/file:{data}\\data\\auditpol-backup.csv"] and backup["when"] == "no_backup_yet"
     fail = [a for a in step(plan, "audit_policy_failure")["args"] if a.startswith("/subcategory:")][0]
@@ -414,10 +419,13 @@ def test_uninstall_refuses_without_admin(tmp_path):
     assert (inst / "bundle.json").is_file() and (data / "data" / "tamper-baseline.json").is_file()
 
 
-def test_audit_policy_script_plan():
-    plan = dry("audit-policy.ps1", "-Enable")
-    assert [s["id"] for s in plan["steps"]][1:] == ["audit_backup", "audit_policy_success", "audit_policy_failure",
-                                                    "registry_cmdline", "registry_scriptblock", "security_log_size", "powershell_log_size"]
+AUDIT_STEPS = ["audit_backup", "audit_policy_success", "audit_policy_failure", "registry_cmdline", "registry_scriptblock",
+               "security_log_size", "powershell_log_size"]
+
+
+def test_audit_policy_script_plan(tmp_path):
+    plan = dry("audit-policy.ps1", "-Enable", "-DataRoot", str(tmp_path / "d"))
+    assert [s["id"] for s in plan["steps"]] == ["require_admin", "secure_data_root", "record_registry", *AUDIT_STEPS]
 
 
 def test_audit_policy_enable_matches_install(bundle, tmp_path):
@@ -425,7 +433,36 @@ def test_audit_policy_enable_matches_install(bundle, tmp_path):
     enable = dry("audit-policy.ps1", "-Enable", "-DataRoot", data)
     install = dry("install.ps1", "-Source", str(bundle), "-InstallDir", str(tmp_path / "i"), "-DataRoot", data)
     assert enable["script"] == "audit-policy" and enable["steps"][0]["id"] == "require_admin"
-    assert enable["steps"][1:] == install["steps"][8:15]
+    assert enable["steps"][3:] == [step(install, sid) for sid in AUDIT_STEPS]
+    # finding 11: before an install the data root is made here, with the install's ACL step
+    assert step(enable, "secure_data_root") == step(install, "secure_data_root")
+
+
+def test_audit_policy_enable_records_the_registry_before_it_changes(tmp_path):
+    data = tmp_path / "d"
+    plan = dry("audit-policy.ps1", "-Enable", "-DataRoot", str(data))
+    rec = step(plan, "record_registry")
+    assert rec["cmd"] == "(write-json)" and rec["when"] == "no_registry_record_yet"
+    path, record = rec["args"]
+    assert path == f"{data}\\data\\audit-policy-state.json"
+    record = json.loads(record)
+    assert set(record["registry_before"]) == {AUDIT_KEY, PS_KEY} and record["audit_backup"] == f"{data}\\data\\auditpol-backup.csv"
+    # install.ps1 (and uninstall / -Restore) take those values over when there is no install state yet
+    (data / "data").mkdir(parents=True)
+    (data / "data" / "mcp-monitor-data-root.json").write_text('{"product": "mcp-monitor"}', "utf-8")
+    (data / "data" / "audit-policy-state.json").write_text(json.dumps({"registry_before": {AUDIT_KEY: None, PS_KEY: 0}}), "utf-8")
+    assert step(dry("uninstall.ps1", "-InstallDir", str(tmp_path / "i"), "-DataRoot", str(data), "-RestoreAuditPolicy"),
+                "restore_registry")["args"] == [f"{AUDIT_KEY}=null", f"{PS_KEY}=0"]
+    assert step(dry("audit-policy.ps1", "-Restore", str(data / "data" / "audit-policy-state.json"), "-DataRoot", str(data)),
+                "restore_registry")["args"] == [f"{AUDIT_KEY}=null", f"{PS_KEY}=0"]
+
+
+def test_restore_registry_refuses_values_install_never_set(tmp_path):
+    # A state file must not choose which registry values an elevated uninstall writes (C1 follow-up).
+    out = run_actions("uninstall.ps1", tmp_path, "",
+                      "try { & $Internal['(reg-restore)'] @{ args = @('HKLM\\SOFTWARE\\Evil\\Run=1') } } catch { Write-Output \"refused: $($_.Exception.Message)\" }\n"
+                      f"try {{ & $Internal['(reg-restore)'] @{{ args = @('{AUDIT_KEY}=1 /f') }} }} catch {{ Write-Output \"refused: $($_.Exception.Message)\" }}\n")
+    assert len(out) == 2 and all(line.startswith("refused: 알 수 없는 레지스트리 값") for line in out), out
 
 
 def test_audit_policy_restore_plan(tmp_path):
@@ -446,3 +483,182 @@ def test_audit_policy_refuses_without_admin(tmp_path):
     p = real_run("audit-policy.ps1", "-Enable", "-DataRoot", str(tmp_path / "d"))
     assert p.returncode == 1 and "관리자 권한(Administrator)으로 PowerShell을 열고 다시 실행하세요." in p.stdout
     assert not (tmp_path / "d").exists()
+
+
+# -- the data root (plan review C1, I3) -----------------------------------------------------------
+
+EVERYONE = "S-1-1-0"
+ICACLS = str(Path(os.environ["SystemRoot"]) / "System32" / "icacls.exe")
+
+
+def me_sid():
+    p = ps("-Command", "[Security.Principal.WindowsIdentity]::GetCurrent().User.Value")
+    assert p.returncode == 0, p.stderr
+    return p.stdout.strip()
+
+
+def junction(link, target):
+    import _winapi
+    target.mkdir(parents=True, exist_ok=True)
+    _winapi.CreateJunction(str(target), str(link))  # no admin needed (unlike a symbolic link)
+
+
+def sddl(path):
+    p = ps("-Command", f"(Get-Acl -LiteralPath '{path}').Sddl")
+    assert p.returncode == 0, p.stderr
+    return p.stdout.strip()
+
+
+def test_install_refuses_a_data_root_someone_else_filled(bundle, tmp_path):
+    # C1: a folder made before the install (C:\ProgramData lets any user do that) is taken over only when
+    # it is empty or an earlier data root, owned by SYSTEM/Administrators/the installer, without links.
+    cases = {}
+    foreign = tmp_path / "foreign"
+    (foreign / "scripts").mkdir(parents=True); (foreign / "scripts" / "a.ps1").write_text("x", "utf-8")
+    cases["not empty, no marker"] = foreign
+    linked = tmp_path / "linked"
+    (linked / "data").mkdir(parents=True); (linked / "data" / "install-state.json").write_text("{}", "utf-8")
+    junction(linked / "scripts", tmp_path / "elsewhere")
+    cases["junction inside"] = linked
+    deep = tmp_path / "deep"
+    (deep / "data").mkdir(parents=True); (deep / "data" / "mcp-monitor-data-root.json").write_text("{}", "utf-8")
+    (deep / "logs" / "x").mkdir(parents=True)
+    junction(deep / "logs" / "x" / "y", tmp_path / "elsewhere2")
+    cases["junction deep inside"] = deep
+    root_link = tmp_path / "rootlink"
+    junction(root_link, tmp_path / "target")
+    cases["root is a junction"] = root_link
+    a_file = tmp_path / "file"; a_file.write_text("x", "utf-8")
+    cases["a file"] = a_file
+    for name, root in cases.items():
+        p = ps("-File", str(INSTALL / "install.ps1"), "-DryRun", "-Source", str(bundle), "-InstallDir", str(tmp_path / "i"),
+               "-DataRoot", str(root))
+        assert p.returncode == 2 and p.stdout.strip() == "", (name, p.stdout + p.stderr)
+        assert "-DataRoot" in p.stderr, (name, p.stderr)
+
+
+def test_install_accepts_an_empty_or_earlier_data_root(bundle, tmp_path):
+    empty = tmp_path / "empty"; empty.mkdir()
+    earlier = tmp_path / "earlier"
+    (earlier / "logs").mkdir(parents=True); (earlier / "logs" / "2026-11-01.jsonl").write_text("{}\n", "utf-8")
+    (earlier / "data").mkdir(); (earlier / "data" / "mcp-monitor-data-root.json").write_text("{}", "utf-8")
+    for root in (empty, earlier, tmp_path / "missing"):
+        plan = dry("install.ps1", "-Source", str(bundle), "-InstallDir", str(tmp_path / "i"), "-DataRoot", str(root))
+        assert step(plan, "secure_data_root")["args"] == [str(root)]
+
+
+@pytest.mark.parametrize("case", ["inside_install", "contains_install", "same_as_install", "inside_source",
+                                  "drive_root", "other_drive_root", "program_data", "users", "inside_windows"])
+def test_install_refuses_unsafe_data_root_paths(bundle, tmp_path, case):
+    # I3: robocopy /MIR would delete a data root inside the install folder; uninstall -RemoveData deletes
+    # the data root whole, so it is never a drive root or a system folder.
+    inst = tmp_path / "i"
+    root = {
+        "inside_install": str(inst / "var"), "contains_install": str(tmp_path), "same_as_install": str(inst),
+        "inside_source": str(bundle / "data"), "drive_root": os.environ["SystemDrive"] + "\\", "other_drive_root": "Q:\\",
+        "program_data": os.environ["ProgramData"], "users": str(Path(os.environ["PUBLIC"]).parent),
+        "inside_windows": str(Path(os.environ["SystemRoot"]) / "Temp" / "mcp"),
+    }[case]
+    p = ps("-File", str(INSTALL / "install.ps1"), "-DryRun", "-Source", str(bundle), "-InstallDir", str(inst), "-DataRoot", root)
+    assert p.returncode == 2 and p.stdout.strip() == "", p.stdout + p.stderr
+    assert "-DataRoot" in p.stderr
+
+
+def test_data_root_problem_names_a_foreign_owner(tmp_path):
+    root = tmp_path / "r"
+    (root / "data").mkdir(parents=True); (root / "data" / "mcp-monitor-data-root.json").write_text("{}", "utf-8")
+    me = me_sid()
+    out = run_actions("install.ps1", tmp_path, "",
+                      f"Write-Output \"[$(Get-DataRootProblem '{root}' @('S-1-5-18', 'S-1-5-32-544', '{me}'))]\"\n"
+                      f"Write-Output (Get-DataRootProblem '{root}' @('S-1-5-18', 'S-1-5-32-544'))\n"
+                      f"Write-Output \"[$(Get-DataRootProblem '{tmp_path / 'missing'}' @())]\"\n")
+    assert out[0] == "[]" and out[2] == "[]"
+    assert me in out[1] and "소유자" in out[1]
+
+
+def test_initialize_data_root_rebuilds_the_acl_from_scratch(tmp_path):
+    """C1 on a scratch folder (no admin: this account owns the folder and stands in for Administrators):
+    an earlier data root whose root and a file carry an extra Everyone:F ACE comes out with exactly the
+    given SIDs, inheritance off at the root and nothing explicit below, and the read-back check passes;
+    an ACE added afterwards is caught by that check."""
+    root = tmp_path / "MCP Monitor"
+    (root / "data").mkdir(parents=True)
+    (root / "data" / "install-state.json").write_text("{}", "utf-8")
+    log = root / "logs" / "2026-11-01.jsonl"
+    log.parent.mkdir(); log.write_text("{}\n", "utf-8")
+    subprocess.run([ICACLS, str(root), "/grant", f"*{EVERYONE}:(OI)(CI)F"], check=True, capture_output=True)
+    subprocess.run([ICACLS, str(log), "/grant", f"*{EVERYONE}:F"], check=True, capture_output=True)
+    assert ";;;WD)" in sddl(root) and ";;;WD)" in sddl(log)  # WD = Everyone
+    me = me_sid()
+    sids = f"@('S-1-5-18', 'S-1-5-32-544', '{me}')"
+    out = run_actions("install.ps1", tmp_path, "",
+                      f"Initialize-DataRoot '{root}' '{me}' {sids} {sids} 'install'\n"
+                      f"Write-Output \"problems=$(@(Get-DataRootAclProblems '{root}' '{me}' {sids}).Count)\"\n"
+                      f"& '{ICACLS}' '{log}' /grant '*{EVERYONE}:R' | Out-Null\n"
+                      f"Write-Output (@(Get-DataRootAclProblems '{root}' '{me}' {sids}) -join '|')\n")
+    assert out[0] == "problems=0", out
+    assert EVERYONE in out[1] and "2026-11-01.jsonl" in out[1], out  # the check reads the ACL back
+    subprocess.run([ICACLS, str(log), "/remove", f"*{EVERYONE}"], check=True, capture_output=True)
+    for item in [root, *root.rglob("*")]:
+        s = sddl(item)
+        assert "WD)" not in s and s.startswith(f"O:{me}"), (item, s)
+    assert "D:P" in sddl(root)  # protected: nothing inherited from the parent folder
+    assert all((root / d).is_dir() for d in ("logs", "data", "scripts"))
+    marker = json.loads((root / "data" / "mcp-monitor-data-root.json").read_text("utf-8"))
+    assert marker["product"] == "mcp-monitor" and marker["created_by"] == "install"
+
+
+def test_initialize_data_root_creates_a_new_root(tmp_path):
+    root = tmp_path / "new" / "MCP Monitor"
+    me = me_sid()
+    sids = f"@('S-1-5-18', 'S-1-5-32-544', '{me}')"
+    out = run_actions("install.ps1", tmp_path, "",
+                      f"Initialize-DataRoot '{root}' '{me}' {sids} {sids} 'audit-policy'\n"
+                      f"Write-Output (@(Get-DataRootAclProblems '{root}' '{me}' {sids}).Count)\n")
+    assert out == ["0"]
+    assert sorted(p.name for p in root.iterdir()) == ["data", "logs", "scripts"]
+    assert json.loads((root / "data" / "mcp-monitor-data-root.json").read_text("utf-8"))["created_by"] == "audit-policy"
+
+
+def test_initialize_data_root_refuses_a_foreign_folder(tmp_path):
+    root = tmp_path / "r"
+    (root / "scripts").mkdir(parents=True)
+    me = me_sid()
+    sids = f"@('S-1-5-18', 'S-1-5-32-544', '{me}')"
+    before = sddl(root)
+    out = run_actions("install.ps1", tmp_path, "",
+                      f"try {{ Initialize-DataRoot '{root}' '{me}' {sids} {sids} 'install' }} catch {{ Write-Output \"refused: $($_.Exception.Message)\" }}\n")
+    assert len(out) == 1 and out[0].startswith("refused: ") and "MCP Monitor" in out[0]
+    assert sddl(root) == before and not (root / "data").exists()  # nothing changed
+
+
+@pytest.mark.parametrize("case", ["drive_root", "program_data", "users", "inside_install"])
+def test_uninstall_refuses_to_remove_unsafe_roots(tmp_path, case):
+    inst = tmp_path / "i"
+    args = {"drive_root": ["-DataRoot", os.environ["SystemDrive"] + "\\", "-RemoveData"],
+            "program_data": ["-DataRoot", os.environ["ProgramData"], "-RemoveData"],
+            "users": ["-DataRoot", str(Path(os.environ["PUBLIC"]).parent), "-RemoveData"],
+            # without -RemoveData, removing the install folder must not take a data root inside it along
+            "inside_install": ["-DataRoot", str(inst / "var")]}[case]
+    p = ps("-File", str(INSTALL / "uninstall.ps1"), "-DryRun", "-InstallDir", str(inst), *args)
+    assert p.returncode == 2 and p.stdout.strip() == "", p.stdout + p.stderr
+
+
+def test_uninstall_removes_only_a_marked_data_root(tmp_path):
+    # I3: a bare data\ folder is not enough (D:\ with a D:\data folder would have been deleted whole)
+    bare, marked, legacy = tmp_path / "bare", tmp_path / "marked", tmp_path / "legacy"
+    for r in (bare, marked, legacy):
+        (r / "data").mkdir(parents=True)
+    (marked / "data" / "mcp-monitor-data-root.json").write_text("{}", "utf-8")
+    (legacy / "data" / "install-state.json").write_text("{}", "utf-8")  # an install from before the marker
+    drive = os.environ["SystemDrive"] + "\\"
+    body = "".join(f"$DataRoot = '{r}'; Write-Output (& $Conditions['data_root_is_ours'])\n" for r in (bare, marked, legacy, drive))
+    assert run_actions("uninstall.ps1", tmp_path, "", body) == ["False", "True", "True", "False"]
+
+
+def test_audit_policy_enable_refuses_unsafe_data_roots(tmp_path):
+    foreign = tmp_path / "foreign"
+    (foreign / "x").mkdir(parents=True)
+    for root in (os.environ["SystemDrive"] + "\\", str(foreign)):
+        p = ps("-File", str(INSTALL / "audit-policy.ps1"), "-DryRun", "-Enable", "-DataRoot", root)
+        assert p.returncode == 2 and p.stdout.strip() == "", p.stdout + p.stderr

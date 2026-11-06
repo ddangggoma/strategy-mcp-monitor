@@ -3,11 +3,13 @@
   MCP Monitor 감사 정책만 켜거나 되돌립니다(Plan 5 Task 14; Plan 4 실기기 점검표 준비 단계).
 
 .DESCRIPTION
-  -Enable: install.ps1의 감사 단계(9-15)와 같습니다. 처음 한 번 현재 감사 정책을 백업하고(auditpol
-  /backup), 프로세스 만들기·로그온·로그오프·기타 로그온/로그오프·감사 정책 변경을 하위 범주 GUID로 켜고
-  (한국어 Windows에서도 같음, W30), 명령줄 기록·스크립트 블록 기록 레지스트리 값과 로그 크기를 정합니다.
-  -Restore <백업 파일>: auditpol /restore로 백업을 되돌리고, install-state.json이 있으면 레지스트리 값도
-  설치 전 값으로 되돌립니다.
+  -Enable: install.ps1의 감사 단계와 같습니다. 데이터 루트가 없으면 install.ps1과 같은 검사·ACL로 먼저
+  만들고(secure_data_root), 바꾸기 전 레지스트리 값을 data\audit-policy-state.json에 처음 한 번 기록한 뒤,
+  처음 한 번 현재 감사 정책을 백업하고(auditpol /backup), 프로세스 만들기·로그온·로그오프·기타
+  로그온/로그오프·감사 정책 변경을 하위 범주 GUID로 켜고(한국어 Windows에서도 같음, W30), 명령줄 기록·
+  스크립트 블록 기록 레지스트리 값과 로그 크기를 정합니다.
+  -Restore <백업 파일>: auditpol /restore로 백업을 되돌리고, install-state.json(없으면
+  audit-policy-state.json)이 있으면 레지스트리 값도 바꾸기 전 값으로 되돌립니다.
 
   install.ps1과 같은 구조입니다: 계획을 만들고, -DryRun이면 JSON으로 출력하고 끝(관리자 불필요, 아무것도
   바꾸지 않음), 아니면 실행합니다. 첫 단계는 관리자 확인입니다(W29).
@@ -46,9 +48,15 @@ function Stop-WithArgumentError([string]$Message) {
 }
 
 function Get-FullPath([string]$Path) {
-    $full = [System.IO.Path]::GetFullPath($ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path))
+    # A drive that does not exist (Q:) has no PowerShell provider path: .NET still makes it absolute.
+    try { $Path = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path) } catch { }
+    $full = [System.IO.Path]::GetFullPath($Path)
     if ($full.Length -gt 3) { $full = $full.TrimEnd('\') }
     return $full
+}
+
+function Test-Inside([string]$Child, [string]$Parent) {
+    return $Child.StartsWith($Parent.TrimEnd('\') + '\', [System.StringComparison]::OrdinalIgnoreCase)
 }
 
 function Get-Prop($Object, [string]$Name) {
@@ -66,6 +74,156 @@ function Read-JsonFile([string]$Path) {
 function Test-Admin {
     $principal = New-Object Security.Principal.WindowsPrincipal ([Security.Principal.WindowsIdentity]::GetCurrent())
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Get-RegistryValue([string]$Key, [string]$Name) {
+    $item = Get-ItemProperty -LiteralPath "Registry::$Key" -Name $Name -ErrorAction SilentlyContinue
+    if ($null -eq $item) { return $null }
+    return $item.$Name
+}
+
+# --- data root helpers (the same in install.ps1 and audit-policy.ps1; the first two also in uninstall.ps1) ---
+# uninstall -RemoveData deletes the data root whole: never a drive root, a system folder or a folder above one.
+function Get-UnsafeRootReason([string]$Root) {
+    $full = Get-FullPath $Root
+    if ($full.TrimEnd('\') -eq ([System.IO.Path]::GetPathRoot($full)).TrimEnd('\')) { return "$full 은(는) 드라이브 루트입니다" }
+    $system = @($env:SystemRoot, $env:ProgramData, $env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramW6432,
+        (Split-Path -Parent $env:PUBLIC), $env:PUBLIC, $env:USERPROFILE, $env:LOCALAPPDATA, $env:APPDATA) | Where-Object { $_ }
+    foreach ($s in $system) {
+        $s = Get-FullPath $s
+        if ($full -eq $s -or (Test-Inside $s $full)) { return "$full 은(는) 시스템 폴더($s)이거나 그 위 폴더입니다" }
+    }
+    if (Test-Inside $full (Get-FullPath $env:SystemRoot)) { return "$full 은(는) Windows 폴더 안입니다" }
+    return $null
+}
+
+# A data root this product made: install.ps1 / audit-policy.ps1 write the marker (an install before the
+# marker existed has install-state.json).
+function Test-DataRootMarker([string]$Root) {
+    return (Test-Path -LiteralPath (Join-Path $Root "data\mcp-monitor-data-root.json") -PathType Leaf) -or
+        (Test-Path -LiteralPath (Join-Path $Root "data\install-state.json") -PathType Leaf)
+}
+
+# Every file and folder below $Root, never entering a junction or symbolic link.
+function Get-TreeItems([string]$Root) {
+    $out = New-Object System.Collections.Generic.List[System.IO.FileSystemInfo]
+    $stack = New-Object System.Collections.Generic.Stack[System.IO.DirectoryInfo]
+    $stack.Push((New-Object System.IO.DirectoryInfo $Root))
+    while ($stack.Count -gt 0) {
+        foreach ($item in $stack.Pop().EnumerateFileSystemInfos()) {
+            $out.Add($item)
+            if ($item -is [System.IO.DirectoryInfo] -and -not ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { $stack.Push($item) }
+        }
+    }
+    return $out.ToArray()
+}
+
+# Why an existing folder must not become the data root ($null: safe). Only an empty folder or an earlier
+# data root (marker) is taken over, and only when SYSTEM, Administrators or the account running this script
+# ($Owners) own every item and nothing is a junction or symbolic link: a user who created the folder before
+# the install would otherwise keep write access to what the service runs as SYSTEM (finding C1).
+function Get-DataRootProblem([string]$Root, [string[]]$Owners) {
+    if (-not (Test-Path -LiteralPath $Root)) { return $null }
+    $info = New-Object System.IO.DirectoryInfo $Root
+    if (-not $info.Exists) { return "$Root 은(는) 폴더가 아닙니다" }
+    if ($info.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return "$Root 은(는) 정션 또는 심볼릭 링크입니다" }
+    try {
+        $items = @(Get-TreeItems $Root)
+        foreach ($item in @($info) + $items) {
+            if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return "$($item.FullName) 은(는) 정션 또는 심볼릭 링크입니다" }
+            $owner = $item.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Owner).GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+            if ($Owners -notcontains $owner) { return "$($item.FullName) 의 소유자($owner)가 SYSTEM·Administrators가 아닙니다" }
+        }
+    } catch {
+        return "$Root 을(를) 확인하지 못했습니다: $($_.Exception.Message)"
+    }
+    if ($items.Count -gt 0 -and -not (Test-DataRootMarker $Root)) { return "$Root 이(가) 비어 있지 않고 MCP Monitor 데이터 폴더도 아닙니다" }
+    return $null
+}
+
+# One item below the data root: no ACEs of its own (only those inherited from the root), owner $Owner.
+function Reset-ItemAcl([System.IO.FileSystemInfo]$Item, [string]$Owner) {
+    if ($Item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { throw "$($Item.FullName) 은(는) 정션 또는 심볼릭 링크입니다" }
+    $acl = $Item.GetAccessControl()
+    foreach ($rule in @($acl.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]))) { [void]$acl.RemoveAccessRuleSpecific($rule) }
+    $acl.SetAccessRuleProtection($false, $false)
+    $acl.SetOwner((New-Object System.Security.Principal.SecurityIdentifier $Owner))
+    $Item.SetAccessControl($acl)
+}
+
+# The data root's own ACL built from scratch (not edited: icacls /grant:r keeps every other explicit ACE):
+# owner $Owner, inheritance off, full control for $Sids only, inherited by everything below.
+function Set-RootAcl([string]$Root, [string]$Owner, [string[]]$Sids) {
+    $sec = New-Object System.Security.AccessControl.DirectorySecurity
+    $sec.SetOwner((New-Object System.Security.Principal.SecurityIdentifier $Owner))
+    $sec.SetAccessRuleProtection($true, $false)
+    foreach ($sid in $Sids) {
+        $sec.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule(
+            (New-Object System.Security.Principal.SecurityIdentifier $sid), "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")))
+    }
+    (New-Object System.IO.DirectoryInfo $Root).SetAccessControl($sec)
+}
+
+# What differs from the ACL Initialize-DataRoot sets (empty: exactly that), read back from the disk.
+function Get-DataRootAclProblems([string]$Root, [string]$Owner, [string[]]$Sids) {
+    $problems = New-Object System.Collections.Generic.List[string]
+    $sidType = [System.Security.Principal.SecurityIdentifier]
+    $full = [System.Security.AccessControl.FileSystemRights]::FullControl
+    $rootInfo = New-Object System.IO.DirectoryInfo $Root
+    foreach ($item in @($rootInfo) + @(Get-TreeItems $Root)) {
+        $name = $item.FullName
+        if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { $problems.Add("$($name): 정션 또는 심볼릭 링크"); continue }
+        $acl = $item.GetAccessControl()
+        $isRoot = $name.TrimEnd('\') -eq $rootInfo.FullName.TrimEnd('\')
+        $o = $acl.GetOwner($sidType).Value
+        if ($o -ne $Owner) { $problems.Add("$($name): 소유자 $o") }
+        $explicit = @($acl.GetAccessRules($true, $false, $sidType))
+        if ($isRoot) {
+            if (-not $acl.AreAccessRulesProtected) { $problems.Add("$($name): 상위 폴더의 권한을 상속함") }
+            foreach ($sid in $Sids) {
+                $ok = @($explicit | Where-Object { $_.IdentityReference.Value -eq $sid -and $_.AccessControlType -eq "Allow" -and
+                    ($_.FileSystemRights -band $full) -eq $full -and $_.InheritanceFlags -eq "ContainerInherit, ObjectInherit" })
+                if ($ok.Count -eq 0) { $problems.Add("$($name): $sid 의 모든 권한 없음") }
+            }
+        } elseif ($explicit.Count -gt 0) {
+            $problems.Add("$($name): 자체 ACE $($explicit.Count)개")
+        }
+        foreach ($rule in @($acl.GetAccessRules($true, $true, $sidType))) {
+            if ($rule.AccessControlType -ne "Allow" -or $Sids -notcontains $rule.IdentityReference.Value) {
+                $problems.Add("$($name): $($rule.IdentityReference.Value) $($rule.AccessControlType) $($rule.FileSystemRights)")
+            }
+        }
+    }
+    return $problems.ToArray()
+}
+
+# Creates or takes over the data root (finding C1): the checks of Get-DataRootProblem, the root's ACL from
+# scratch, the same checks again once nobody else can write, every item below reset, logs\ data\ scripts\
+# and the marker, then the ACL read back: any difference fails the step.
+function Initialize-DataRoot([string]$Root, [string]$Owner, [string[]]$Sids, [string[]]$Owners, [string]$CreatedBy) {
+    $problem = Get-DataRootProblem $Root $Owners
+    if ($problem) { throw $problem }
+    if (-not (Test-Path -LiteralPath $Root)) {
+        $parent = Split-Path -Parent $Root
+        if ($parent) { [void][System.IO.Directory]::CreateDirectory($parent) }
+        [void][System.IO.Directory]::CreateDirectory($Root)
+    }
+    Set-RootAcl $Root $Owner $Sids
+    $problem = Get-DataRootProblem $Root $Owners
+    if ($problem) { throw $problem }
+    foreach ($item in @(Get-TreeItems $Root)) { Reset-ItemAcl $item $Owner }
+    foreach ($d in "logs", "data", "scripts") {
+        $dir = New-Object System.IO.DirectoryInfo (Join-Path $Root $d)
+        if (-not $dir.Exists) { $dir.Create(); $dir.Refresh(); Reset-ItemAcl $dir $Owner }
+    }
+    $marker = Join-Path $Root "data\mcp-monitor-data-root.json"
+    if (-not (Test-Path -LiteralPath $marker)) {
+        $text = [ordered]@{ product = "mcp-monitor"; created_by = $CreatedBy; created_at = (Get-Date).ToString("yyyy-MM-ddTHH:mm:sszzz") } | ConvertTo-Json
+        [System.IO.File]::WriteAllText($marker, $text, (New-Object System.Text.UTF8Encoding $false))
+        Reset-ItemAcl (New-Object System.IO.FileInfo $marker) $Owner
+    }
+    $problems = @(Get-DataRootAclProblems $Root $Owner $Sids)
+    if ($problems.Count -gt 0) { throw "데이터 폴더 권한 확인 실패: $($problems -join '; ')" }
 }
 
 $Steps = New-Object System.Collections.Generic.List[object]
@@ -104,12 +262,16 @@ function Invoke-Native([string]$Cmd, [string[]]$Arguments) {
 }
 
 # "<key>\<value name>=<previous DWORD or null>" (install-state.json registry_before): put back or delete.
+# Only the two values install.ps1 sets, and only DWORDs: the state file must not choose what is written.
 function Restore-RegistryValues([string[]]$Entries) {
     if ($Entries.Count -eq 0) { Write-Host "  되돌릴 레지스트리 값이 없습니다(install-state.json 없음)." }
+    $known = @("HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Audit\ProcessCreationIncludeCmdLine_Enabled",
+        "HKLM\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging\EnableScriptBlockLogging")
     foreach ($entry in $Entries) {
         $at = $entry.LastIndexOf("=")
         $full = $entry.Substring(0, $at)
         $value = $entry.Substring($at + 1)
+        if ($known -notcontains $full -or ($value -ne "null" -and $value -notmatch '^\d{1,10}$')) { throw "알 수 없는 레지스트리 값 $entry" }
         $key = Split-Path -Parent $full
         $name = Split-Path -Leaf $full
         if ($value -eq "null") { $code = Invoke-Native "reg" @("delete", $key, "/v", $name, "/f"); $ok = @(0, 1) }
@@ -121,10 +283,15 @@ function Restore-RegistryValues([string[]]$Entries) {
 $Internal = @{
     "(admin)"       = { param($s) if (-not (Test-Admin)) { Write-Host $AdminMessage; exit 1 }; 0 }
     "(reg-restore)" = { param($s) Restore-RegistryValues @($s.args); 0 }
+    # Before an install the data root may not exist yet: made here with the same ACL as install.ps1.
+    "(secure-data-root)" = { param($s) Initialize-DataRoot $s.args[0] "S-1-5-32-544" @("S-1-5-18", "S-1-5-32-544") $DataRootOwners "audit-policy"; 0 }
+    "(write-json)"  = { param($s) [System.IO.File]::WriteAllText($s.args[0], $s.args[1], (New-Object System.Text.UTF8Encoding $false)); 0 }
 }
 
 $Conditions = @{
     no_backup_yet = { -not (Test-Path -LiteralPath $BackupPath) }
+    # install-state.json (or an earlier -Enable) already holds the values from before our first change.
+    no_registry_record_yet = { -not (Test-Path -LiteralPath $AuditStatePath) -and -not (Test-Path -LiteralPath $InstallStatePath) }
 }
 
 function Invoke-Plan {
@@ -151,16 +318,37 @@ function Invoke-Plan {
 if ($Enable -eq [bool]$Restore) { Stop-WithArgumentError "-Enable 또는 -Restore <백업 파일> 중 하나만 주세요." }
 $DataRoot = Get-FullPath $DataRoot
 $BackupPath = "$DataRoot\data\auditpol-backup.csv"
+$InstallStatePath = "$DataRoot\data\install-state.json"
+$AuditStatePath = "$DataRoot\data\audit-policy-state.json"
 if ($Restore) {
     $Restore = Get-FullPath $Restore
     if (-not (Test-Path -LiteralPath $Restore -PathType Leaf)) { Stop-WithArgumentError "백업 파일 $Restore 이(가) 없습니다." }
 }
+if ($Enable) {
+    # -Enable writes into the data root (the backup, the registry record): the same checks as install.ps1 (C1, I3).
+    $unsafe = Get-UnsafeRootReason $DataRoot
+    if ($unsafe) { Stop-WithArgumentError "-DataRoot: $unsafe" }
+    $DataRootOwners = @("S-1-5-18", "S-1-5-32-544", [Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
+    $problem = Get-DataRootProblem $DataRoot $DataRootOwners
+    if ($problem) { Stop-WithArgumentError "-DataRoot: $problem" }
+}
 $Bundle = Read-JsonFile (Join-Path (Split-Path -Parent $PSScriptRoot) "bundle.json")
+$RegistryBefore = Get-Prop (Read-JsonFile $InstallStatePath) "registry_before"
+if ($null -eq $RegistryBefore) { $RegistryBefore = Get-Prop (Read-JsonFile $AuditStatePath) "registry_before" }
 
 # --- plan ---------------------------------------------------------------------------------------
 Add-Step "require_admin" "(admin)"
 if ($Enable) {
-    # The same steps (and arguments) as install.ps1 steps 9-15.
+    Add-Step "secure_data_root" "(secure-data-root)" @($DataRoot)
+    # The registry values before our first change (uninstall / -Restore put them back), recorded before
+    # anything changes; install.ps1 takes them over.
+    $current = [ordered]@{}
+    foreach ($key in @("$AuditKey\ProcessCreationIncludeCmdLine_Enabled", "$PsLogKey\EnableScriptBlockLogging")) {
+        $current[$key] = Get-RegistryValue (Split-Path -Parent $key) (Split-Path -Leaf $key)
+    }
+    $record = [ordered]@{ registry_before = $current; audit_backup = $BackupPath; recorded_at = (Get-Date).ToString("yyyy-MM-ddTHH:mm:sszzz") }
+    Add-Step "record_registry" "(write-json)" @($AuditStatePath, ($record | ConvertTo-Json -Depth 4 -Compress)) -When "no_registry_record_yet"
+    # The same steps (and arguments) as install.ps1's audit steps.
     Add-Step "audit_backup" "auditpol" @("/backup", "/file:$BackupPath") -When "no_backup_yet"
     Add-Step "audit_policy_success" "auditpol" @("/set", "/subcategory:$SuccessGuids", "/success:enable")
     Add-Step "audit_policy_failure" "auditpol" @("/set", "/subcategory:$FailureGuids", "/failure:enable")
@@ -170,9 +358,8 @@ if ($Enable) {
     Add-Step "powershell_log_size" "wevtutil" @("sl", "Microsoft-Windows-PowerShell/Operational", "/ms:67108864")
 } else {
     $RegistryEntries = @()
-    $before = Get-Prop (Read-JsonFile "$DataRoot\data\install-state.json") "registry_before"
-    if ($null -ne $before) {
-        $RegistryEntries = @($before.PSObject.Properties | ForEach-Object { "$($_.Name)=$(if ($null -eq $_.Value) { 'null' } else { $_.Value })" })
+    if ($null -ne $RegistryBefore) {
+        $RegistryEntries = @($RegistryBefore.PSObject.Properties | ForEach-Object { "$($_.Name)=$(if ($null -eq $_.Value) { 'null' } else { $_.Value })" })
     }
     Add-Step "restore_audit_policy" "auditpol" @("/restore", "/file:$Restore")
     Add-Step "restore_registry" "(reg-restore)" $RegistryEntries

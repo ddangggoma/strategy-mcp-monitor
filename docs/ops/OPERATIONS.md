@@ -60,21 +60,21 @@
 |---|---|---|
 | `-Source` | 스크립트가 든 묶음 폴더 | `bundle.json`이 있는 묶음 폴더 |
 | `-InstallDir` | `%ProgramFiles%\MCP Monitor` | 설치 폴더. Program Files 밖이면 경고합니다. SYSTEM이 실행하는 파일을 사용자가 고칠 수 없어야 합니다. 비어 있거나 이전 설치 폴더여야 합니다 |
-| `-DataRoot` | `%ProgramData%\MCP Monitor` | 데이터 루트(로그, DB, 스크립트) |
+| `-DataRoot` | `%ProgramData%\MCP Monitor` | 데이터 루트(로그, DB, 스크립트). 없는 폴더, 빈 폴더, 이전 데이터 루트(`data\mcp-monitor-data-root.json` 또는 `install-state.json`)만 받습니다. 드라이브 루트·시스템 폴더, 설치 폴더·묶음과 겹치는 폴더, 정션·심볼릭 링크가 든 폴더, SYSTEM·Administrators·설치하는 계정이 아닌 사용자가 소유한 파일이 든 폴더는 거부합니다(종료 코드 2) |
 | `-OpenFirewall` | 꺼짐 | 8701 인바운드 방화벽 규칙 `MCP Monitor (8701)`을 만듭니다. 도메인·개인 프로필만이고, 공용 프로필은 열지 않습니다. **기본은 꺼짐**입니다(§2 #6) |
 | `-SkipAuditPolicy` | 꺼짐 | 감사 정책, 레지스트리, 이벤트 로그 크기 단계를 건너뜁니다. 이 경우 세션·명령 수집이 줄어듭니다 |
 | `-LocalPort` | `8700` | Local 채널 포트 |
 | `-ExternalPort` | `8701` | External 채널 포트. `-LocalPort`와 달라야 합니다 |
 | `-DryRun` | 꺼짐 | 실행할 단계를 JSON으로 출력만 합니다 |
 
-**설치 단계**(`-DryRun` 출력의 `id`. 기본 22단계, `-OpenFirewall`이면 23단계)
+**설치 단계**(`-DryRun` 출력의 `id`. 기본 19단계, `-OpenFirewall`이면 20단계)
 
 | 단계 | id |
 |---|---|
 | 확인 | `require_admin`, `check_os` |
 | 기존 서비스 정지 | `stop_existing` |
 | 묶음 복사(`robocopy /MIR`) | `copy_bundle` |
-| 데이터 폴더와 ACL. SID로 지정하므로 한국어 Windows에서도 같습니다 | `create_dirs`, `acl_data`, `acl_children`, `acl_owner` |
+| 데이터 폴더와 ACL. 루트의 ACL을 처음부터 새로 만들고(소유자 Administrators, 상속 끊음, SYSTEM·Administrators 모든 권한만), 그 아래는 모두 자기 ACE를 지우고 루트에서 상속만 받게 한 뒤, 다시 읽어 다른 ACE·소유자·정션이 하나라도 있으면 설치를 멈춥니다. SID로 지정하므로 한국어 Windows에서도 같습니다 | `secure_data_root` |
 | 감사 정책. 처음 한 번 백업한 뒤 하위 범주 GUID로 켭니다 | `audit_backup`, `audit_policy_success`, `audit_policy_failure` |
 | 레지스트리 | `registry_cmdline`, `registry_scriptblock` |
 | 이벤트 로그 크기. Security 256 MB, PowerShell/Operational 64 MB | `security_log_size`, `powershell_log_size` |
@@ -84,8 +84,8 @@
 | 시작과 준비 확인 | `service_start`, `wait_ready`(30초 동안 `/api/channel`) |
 
 - 감사 정책만 따로 켜거나 되돌릴 때는 `install\audit-policy.ps1 -Enable` / `-Restore <백업 csv>`를 씁니다(`-DryRun` 가능).
-  - `-Enable`만 단독으로 쓰면 바꾸기 전 레지스트리 값을 기록하지 않습니다.
-  - 그래서 `-Restore`는 `install-state.json`이 있을 때만 레지스트리를 되돌립니다.
+  - 설치 전에 `-Enable`을 쓰면 데이터 루트를 설치와 같은 ACL로 먼저 만들고(`secure_data_root`), 바꾸기 전 레지스트리 값을 `<D>\data\audit-policy-state.json`에 처음 한 번 기록합니다(`record_registry`).
+  - 나중의 설치는 그 값을 `install-state.json`의 `registry_before`로 이어받습니다. `-Restore`와 제거(`-RestoreAuditPolicy`)는 `install-state.json`, 없으면 `audit-policy-state.json`의 값으로 되돌립니다. 되돌리는 값은 설치가 바꾸는 두 레지스트리 값(DWORD)뿐입니다.
 
 **첫 Admin 만들기**
 
@@ -135,7 +135,7 @@
 | 매개변수 | 기본값 | 설명 |
 |---|---|---|
 | `-InstallDir` | `install-state.json`의 값, 없으면 `%ProgramFiles%\MCP Monitor` | 지울 설치 폴더. `bundle.json`이 있을 때만 지웁니다 |
-| `-DataRoot` | `%ProgramData%\MCP Monitor` | 데이터 루트 |
+| `-DataRoot` | `%ProgramData%\MCP Monitor` | 데이터 루트. `-RemoveData`는 우리 표시(`data\mcp-monitor-data-root.json` 또는 `install-state.json`)가 있을 때만 지우고, 드라이브 루트·시스템 폴더는 거부합니다(종료 코드 2). 데이터 루트가 설치 폴더 안이면 `-RemoveData` 없이는 거부합니다 |
 | `-RemoveData` | 꺼짐 | 데이터 루트 전체(로그, `config.db`, 스크립트, `collector-state.json`, `tamper-baseline.json`)와 사용자마다의 Edge 고지 프로필(`%LOCALAPPDATA%\mcp-monitor`)을 지웁니다. **되살릴 수 없습니다** |
 | `-RestoreAuditPolicy` | 꺼짐 | 첫 설치 때의 `auditpol` 백업과 레지스트리 값으로 되돌립니다 |
 | `-DryRun` | 꺼짐 | 단계만 출력합니다 |
