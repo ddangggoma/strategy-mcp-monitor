@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from datetime import timedelta
 from typing import Annotated, Any, Literal
 
@@ -104,7 +104,19 @@ async def board(
     _user: User | None = Depends(require(Action.VIEW_BOARD)),
     services: Services = Depends(get_services),
 ) -> dict[str, Any]:
-    return services.monitor.board_snapshot()
+    return board_snapshot(services)
+
+
+def board_snapshot(services: Services) -> dict[str, Any]:
+    """The board (GET /api/board, the first SSE event): MCPs, plus ``sessions`` once collected.
+
+    ``sessions`` is absent before the first WTS snapshot and when session collection is off (V7).
+    """
+    snapshot = services.monitor.board_snapshot()
+    sessions = services.rdp.board_sessions()
+    if sessions is not None:
+        snapshot["sessions"] = sessions
+    return snapshot
 
 
 def _sse(name: str, data: Any) -> str:
@@ -116,14 +128,18 @@ async def board_stream(
     bus: BoardBus,
     sub: Subscription,
     *,
+    snapshot: Callable[[], dict[str, Any]] | None = None,
     coalesce_sec: float = COALESCE_SEC,
     heartbeat_sec: float = HEARTBEAT_SEC,
 ) -> AsyncGenerator[str]:
-    """SSE text for one subscriber: the whole board first, then changes coalesced per ``coalesce_sec``."""
+    """SSE text for one subscriber: the whole board first, then changes coalesced per ``coalesce_sec``.
+
+    ``snapshot`` builds the first ``board`` event (default: ``monitor.board_snapshot``).
+    """
     loop = asyncio.get_running_loop()
     try:
         sub.dirty.clear()  # the snapshot below covers anything marked so far
-        yield _sse("board", monitor.board_snapshot())
+        yield _sse("board", snapshot() if snapshot is not None else monitor.board_snapshot())
         last_sent = last_output = loop.time()
         while True:
             if not sub.dirty and not sub.events:
@@ -166,7 +182,8 @@ async def open_stream(services: Services, *, authed: bool, ip: str | None) -> As
     try:
         async with contextlib.aclosing(
             board_stream(
-                services.monitor, bus, sub, coalesce_sec=COALESCE_SEC, heartbeat_sec=HEARTBEAT_SEC
+                services.monitor, bus, sub, snapshot=lambda: board_snapshot(services),
+                coalesce_sec=COALESCE_SEC, heartbeat_sec=HEARTBEAT_SEC,
             )
         ) as inner:
             async for chunk in inner:

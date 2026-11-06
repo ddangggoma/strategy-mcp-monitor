@@ -9,6 +9,7 @@ from app.auth.otp import DummyOtpProvider, OtpProvider, OtpService
 from app.auth.sessions import SessionStore
 from app.clock import Clock, SystemClock
 from app.collect.config import CollectorConfig
+from app.collect.manager import Collectors, SessionsComponent
 from app.db import Database
 from app.logstore.writer import DailyJsonlWriter, LogWriter
 from app.monitor.bus import BoardBus
@@ -21,6 +22,7 @@ from app.monitor.supervisor import Monitor, ProberLike, ScriptRunnerLike
 from app.notice.store import NoticeStore
 from app.paths import AppPaths
 from app.sessions.history import SessionHistory
+from app.sessions.rdns import ReverseDns
 from app.sessions.tracker import SessionTracker
 from app.settings.store import SettingsStore
 from app.users.store import UserStore
@@ -51,6 +53,8 @@ class Services:
     rdp_history: SessionHistory
     rdp: SessionTracker
     """The RDP session tracker (``sessions`` is the login ``SessionStore``; ruling F01)."""
+    collectors: Collectors
+    """Windows collectors; ``serve()`` starts them after the monitor and stops them before it."""
 
 
 def _load_or_create_otp_secret(db: Database) -> bytes:
@@ -110,6 +114,12 @@ def build_services(
     rdp = SessionTracker(
         rdp_history, clock, log, bus, collect_console=config_collectors.collect_console
     )
+    manager = Collectors(log, clock)
+    if config_collectors.wts is not None:
+        manager.add(SessionsComponent(
+            config_collectors.wts, rdp, manager, ReverseDns(clock=clock), clock,
+            interval_sec=config_collectors.poll_interval_sec,
+        ))
     return Services(
         paths=paths,
         db=db,
@@ -130,4 +140,5 @@ def build_services(
         config_collectors=config_collectors,
         rdp_history=rdp_history,
         rdp=rdp,
+        collectors=manager,
     )

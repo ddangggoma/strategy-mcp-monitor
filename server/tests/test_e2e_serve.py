@@ -25,13 +25,16 @@ def _answers(port: int) -> bool:
 
 @contextlib.contextmanager
 def _running_server(tmp_path, *extra_args):
-    """Run `python -m app` on two free loopback-reachable ports; yields (local, external, output file)."""
+    """Run `python -m app` on two free loopback-reachable ports; yields (local, external, output file).
+
+    No session collection unless ``extra_args`` pass their own ``--session-source`` (the last one wins).
+    """
     lp, ep = free_port(), free_port()
     out_path = tmp_path / "server-output.txt"
     with out_path.open("wb") as out:
         p = subprocess.Popen(
             [sys.executable, "-m", "app", "--root", str(tmp_path),
-             "--local-port", str(lp), "--external-port", str(ep), *extra_args],
+             "--local-port", str(lp), "--external-port", str(ep), "--session-source", "none", *extra_args],
             cwd=SERVER_DIR, stdout=out, stderr=subprocess.STDOUT,
         )
         try:
@@ -127,15 +130,17 @@ def test_dev_code_on_lan_host_is_refused_at_startup(tmp_path):
     assert not (tmp_path / "data").exists()  # refused before any state was created
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="CTRL_BREAK_EVENT is Windows only")
-def test_graceful_shutdown_stops_monitor(tmp_path):
-    """serve() starts the monitor with the servers and stops it (then the log writer) on Ctrl+Break."""
+def _serve_until_ctrl_break(tmp_path, *extra_args, while_running=None):
+    """Run `python -m app`, call ``while_running(local_port, external_port)``, stop it with Ctrl+Break.
+
+    Returns (exit code, combined output, every log line written).
+    """
     lp, ep = free_port(), free_port()
     out_path = tmp_path / "server-output.txt"
     with out_path.open("wb") as out:
         p = subprocess.Popen(
             [sys.executable, "-m", "app", "--root", str(tmp_path),
-             "--local-port", str(lp), "--external-port", str(ep)],
+             "--local-port", str(lp), "--external-port", str(ep), *extra_args],
             cwd=SERVER_DIR, stdout=out, stderr=subprocess.STDOUT,
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
         )
@@ -144,6 +149,8 @@ def test_graceful_shutdown_stops_monitor(tmp_path):
             while not (_answers(lp) and _answers(ep)):
                 assert p.poll() is None and time.monotonic() < deadline, "server did not become ready"
                 time.sleep(0.1)
+            if while_running is not None:
+                while_running(lp, ep)
             p.send_signal(signal.CTRL_BREAK_EVENT)
             code = p.wait(30)
         finally:
@@ -151,8 +158,47 @@ def test_graceful_shutdown_stops_monitor(tmp_path):
                 p.kill()
                 p.wait(10)
     output = out_path.read_text("utf-8", errors="replace")
-    assert code == 0 and "Traceback" not in output, output
     events = [json.loads(line) for f in (tmp_path / "logs").glob("*.jsonl")
               for line in f.read_text("utf-8").splitlines()]
+    return code, output, events
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="CTRL_BREAK_EVENT is Windows only")
+def test_graceful_shutdown_stops_monitor(tmp_path):
+    """serve() starts the monitor with the servers and stops it (then the log writer) on Ctrl+Break."""
+    code, output, events = _serve_until_ctrl_break(tmp_path, "--session-source", "none")
+    assert code == 0 and "Traceback" not in output, output
     monitor = [e["event"] for e in events if e["cat"] == "system" and e.get("event", "").startswith("monitor.")]
     assert monitor == ["monitor.start", "monitor.stop"]
+    assert not [e for e in events if e.get("event") == "collector.status"]  # no session collection
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="CTRL_BREAK_EVENT is Windows only")
+def test_json_session_source_reaches_the_board_and_stops_cleanly(tmp_path):
+    """A dev JSON session source: the RDP session shows on the anonymous board; Ctrl+Break still exits 0."""
+    sessions = tmp_path / "sessions.json"
+    sessions.write_text(json.dumps({"sessions": [
+        {"session_id": 5, "user": "hong", "domain": "CORP", "client_ip": "10.0.3.21",
+         "client_name": "HONG-LAPTOP", "logon_at": "2026-11-04T13:00:00+09:00"},
+    ]}), "utf-8")
+    seen = {}
+
+    def check(lp, ep):
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            board = httpx.get(f"http://127.0.0.1:{ep}/api/board").json()
+            if board.get("sessions"):
+                seen["board"] = board
+                return
+            time.sleep(0.1)
+
+    code, output, events = _serve_until_ctrl_break(
+        tmp_path, "--session-source", f"json:{sessions}", while_running=check)
+    assert code == 0 and "Traceback" not in output, output
+    assert "WARNING: dev session source" in output
+    [s] = seen["board"]["sessions"]
+    assert (s["session_id"], s["user"], s["client_ip"], s["protocol"]) == (5, "hong", "10.0.3.21", "rdp")
+    status = [(e["source"], e["ok"]) for e in events if e.get("event") == "collector.status"]
+    assert status == [("wts", True)]
+    connects = [e for e in events if e["cat"] == "session" and e["event"] == "connect"]
+    assert [(c["kind"], c["user"]) for c in connects] == [("existing", "CORP\\hong")]

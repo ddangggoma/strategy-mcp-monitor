@@ -12,6 +12,7 @@ from typing import Any
 import uvicorn
 from fastapi import FastAPI
 
+from app.collect.config import CollectorConfig
 from app.services import build_services
 from app.web.app_factory import create_app
 
@@ -77,26 +78,31 @@ async def serve(
     external_host: str = "0.0.0.0",
     static_dir: Path | None = None,
     dev_otp_code: str | None = None,
+    collectors: CollectorConfig | None = None,
 ) -> None:
     if dev_otp_code is not None:
         print("WARNING: dev OTP code enabled", file=sys.stderr, flush=True)
     if static_dir is not None and not (static_dir / "board.html").is_file():
         print(f"WARNING: no built web app in {static_dir}; serving the API only", file=sys.stderr, flush=True)
-    services = build_services(root, dev_fixed_code=dev_otp_code)
+    services = build_services(root, dev_fixed_code=dev_otp_code, collectors=collectors)
     await services.log.start()
     try:
         await services.monitor.start()
         try:
-            configs = server_configs(
-                create_app("local", services, static_dir),
-                create_app("external", services, static_dir),
-                local_port,
-                external_port,
-                external_host,
-            )
-            servers = [_Server(cfg) for cfg in configs]
-            with _stop_on_signals(servers):
-                await asyncio.gather(*(s.serve() for s in servers))
+            await services.collectors.start()
+            try:
+                configs = server_configs(
+                    create_app("local", services, static_dir),
+                    create_app("external", services, static_dir),
+                    local_port,
+                    external_port,
+                    external_host,
+                )
+                servers = [_Server(cfg) for cfg in configs]
+                with _stop_on_signals(servers):
+                    await asyncio.gather(*(s.serve() for s in servers))
+            finally:
+                await services.collectors.stop()
         finally:
             await services.monitor.stop()
     finally:

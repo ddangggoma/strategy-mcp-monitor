@@ -4,6 +4,8 @@ import ipaddress
 import re
 from pathlib import Path
 
+from app.clock import SystemClock
+from app.collect.cli import add_collector_arguments, collector_config
 from app.main import serve
 
 DEFAULT_STATIC_DIR = Path(__file__).resolve().parents[2] / "web" / "dist"
@@ -47,6 +49,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="allow --dev-otp-code while the external channel is reachable from the network",
     )
+    add_collector_arguments(parser)
     args = parser.parse_args(argv)
     if args.dev_otp_code is not None and not args.allow_lan_dev and not _is_loopback(args.external_host):
         parser.error(
@@ -66,6 +69,7 @@ def main(argv: list[str] | None = None) -> None:
             external_host=ns.external_host,
             static_dir=ns.static_dir,
             dev_otp_code=ns.dev_otp_code,
+            collectors=collector_config(ns, clock=SystemClock(), root=ns.root),
         )
     )
 

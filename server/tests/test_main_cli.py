@@ -3,8 +3,11 @@ from pathlib import Path
 import pytest
 
 from app.__main__ import parse_args
+from app.collect.cli import collector_config
 from app.main import server_configs
+from app.sessions.jsonsource import JsonFileWtsSource
 from app.web.app_factory import create_app
+from app.win.wts import CtypesWtsSource
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -62,6 +65,39 @@ def test_loopback_hosts_need_no_lan_flag(host):
 
 def test_no_dev_code_means_any_external_host_is_fine():
     assert parse_args(["--external-host", "0.0.0.0"]).dev_otp_code is None
+
+
+def test_session_source_flags(tmp_path, clock):
+    assert isinstance(collector_config(parse_args([]), clock=clock, root=tmp_path).wts, CtypesWtsSource)
+    assert collector_config(parse_args(["--session-source", "none"]), clock=clock, root=tmp_path).wts is None
+    cfg = collector_config(parse_args(["--session-source", f"json:{tmp_path / 's.json'}", "--collect-console"]), clock=clock, root=tmp_path)
+    assert isinstance(cfg.wts, JsonFileWtsSource) and cfg.collect_console is True
+
+
+def test_session_source_rejects_unknown():
+    with pytest.raises(SystemExit) as e:
+        parse_args(["--session-source", "bogus"])
+    assert e.value.code == 2
+
+
+@pytest.mark.parametrize("bad", ["json:", "WTS", "json", "none "])
+def test_session_source_rejects_malformed(bad, capsys):
+    with pytest.raises(SystemExit) as e:
+        parse_args(["--session-source", bad])
+    assert e.value.code == 2 and "--session-source" in capsys.readouterr().err
+
+
+def test_session_source_defaults_and_dev_warning(tmp_path, clock, capsys):
+    ns = parse_args([])
+    assert ns.session_source == "wts" and ns.collect_console is False
+    cfg = collector_config(ns, clock=clock, root=tmp_path)
+    assert cfg.collect_console is False and cfg.poll_interval_sec == 0.5
+    assert "WARNING" not in capsys.readouterr().err
+    path = tmp_path / "s.json"
+    path.write_text('{"sessions": [{"session_id": 4, "user": "kim"}]}', "utf-8")
+    cfg = collector_config(parse_args(["--session-source", f"json:{path}"]), clock=clock, root=tmp_path)
+    assert "WARNING: dev session source" in capsys.readouterr().err
+    assert [s.session_id for s in cfg.wts.snapshot().sessions] == [4]
 
 
 def test_server_configs_bind_the_external_host(services):
