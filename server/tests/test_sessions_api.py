@@ -46,7 +46,7 @@ async def test_history_requires_login_and_paginates(external_client, services, c
     r1 = (await external_client.get("/api/sessions/history", params={"limit": 2})).json()
     assert len(r1["connections"]) == 2 and r1["next_before_id"] == r1["connections"][-1]["id"]
     c = r1["connections"][0]
-    assert set(c) == CONNECTION_KEYS and (c["kind"], c["end_reason"], c["notice"]) == ("logon", "logoff", None)
+    assert set(c) == CONNECTION_KEYS and (c["kind"], c["end_reason"], c["notice"]["closed_reason"]) == ("logon", "logoff", "logoff")
     assert c["connected_at"] == to_kst_iso(services.rdp_history.get(c["id"]).connected_at)
     r2 = (await external_client.get("/api/sessions/history", params={"limit": 2, "before_id": r1["next_before_id"]})).json()
     assert len(r2["connections"]) == 1 and r2["next_before_id"] is None and r2["failures"] == []

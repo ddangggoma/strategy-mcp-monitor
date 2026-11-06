@@ -67,7 +67,7 @@ async def test_board_sessions_shape(services, clock):
     assert {k: v for k, v in s.items() if k != "connection_id"} == {
         "session_id": 2, "user": "hong", "domain": "CORP", "client_name": "HONG-LAPTOP", "client_ip": "10.0.3.21",
         "reverse_dns": None, "logon_at": to_kst_iso(T0), "connected_at": to_kst_iso(T0), "state": "active",
-        "idle_sec": 125, "resolution": "1920x1080@32", "notice_acknowledged": None, "client_build": 26100,
+        "idle_sec": 125, "resolution": "1920x1080@32", "notice_acknowledged": False, "client_build": 26100,
         "protocol": "rdp", "first_seen_ip": True, "first_seen_device": True}
 
 async def test_publishes_sessions_only_on_visible_change(services, clock):
@@ -187,11 +187,11 @@ async def test_notice_state_and_reverse_dns_update_board_and_publish(services, c
     assert list(sub.events) == []
     [o] = t.apply(snap(clock.now(), ws(2))); sub.events.clear()
     cid = o.connection.id
-    t.set_notice_state(cid, False)
+    t.set_notice_state(cid, True)  # opening already set False through the display listener (Task 11)
     t.set_reverse_dns(cid, "hong-laptop.corp")
     t.set_reverse_dns(cid, "hong-laptop.corp")  # no visible change, no event
     assert [(d["sessions"][0]["notice_acknowledged"], d["sessions"][0]["reverse_dns"]) for _, d in sub.events] == \
-        [(False, None), (False, "hong-laptop.corp")]
+        [(True, None), (True, "hong-laptop.corp")]
     assert services.rdp_history.get(cid).reverse_dns == "hong-laptop.corp"
     # a closed connection still gets its history row updated (DNS can arrive late)
     clock.advance(1); t.apply(snap(clock.now()))

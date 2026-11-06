@@ -17,6 +17,7 @@ from app.web import (
     mcp_local,
     mcp_shared,
     notice_api,
+    notice_display_api,
     sessions_api,
     shared_api,
     tamper_api,
@@ -165,6 +166,7 @@ def create_app(channel: Channel, services: Services, static_dir: Path | None = N
         app.include_router(local_api.router)
         app.include_router(mcp_local.router)
         app.include_router(notice_api.router)
+        app.include_router(notice_display_api.router)
     if static_dir is not None and (static_dir / HTML_PAGES["board"]).is_file():
         # After the API routers, so an API path can never be shadowed by a page. /notice is a
         # Local-channel page only.

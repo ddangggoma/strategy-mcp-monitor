@@ -2,7 +2,7 @@
 connection history with logon failures, and the collectors' health."""
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Query
 from app.auth.policy import Action
 from app.clock import to_kst_iso
 from app.collect.manager import CollectorStatus
+from app.notice.displays import Display
 from app.services import Services
 from app.sessions.history import Connection, LogonFailure
 from app.users.store import User
@@ -20,7 +21,22 @@ router = APIRouter()
 RowId = Annotated[int, Query(ge=1, le=2**63 - 1)]  # SQLite INTEGER range; larger overflows
 
 
-def connection_json(c: Connection) -> dict[str, Any]:
+def _kst(dt: datetime | None) -> str | None:
+    return to_kst_iso(dt) if dt is not None else None
+
+
+def notice_display_json(d: Display) -> dict[str, Any]:
+    return {
+        "version": d.version,
+        "attempts": d.attempts,
+        "first_shown_at": _kst(d.first_shown_at),
+        "acknowledged_at": _kst(d.acknowledged_at),
+        "ack_ms": d.ack_ms,
+        "closed_reason": d.closed_reason,
+    }
+
+
+def connection_json(c: Connection, notice: Display | None = None) -> dict[str, Any]:
     return {
         "id": c.id,
         "session_id": c.session_id,
@@ -39,7 +55,7 @@ def connection_json(c: Connection) -> dict[str, Any]:
         "end_reason": c.end_reason,
         "first_seen_ip": c.first_seen_ip,
         "first_seen_device": c.first_seen_device,
-        "notice": None,  # the latest notice display of the connection: Task 11
+        "notice": notice_display_json(notice) if notice is not None else None,  # the latest display
     }
 
 
@@ -85,8 +101,9 @@ async def sessions_history(
     history = services.rdp_history
     rows = history.connections(since, limit, before_id)
     failures = history.failures(since, limit) if before_id is None else []
+    notices = services.displays.latest_for_connections(c.id for c in rows)
     return {
-        "connections": [connection_json(c) for c in rows],
+        "connections": [connection_json(c, notices.get(c.id)) for c in rows],
         "failures": [failure_json(f) for f in failures],
         "next_before_id": rows[-1].id if len(rows) == limit else None,
     }

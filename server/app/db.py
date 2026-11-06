@@ -187,6 +187,26 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX idx_rdp_logon_failures_at ON rdp_logon_failures(at);
     """,
+    # 7
+    """
+    CREATE TABLE notice_displays (
+        id INTEGER PRIMARY KEY,
+        connection_id INTEGER NOT NULL REFERENCES rdp_connections(id) ON DELETE CASCADE,
+        session_id INTEGER NOT NULL,
+        user TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('logon','reconnect','existing')),
+        version INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        first_shown_at TEXT,
+        last_shown_at TEXT,
+        acknowledged_at TEXT,
+        ack_ms INTEGER,
+        closed_reason TEXT CHECK (closed_reason IN ('acknowledged','superseded','logoff','service_restart'))
+    );
+    CREATE INDEX idx_notice_displays_connection ON notice_displays(connection_id);
+    CREATE INDEX idx_notice_displays_open ON notice_displays(session_id) WHERE closed_reason IS NULL;
+    """,
 ]
 
 

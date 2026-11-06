@@ -210,6 +210,24 @@ async def test_sessions_component_closes_dangling_connections_on_start(services,
     assert conn.end_reason == "service_stop"
 
 
+async def test_sessions_component_closes_pending_displays_before_the_first_snapshot(services, clock):
+    old = services.displays.create(services.rdp_history.open(ws(2), "logon", clock.now()))  # a previous run's
+    comp = SessionsComponent(FakeWtsSource([snap(clock.now(), ws(2))]), services.rdp, services.collectors,
+                             ReverseDns(lambda ip: ("x", [], [ip]), clock=clock), clock, interval_sec=30,
+                             displays=services.displays)
+    services.collectors.add(comp)
+    await services.collectors.start()
+    try:
+        await eventually(lambda: services.rdp.ready)
+    finally:
+        await services.collectors.stop()
+    assert services.displays.get(old.id).closed_reason == "service_restart"
+    new = services.displays.pending_for_session(2)
+    assert new.id != old.id and new.kind == "existing"
+    notice = await audit_events(services, "notice")
+    assert [(e["display_id"], e["reason"]) for e in notice] == [(old.id, "service_restart")]
+
+
 async def test_sessions_component_nudge_reaches_the_collector(services, clock):
     src = FakeWtsSource([snap(clock.now())])
     comp = SessionsComponent(src, services.rdp, services.collectors,

@@ -17,6 +17,7 @@ from typing import Any, Protocol
 from app.clock import Clock
 from app.collect.bridge import CollectorBridge
 from app.logstore.writer import LogSink
+from app.notice.displays import NoticeDisplays
 from app.sessions.collector import SessionCollector, WtsFailure
 from app.sessions.rdns import ReverseDns
 from app.sessions.tracker import Change, Opened, SessionTracker
@@ -133,8 +134,10 @@ class SessionsComponent:
         clock: Clock,
         *,
         interval_sec: float,
+        displays: NoticeDisplays | None = None,
     ) -> None:
         self._source = source
+        self._displays = displays
         self._tracker = tracker
         self._collectors = collectors
         self._rdns = rdns
@@ -152,6 +155,8 @@ class SessionsComponent:
     def start(self, bridge: CollectorBridge) -> None:
         self._loop = asyncio.get_running_loop()
         self._tracker.start()
+        if self._displays is not None:  # after the tracker: close what a previous run left open
+            self._displays.start()
         post = bridge.register(self.name, self._handle)
         self._tracker.add_listener(self._on_change)
         self._collector = SessionCollector(

@@ -25,6 +25,7 @@ from app.monitor.runner import ScriptRunner
 from app.monitor.scripts import ScriptStore
 from app.monitor.store import McpStore
 from app.monitor.supervisor import Monitor, ProberLike, ScriptRunnerLike
+from app.notice.displays import NoticeDisplays
 from app.notice.store import NoticeStore
 from app.paths import AppPaths
 from app.sessions.eventmap import SessionEventHandler
@@ -61,6 +62,8 @@ class Services:
     rdp_history: SessionHistory
     rdp: SessionTracker
     """The RDP session tracker (``sessions`` is the login ``SessionStore``; ruling F01)."""
+    displays: NoticeDisplays
+    """Notice displays per RDP connection; its tracker listener runs before every other one."""
     collectors: Collectors
     """Windows collectors; ``serve()`` starts them after the monitor and stops them before it."""
     eventlog: EventLogComponent | None
@@ -129,12 +132,15 @@ def build_services(
     rdp = SessionTracker(
         rdp_history, clock, log, bus, collect_console=config_collectors.collect_console
     )
+    notice = NoticeStore(db, clock)
+    displays = NoticeDisplays(db, clock, log, notice, rdp, tamper)
+    rdp.add_listener(displays.on_session_change)  # first: later listeners see the new display
     manager = Collectors(log, clock)
     activity_context = ActivityContext(rdp, clock)
     if config_collectors.wts is not None:
         manager.add(SessionsComponent(
             config_collectors.wts, rdp, manager, ReverseDns(clock=clock), clock,
-            interval_sec=config_collectors.poll_interval_sec,
+            interval_sec=config_collectors.poll_interval_sec, displays=displays,
         ))
     eventlog: EventLogComponent | None = None
     if config_collectors.event_log is not None:
@@ -174,11 +180,12 @@ def build_services(
         bus=bus,
         tamper=tamper,
         monitor=monitor,
-        notice=NoticeStore(db, clock),
+        notice=notice,
         peers=peer_resolver if peer_resolver is not None else PsutilPeerResolver(),
         config_collectors=config_collectors,
         rdp_history=rdp_history,
         rdp=rdp,
+        displays=displays,
         collectors=manager,
         eventlog=eventlog,
         activity_context=activity_context,
