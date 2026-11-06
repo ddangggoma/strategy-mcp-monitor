@@ -2,7 +2,7 @@
 """Smoke tests of a built deployment bundle (``install/build.ps1``, Plan 5 Task 13).
 
 Run with ``MCPMON_BUNDLE=<bundle folder> uv run python -m pytest -m bundle -v``. The install
-scripts and ``docs/OPERATIONS.md`` are asserted by Tasks 14 and 16 (preflight F02).
+scripts are asserted here since Task 14; ``docs/OPERATIONS.md`` is asserted by Task 16 (preflight F02).
 """
 
 import json
@@ -16,6 +16,7 @@ import pytest
 
 from app import __version__
 from tests.live import free_port
+from tests.test_install_scripts import ps
 
 pytestmark = pytest.mark.bundle
 B = Path(os.environ.get("MCPMON_BUNDLE", "missing"))
@@ -42,6 +43,28 @@ def test_bundle_metadata_and_files():
     for rel in ("web/board.html", "web/admin.html"):
         assert (B / rel).is_file(), rel
     assert not (B / "web" / ".vite").exists()
+    for name in ("install.ps1", "uninstall.ps1", "audit-policy.ps1"):
+        assert (B / "install" / name).read_bytes().startswith(b"\xef\xbb\xbf"), name  # UTF-8 with BOM (PowerShell 5.1)
+
+
+def test_bundle_install_scripts_plan_from_the_bundle(tmp_path):
+    # Run from the bundle with no -Source: the bundle is the script's parent folder (DryRun only, no admin).
+    inst, data = tmp_path / "i", tmp_path / "d"
+    p = ps("-File", str(B / "install" / "install.ps1"), "-DryRun", "-InstallDir", str(inst), "-DataRoot", str(data))
+    assert p.returncode == 0, p.stdout + p.stderr
+    plan = json.loads(p.stdout)
+    assert (plan["layout"], plan["version"]) == (meta()["layout"], __version__)
+    steps = {s["id"]: s for s in plan["steps"]}
+    assert steps["copy_bundle"]["args"][:2] == [str(B.resolve()), str(inst)]
+    svc = steps["service_install"]["args"]
+    program = svc[svc.index("binPath=") + 1].split('"')[1]
+    # The service runs the bundle's own monitor program, copied to the same place under the install folder.
+    assert program.startswith(str(inst) + "\\") and (B / Path(program).relative_to(inst)).is_file()
+    assert svc[svc.index("binPath=") + 1].endswith(f'service --root "{data}" --local-port 8700 --external-port 8701')
+    for script, args in (("uninstall.ps1", ["-InstallDir", str(inst), "-DataRoot", str(data)]), ("audit-policy.ps1", ["-Enable", "-DataRoot", str(data)])):
+        p = ps("-File", str(B / "install" / script), "-DryRun", *args)
+        assert p.returncode == 0 and json.loads(p.stdout)["steps"][0]["id"] == "require_admin", p.stdout + p.stderr
+    assert json.loads(p.stdout)["version"] == __version__  # audit-policy.ps1 reads the bundle it sits in
 
 
 def test_bundle_version():
