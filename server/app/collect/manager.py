@@ -109,6 +109,14 @@ class Collectors:
             except Exception as exc:
                 self.report(component.name, False, f"stop failed: {exc!r}")
 
+    def nudge_sessions(self) -> None:
+        """Take the next RDP session snapshot now (``SERVICE_CONTROL_SESSIONCHANGE``). Callable from
+        any thread: each ``nudge()`` only sets an event; components without one are skipped."""
+        for component in self._components:
+            nudge = getattr(component, "nudge", None)
+            if nudge is not None:
+                nudge()
+
     def report(self, name: str, ok: bool, error: str | None = None) -> None:
         """Record a collector's health; ``since`` moves and a ``collector.status`` line is written
         only when ``(ok, error)`` changes."""

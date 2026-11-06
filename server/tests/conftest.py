@@ -8,7 +8,7 @@ from app.db import Database
 from app.paths import AppPaths
 from app.services import build_services
 from app.web.app_factory import create_app
-from tests.fakes import CapturingOtpProvider, FakeClock, FakeProber, FakeRunner
+from tests.fakes import CapturingOtpProvider, FakeClock, FakeProber, FakeRunner, FakeScm
 
 
 @pytest.fixture
@@ -35,7 +35,7 @@ def db(paths):
 async def services(tmp_path, clock):
     svc = build_services(
         tmp_path, clock=clock, otp_provider=CapturingOtpProvider(),
-        runner=FakeRunner(), prober=FakeProber(clock),
+        runner=FakeRunner(), prober=FakeProber(clock), service_configurator=FakeScm(),
     )
     await svc.log.start()
     await svc.log_index.start(run_loop=False)

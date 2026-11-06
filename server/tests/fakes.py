@@ -147,3 +147,28 @@ class FakeProber:
 
     async def aclose(self) -> None:
         self.closed = True
+
+
+class FakeScm:
+    """A ``ServiceConfigurator`` (Task 8): the ``mcp-monitor`` service in memory.
+
+    ``apply`` raises ``fail`` when given, otherwise records the start type and adopts it;
+    ``query_fail`` (when set) is raised by ``query``."""
+
+    def __init__(self, installed: bool = True, start: str = "delayed-auto", fail: Exception | None = None) -> None:
+        self.installed = installed
+        self.start = start
+        self.fail = fail
+        self.query_fail: Exception | None = None
+        self.applied: list[str] = []
+
+    def query(self):
+        if self.query_fail is not None:
+            raise self.query_fail
+        return self.start if self.installed else None
+
+    def apply(self, st) -> None:
+        if self.fail is not None:
+            raise self.fail
+        self.applied.append(st)
+        self.start = st

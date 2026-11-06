@@ -25,6 +25,8 @@ class ListLog:
     def emit(self, cat: str, *, at: datetime | None = None, **fields: Any) -> None:
         self.events.append((cat, at, fields))
 
+    emit_threadsafe = emit  # F09: the same tuple, from any thread (list.append is atomic)
+
 
 async def eventually(pred: Callable[[], bool], timeout: float = 5.0, step: float = 0.01) -> None:
     """Wait (yielding to the loop) until ``pred()`` is true; ``AssertionError`` after ``timeout``."""

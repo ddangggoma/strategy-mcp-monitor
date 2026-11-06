@@ -8,11 +8,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from app import __version__
 from app.clock import SystemClock
 from app.collect.cli import add_collector_arguments, collector_config
+from app.db import DatabaseTooNewError
 from app.logstore.indexer import IndexStatus, LogIndex
-from app.main import serve
+from app.main import PortInUseError, ServeControl, serve
 from app.paths import AppPaths
+from app.rootlock import RootInUseError, RootLock
 
 DEFAULT_STATIC_DIR = Path(__file__).resolve().parents[2] / "web" / "dist"
 
@@ -35,6 +38,7 @@ def _is_loopback(host: str) -> bool:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="python -m app", description="MCP monitor server")
+    parser.add_argument("--version", action="version", version=f"mcp-monitor {__version__}")
     parser.add_argument("--root", type=Path, default=Path.cwd(), help="data root (default: cwd)")
     parser.add_argument("--local-port", type=int, default=8700)
     parser.add_argument("--external-port", type=int, default=8701)
@@ -65,6 +69,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return args
 
 
+# Exit codes (W23): 0 ok, 1 unexpected error, 2 arguments (argparse), and these three.
+EXIT_PORT_IN_USE = 3
+EXIT_ROOT_IN_USE = 4
+EXIT_DATABASE_TOO_NEW = 5
+
+
+def _error(message: str) -> None:
+    print(f"ERROR: {message}", file=sys.stderr, flush=True)
+
+
 class _StderrLog:
     """The reindex command's log sink: ``logindex.*`` lines go to stderr (no LogWriter)."""
 
@@ -91,33 +105,67 @@ def reindex(argv: list[str]) -> int:
     )
     parser.add_argument("--root", type=Path, default=Path.cwd(), help="data root (default: cwd)")
     ns = parser.parse_args(argv)
-    paths = AppPaths(ns.root)
+    root = ns.root.resolve()
+    paths = AppPaths(root)
     paths.ensure()
-    db = paths.index_db_path
-    for p in (db, db.with_name(db.name + "-wal"), db.with_name(db.name + "-shm")):
-        p.unlink(missing_ok=True)
-    status = asyncio.run(_reindex(paths))
+    lock = RootLock(root)
+    try:
+        lock.acquire()  # never rebuild the index under a running server (exit 4)
+    except RootInUseError:
+        _error(f"data root {root} is already in use by another MCP Monitor process")
+        return EXIT_ROOT_IN_USE
+    try:
+        db = paths.index_db_path
+        for p in (db, db.with_name(db.name + "-wal"), db.with_name(db.name + "-shm")):
+            p.unlink(missing_ok=True)
+        status = asyncio.run(_reindex(paths))
+    finally:
+        lock.release()
     print(f"indexed {status.rows} rows from {status.files} files", flush=True)
+    return 0
+
+
+def run_server(ns: argparse.Namespace, control: ServeControl | None = None) -> int:
+    """Run the server until it stops; the expected startup failures become exit codes 3/4/5
+    with one line on stderr and no traceback (W23)."""
+    root = ns.root.resolve()
+    try:
+        asyncio.run(
+            serve(
+                root,
+                ns.local_port,
+                ns.external_port,
+                external_host=ns.external_host,
+                static_dir=ns.static_dir,
+                dev_otp_code=ns.dev_otp_code,
+                collectors=collector_config(ns, clock=SystemClock(), root=root),
+                control=control,
+            )
+        )
+    except PortInUseError as exc:
+        _error(f"port {exc.port} is already in use ({exc.host})")
+        return EXIT_PORT_IN_USE
+    except RootInUseError:
+        _error(f"data root {root} is already in use by another MCP Monitor process")
+        return EXIT_ROOT_IN_USE
+    except DatabaseTooNewError as exc:
+        _error(
+            f"{AppPaths(root).db_path} was written by a newer version (schema {exc.found} > "
+            f"{exc.supported}); install that version or restore a backup"
+        )
+        return EXIT_DATABASE_TOO_NEW
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else list(argv)
+    if args[:1] == ["service"]:
+        from app.winsvc.service import dispatch  # pywin32: Windows only
+
+        return dispatch(args[1:])
     if args[:1] == ["reindex"]:
         return reindex(args[1:])
-    ns = parse_args(args)
-    asyncio.run(
-        serve(
-            ns.root,
-            ns.local_port,
-            ns.external_port,
-            external_host=ns.external_host,
-            static_dir=ns.static_dir,
-            dev_otp_code=ns.dev_otp_code,
-            collectors=collector_config(ns, clock=SystemClock(), root=ns.root),
-        )
-    )
-    return 0
+    return run_server(parse_args(args))
 
 
 if __name__ == "__main__":

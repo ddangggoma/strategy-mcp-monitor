@@ -290,4 +290,15 @@ async def update_settings(
             target={"changes": changes},
             result="ok",
         )
+    if "service_start_type" in changes:
+        start_type = after["service_start_type"]
+        result = await asyncio.to_thread(services.start_type.reconcile, start_type)
+        services.audit.admin(
+            actor=actor,
+            action="service_start_type_apply",
+            channel=channel,
+            ip=ip,
+            target={"start_type": start_type, "result": result},
+            result="ok" if result in ("applied", "in_sync", "not_installed") else "error",
+        )
     return after

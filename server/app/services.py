@@ -39,6 +39,7 @@ from app.sessions.tracker import SessionTracker
 from app.settings.store import SettingsStore
 from app.users.store import UserStore
 from app.win.peer import PeerResolver, PsutilPeerResolver
+from app.winsvc.start_type import ServiceConfigurator, StartTypeManager, default_configurator
 
 _OTP_SECRET_NAME = "otp_secret"
 
@@ -88,6 +89,8 @@ class Services:
     retention: RetentionJob
     """The daily log retention job (W14); ``serve()`` starts it after the log index and stops it
     first. Fixtures do not start it (tests call ``run_once``)."""
+    start_type: StartTypeManager
+    """The ``mcp-monitor`` service's start type vs the ``service_start_type`` setting (Task 8)."""
 
 
 def _load_or_create_otp_secret(db: Database) -> bytes:
@@ -113,11 +116,35 @@ def build_services(
     prober: ProberLike | None = None,
     peer_resolver: PeerResolver | None = None,
     collectors: CollectorConfig | None = None,
+    service_configurator: ServiceConfigurator | None = None,
 ) -> Services:
-    """Wire all backend services. Starts neither the log writer nor the monitor (serve() / fixtures do)."""
+    """Wire all backend services. Starts neither the log writer nor the monitor (serve() / fixtures do).
+
+    Raises ``DatabaseTooNewError`` for a database from a newer version; whatever fails, the
+    database is closed again before the error propagates."""
     paths = AppPaths(Path(root))
     paths.ensure()
     db = Database(paths.db_path)
+    try:
+        return _wire(paths, db, clock, otp_provider, dev_fixed_code, runner, prober, peer_resolver,
+                     collectors, service_configurator)
+    except BaseException:
+        db.close()
+        raise
+
+
+def _wire(
+    paths: AppPaths,
+    db: Database,
+    clock: Clock | None,
+    otp_provider: OtpProvider | None,
+    dev_fixed_code: str | None,
+    runner: ScriptRunnerLike | None,
+    prober: ProberLike | None,
+    peer_resolver: PeerResolver | None,
+    collectors: CollectorConfig | None,
+    service_configurator: ServiceConfigurator | None,
+) -> Services:
     db.migrate()
     clock = clock or SystemClock()
     users = UserStore(db, clock)
@@ -243,4 +270,9 @@ def build_services(
         tamper_scanner=tamper_scanner,
         log_index=log_index,
         retention=retention,
+        start_type=StartTypeManager(
+            service_configurator if service_configurator is not None else default_configurator(),
+            settings,
+            log,
+        ),
     )
