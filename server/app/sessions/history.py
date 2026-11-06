@@ -224,7 +224,8 @@ class SessionHistory:
         return [_connection(r) for r in self._db.query(sql, params)]
 
     def add_failure(self, f: LogonFailureIn) -> int | None:
-        """Store a logon failure; ``None`` when ``(source, record_id)`` was already stored."""
+        """Store a logon failure; ``None`` when ``(source, record_id, at)`` was already stored (a
+        replay; the record id alone restarts after a log clear, I3)."""
         with self._db.transaction() as conn:
             cur = conn.execute(
                 "INSERT OR IGNORE INTO rdp_logon_failures (at, user, domain, client_ip, workstation,"

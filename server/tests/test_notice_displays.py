@@ -202,3 +202,16 @@ async def test_start_closes_every_open_display_once(services, clock):
     reasons = [e["reason"] for e in await notice_events(services) if e["event"] == "notice_unacknowledged"]
     assert reasons == ["service_restart", "service_restart"]
     assert services.displays.start() == 0
+
+
+async def test_without_a_session_source_a_previous_runs_displays_still_close_at_start(services, clock):
+    """M12: ``--session-source none`` must not leave the last run's open displays open forever."""
+    from tests.winfakes import eventually
+    services.rdp.apply(snap(clock.now(), ws(2)))
+    d = services.displays.pending_for_session(2)
+    assert services.config_collectors.wts is None
+    await services.collectors.start()
+    try:
+        await eventually(lambda: services.displays.get(d.id).closed_reason == "service_restart")
+    finally:
+        await services.collectors.stop()

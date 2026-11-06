@@ -97,6 +97,9 @@ class WtsSession:
 class WtsSnapshot:
     at: datetime
     sessions: tuple[WtsSession, ...]
+    unreadable: frozenset[int] = frozenset()
+    """Sessions that were enumerated but could not be read this time (plan review I4): their
+    previous state is kept; only a session missing from the enumeration has logged off."""
 
 
 class WtsError(Exception):
@@ -280,11 +283,15 @@ class CtypesWtsSource:
             _wtsapi32.WTSFreeMemory(infos)
         at = self._clock.now()
         sessions: list[WtsSession] = []
+        unreadable: set[int] = set()
         for sid in ids:
             try:
                 s = _read_session(sid)
             except _QueryFailed:
-                continue  # the session went away between the enumeration and the query
+                # Gone between the enumeration and the query, or a transient failure (e.g. during
+                # a reconnect): the next snapshot tells which; until then nothing changes (I4).
+                unreadable.add(sid)
+                continue
             if s.state != "listen":
                 sessions.append(s)
-        return WtsSnapshot(at=at, sessions=tuple(sessions))
+        return WtsSnapshot(at=at, sessions=tuple(sessions), unreadable=frozenset(unreadable))

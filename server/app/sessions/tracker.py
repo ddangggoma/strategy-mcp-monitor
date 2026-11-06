@@ -133,26 +133,32 @@ class SessionTracker:
         at = snap.at
         current = {s.session_id: s for s in snap.sessions if self._watched(s)}
         changes: list[Change] = []
-        for sid in sorted(self._tracked.keys() | current.keys()):
-            prev = self._tracked.get(sid)
-            new = current.get(sid)
-            if prev is not None and (new is None or (new.session_id, new.logon_at) != prev.identity):
-                self._logoff(prev, at, changes)
-                del self._tracked[sid]
-                prev = None
-            if new is None:
-                continue
-            if prev is None:
-                tracked = _Tracked(session=new, prior=first)
-                self._tracked[sid] = tracked
-                if new.state == "active":
-                    self._open(tracked, new, "existing" if first else "logon", at, changes)
-                continue
-            self._update(prev, new, at, changes)
-        self._snap_at = at
-        self.ready = True
-        self._notify(changes)
-        self._publish()
+        try:
+            for sid in sorted(self._tracked.keys() | current.keys()):
+                prev = self._tracked.get(sid)
+                new = current.get(sid)
+                if new is None and sid in snap.unreadable:
+                    continue  # enumerated but unreadable this time: keep the state (I4)
+                if prev is not None and (new is None or (new.session_id, new.logon_at) != prev.identity):
+                    self._logoff(prev, at, changes)
+                    del self._tracked[sid]
+                    prev = None
+                if new is None:
+                    continue
+                if prev is None:
+                    tracked = _Tracked(session=new, prior=first)
+                    self._tracked[sid] = tracked
+                    if new.state == "active":
+                        self._open(tracked, new, "existing" if first else "logon", at, changes)
+                    continue
+                self._update(prev, new, at, changes)
+            self._snap_at = at
+            self.ready = True
+        finally:
+            # M7: what this snapshot already changed (rows written, lines logged) reaches the
+            # listeners even when a later write failed.
+            self._notify(changes)
+            self._publish()
         return changes
 
     def _update(self, t: _Tracked, new: WtsSession, at: datetime, changes: list[Change]) -> None:

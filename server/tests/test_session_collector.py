@@ -204,7 +204,8 @@ async def test_sessions_component_feeds_the_tracker_and_resolves_dns(services, c
     try:
         await eventually(lambda: services.rdp.ready and src.calls >= 3)
         await eventually(lambda: (services.rdp.board_sessions() or [{}])[0].get("reverse_dns") == "hong-pc.corp")
-        assert [(s.name, s.ok) for s in cs.status()] == [("wts", True)]
+        # M9: the third snapshot (after the error) may still be in the bridge: wait for it.
+        await eventually(lambda: [(s.name, s.ok) for s in cs.status()] == [("wts", True)])
     finally:
         await cs.stop()
     assert lookups == ["10.0.3.21"] and not comp.alive

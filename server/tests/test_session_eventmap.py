@@ -1,4 +1,5 @@
 # server/tests/test_session_eventmap.py
+import sqlite3
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -196,3 +197,39 @@ async def test_build_services_registers_the_handler_on_the_three_session_channel
     finally:
         await svc.log.stop()
         svc.db.close()
+
+
+async def test_a_record_id_reused_after_a_log_clear_is_stored_and_logged(services, clock):
+    """I3: EventRecordID restarts at 1 when Security is cleared; a new failure with an old id (but
+    another time) is a new event. Only the same id at the same time is a replay."""
+    data = {"TargetUserName": "admin", "TargetDomainName": "-", "LogonType": "10", "IpAddress": "203.0.113.9"}
+    before = rec(SEC, 4625, data, rid=5, time="2026-11-04T04:00:00Z")
+    after = rec(SEC, 4625, data, rid=5, time="2026-11-04T04:59:30Z")
+    h = SessionEventHandler(services.rdp_history, services.log)
+    h([before, after, after])
+    stored = services.rdp_history.failures(clock.now() - timedelta(days=1))
+    assert [(f.record_id, f.at) for f in stored] == [(5, after.time_created), (5, before.time_created)]
+    lines = [e for e in await audit_events(services, "session") if e["event"] == "logon_failed"]
+    assert [e["ts"] for e in lines] == ["2026-11-04T13:00:00.000+09:00", "2026-11-04T13:59:30.000+09:00"]
+
+
+def test_migration_8_keeps_stored_failures_and_relaxes_the_unique_key(tmp_path):
+    import app.db as dbmod
+    db = dbmod.Database(tmp_path / "m.db")
+    try:
+        orig = dbmod.MIGRATIONS
+        dbmod.MIGRATIONS = orig[:7]
+        try:
+            db.migrate()
+        finally:
+            dbmod.MIGRATIONS = orig
+        db.execute("INSERT INTO rdp_logon_failures (at, user, source, record_id) VALUES ('2026-11-04T04:00:00+00:00', 'a', 'eventlog:4625', 5)")
+        db.migrate()
+        assert db.query("PRAGMA user_version")[0][0] == len(orig)
+        db.execute("INSERT INTO rdp_logon_failures (at, user, source, record_id) VALUES ('2026-11-04T05:00:00+00:00', 'b', 'eventlog:4625', 5)")
+        assert [r["user"] for r in db.query("SELECT user FROM rdp_logon_failures ORDER BY id")] == ["a", "b"]
+        with pytest.raises(sqlite3.IntegrityError):
+            db.execute("INSERT INTO rdp_logon_failures (at, user, source, record_id) VALUES ('2026-11-04T05:00:00+00:00', 'c', 'eventlog:4625', 5)")
+        assert db.query("SELECT name FROM sqlite_master WHERE name = 'idx_rdp_logon_failures_at'")
+    finally:
+        db.close()

@@ -165,3 +165,4 @@ def test_ctypes_source_skips_a_session_whose_query_fails(monkeypatch):
     monkeypatch.setattr(wts, "_read_session", flaky)
     snap = CtypesWtsSource(SystemClock()).snapshot()
     assert snap.sessions and all(s.session_id != mine for s in snap.sessions)
+    assert mine in snap.unreadable  # I4: kept by the tracker, not a logoff

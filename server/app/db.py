@@ -207,6 +207,26 @@ MIGRATIONS: list[str] = [
     CREATE INDEX idx_notice_displays_connection ON notice_displays(connection_id);
     CREATE INDEX idx_notice_displays_open ON notice_displays(session_id) WHERE closed_reason IS NULL;
     """,
+    # 8 — logon failures: EventRecordID restarts after a log clear, so the event time is part of the
+    # replay key (plan review I3). SQLite cannot drop a table constraint: rebuild the table.
+    """
+    CREATE TABLE rdp_logon_failures_v8 (
+        id INTEGER PRIMARY KEY,
+        at TEXT NOT NULL,
+        user TEXT, domain TEXT, client_ip TEXT, workstation TEXT,
+        logon_type INTEGER, status TEXT, sub_status TEXT,
+        source TEXT NOT NULL,
+        record_id INTEGER,
+        UNIQUE (source, record_id, at)
+    );
+    INSERT INTO rdp_logon_failures_v8 (id, at, user, domain, client_ip, workstation, logon_type, status,
+        sub_status, source, record_id)
+        SELECT id, at, user, domain, client_ip, workstation, logon_type, status, sub_status, source,
+            record_id FROM rdp_logon_failures;
+    DROP TABLE rdp_logon_failures;
+    ALTER TABLE rdp_logon_failures_v8 RENAME TO rdp_logon_failures;
+    CREATE INDEX idx_rdp_logon_failures_at ON rdp_logon_failures(at);
+    """,
 ]
 
 

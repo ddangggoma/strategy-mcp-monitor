@@ -167,7 +167,7 @@ def map_session_record(r: EventRecord) -> SessionLogEvent | None:
 class SessionEventHandler:
     """``EventLogComponent`` handler for the security, LSM and RCM channels: one ``session`` log
     line per mapped record, stamped with the event time. A logon failure is stored first; one
-    already stored (same ``(source, record_id)``, e.g. replayed after a lost bookmark) is
+    already stored (same ``(source, record_id, at)``, e.g. replayed after a lost bookmark) is
     neither stored nor logged again."""
 
     def __init__(self, history: SessionHistory, log: LogSink) -> None:

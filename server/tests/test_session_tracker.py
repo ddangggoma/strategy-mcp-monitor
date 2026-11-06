@@ -235,3 +235,53 @@ async def test_history_failures_and_pagination(services, clock):
     h.close(ids[0], clock.now(), "logoff"); h.close(ids[0], clock.now() + timedelta(1), "disconnect")
     assert (h.get(ids[0]).end_reason, h.get(ids[0]).ended_at) == ("logoff", clock.now())
     assert h.get(999) is None
+
+
+# --- I4: a session that was enumerated but could not be read keeps its state ----------------------
+
+import pytest  # noqa: E402
+
+from app.win.wts import WtsSnapshot  # noqa: E402
+
+
+async def test_an_unreadable_session_keeps_its_state_and_is_not_logged_off(services, clock):
+    t = services.rdp
+    seen = []; t.add_listener(seen.append)
+    [o] = t.apply(snap(clock.now(), ws(2)))
+    clock.advance(1)
+    assert t.apply(WtsSnapshot(at=clock.now(), sessions=(), unreadable=frozenset({2}))) == []
+    clock.advance(1)
+    assert t.apply(snap(clock.now(), ws(2))) == []  # the same logon, still open: no logoff, no new logon
+    assert [type(c).__name__ for c in seen] == ["Opened"]
+    [row] = services.rdp_history.connections(T0 - timedelta(days=1))
+    assert (row.id, row.ended_at) == (o.connection.id, None)
+    assert [s["session_id"] for s in t.board_sessions()] == [2]
+    clock.advance(1)
+    [c] = t.apply(snap(clock.now()))  # gone from the enumeration itself: that is a logoff
+    assert (type(c).__name__, c.reason) == ("Closed", "logoff")
+
+
+async def test_an_unreadable_unknown_session_is_not_opened_until_readable(services, clock):
+    t = services.rdp; t.apply(snap(clock.now()))
+    clock.advance(1)
+    assert t.apply(WtsSnapshot(at=clock.now(), sessions=(), unreadable=frozenset({5}))) == []
+    clock.advance(1)
+    [o] = t.apply(snap(clock.now(), ws(5, logon=clock.now(), connected=clock.now())))
+    assert o.connection.kind == "logon"
+
+
+async def test_changes_made_before_a_db_failure_still_reach_the_listeners(services, clock, monkeypatch):
+    """M7: a write failing mid-snapshot must not swallow the changes already made in it."""
+    t = services.rdp; t.apply(snap(clock.now()))
+    seen = []; t.add_listener(seen.append)
+    real_open = services.rdp_history.open
+    def open_then_fail(s, kind, at):
+        if s.session_id == 3:
+            raise RuntimeError("disk full")
+        return real_open(s, kind, at)
+    monkeypatch.setattr(services.rdp_history, "open", open_then_fail)
+    clock.advance(1)
+    with pytest.raises(RuntimeError, match="disk full"):
+        t.apply(snap(clock.now(), ws(2, logon=clock.now(), connected=clock.now()),
+                     ws(3, user="kim", logon=clock.now(), connected=clock.now())))
+    assert [(type(c).__name__, c.session.session_id) for c in seen] == [("Opened", 2)]

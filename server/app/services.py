@@ -165,6 +165,15 @@ def build_services(
             config_collectors.wts, rdp, manager, ReverseDns(clock=clock), clock,
             interval_sec=config_collectors.poll_interval_sec, displays=displays,
         ))
+    else:
+        async def close_previous_displays() -> None:
+            """M12: with no session source, a previous run's open displays still close."""
+            try:
+                displays.start()
+            except Exception as exc:
+                manager.handler_failed("notice-displays", exc)
+
+        manager.add_task("notice-displays", close_previous_displays)
     eventlog: EventLogComponent | None = None
     if config_collectors.event_log is not None:
         bookmarks = BookmarkStore(
