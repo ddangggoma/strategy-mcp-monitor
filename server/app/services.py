@@ -8,6 +8,7 @@ from app.audit import AuditLogger
 from app.auth.otp import DummyOtpProvider, OtpProvider, OtpService
 from app.auth.sessions import SessionStore
 from app.clock import Clock, SystemClock
+from app.collect.config import CollectorConfig
 from app.db import Database
 from app.logstore.writer import DailyJsonlWriter, LogWriter
 from app.monitor.bus import BoardBus
@@ -19,6 +20,8 @@ from app.monitor.store import McpStore
 from app.monitor.supervisor import Monitor, ProberLike, ScriptRunnerLike
 from app.notice.store import NoticeStore
 from app.paths import AppPaths
+from app.sessions.history import SessionHistory
+from app.sessions.tracker import SessionTracker
 from app.settings.store import SettingsStore
 from app.users.store import UserStore
 from app.win.peer import PeerResolver, PsutilPeerResolver
@@ -44,6 +47,10 @@ class Services:
     monitor: Monitor
     notice: NoticeStore
     peers: PeerResolver
+    config_collectors: CollectorConfig
+    rdp_history: SessionHistory
+    rdp: SessionTracker
+    """The RDP session tracker (``sessions`` is the login ``SessionStore``; ruling F01)."""
 
 
 def _load_or_create_otp_secret(db: Database) -> bytes:
@@ -68,6 +75,7 @@ def build_services(
     runner: ScriptRunnerLike | None = None,
     prober: ProberLike | None = None,
     peer_resolver: PeerResolver | None = None,
+    collectors: CollectorConfig | None = None,
 ) -> Services:
     """Wire all backend services. Starts neither the log writer nor the monitor (serve() / fixtures do)."""
     paths = AppPaths(Path(root))
@@ -97,6 +105,11 @@ def build_services(
         bus=bus,
         clock=clock,
     )
+    config_collectors = collectors or CollectorConfig()
+    rdp_history = SessionHistory(db, clock)
+    rdp = SessionTracker(
+        rdp_history, clock, log, bus, collect_console=config_collectors.collect_console
+    )
     return Services(
         paths=paths,
         db=db,
@@ -114,4 +127,7 @@ def build_services(
         monitor=monitor,
         notice=NoticeStore(db, clock),
         peers=peer_resolver if peer_resolver is not None else PsutilPeerResolver(),
+        config_collectors=config_collectors,
+        rdp_history=rdp_history,
+        rdp=rdp,
     )

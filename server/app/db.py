@@ -152,6 +152,41 @@ MIGRATIONS: list[str] = [
         reverted_from INTEGER                               -- source version of a revert (0 = built-in text)
     );
     """,
+    # 6
+    """
+    CREATE TABLE rdp_connections (
+        id INTEGER PRIMARY KEY,
+        session_id INTEGER NOT NULL,
+        logon_at TEXT,
+        kind TEXT NOT NULL CHECK (kind IN ('logon','reconnect','existing')),
+        user TEXT NOT NULL,
+        domain TEXT,
+        client_name TEXT,
+        client_ip TEXT,
+        client_build INTEGER,
+        protocol TEXT NOT NULL,
+        resolution TEXT,
+        reverse_dns TEXT,
+        first_seen_ip INTEGER NOT NULL DEFAULT 0,
+        first_seen_device INTEGER NOT NULL DEFAULT 0,
+        connected_at TEXT NOT NULL,
+        ended_at TEXT,
+        end_reason TEXT CHECK (end_reason IN ('disconnect','logoff','reconnected','service_stop'))
+    );
+    CREATE INDEX idx_rdp_connections_connected ON rdp_connections(connected_at);
+    CREATE INDEX idx_rdp_connections_ip ON rdp_connections(client_ip);
+    CREATE INDEX idx_rdp_connections_device ON rdp_connections(client_name COLLATE NOCASE);
+    CREATE TABLE rdp_logon_failures (
+        id INTEGER PRIMARY KEY,
+        at TEXT NOT NULL,
+        user TEXT, domain TEXT, client_ip TEXT, workstation TEXT,
+        logon_type INTEGER, status TEXT, sub_status TEXT,
+        source TEXT NOT NULL,
+        record_id INTEGER,
+        UNIQUE (source, record_id)
+    );
+    CREATE INDEX idx_rdp_logon_failures_at ON rdp_logon_failures(at);
+    """,
 ]
 
 

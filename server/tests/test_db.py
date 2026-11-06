@@ -16,6 +16,7 @@ def test_migrate_creates_tables(db):
     assert {"settings", "users", "otp_codes", "otp_ip_requests", "auth_sessions", "secrets"} <= names
     assert {"mcps", "mcp_scripts", "mcp_script_versions", "mcp_minutes", "mcp_transitions", "mcp_actions"} <= names
     assert "notice_versions" in names
+    assert {"rdp_connections", "rdp_logon_failures"} <= names
     assert db.query("PRAGMA journal_mode")[0][0] == "wal"
 
 def test_migrate_idempotent(db):
