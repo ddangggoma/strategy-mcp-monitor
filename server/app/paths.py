@@ -28,6 +28,11 @@ class AppPaths:
     def db_path(self) -> Path:
         return self.data_dir / "config.db"
 
+    @property
+    def index_db_path(self) -> Path:
+        """The log search index (derived from the JSONL files; rebuilt when its schema differs)."""
+        return self.data_dir / "index.db"
+
     def ensure(self) -> None:
         for d in (self.logs_dir, self.data_dir, self.dev_dir, self.scripts_dir):
             d.mkdir(parents=True, exist_ok=True)
