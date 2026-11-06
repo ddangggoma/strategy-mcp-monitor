@@ -5,7 +5,7 @@ import contextlib
 import signal
 import sys
 import threading
-from collections.abc import Iterator, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -50,16 +50,49 @@ def request_exit(servers: Sequence[uvicorn.Server]) -> None:
             server.should_exit = True
 
 
+class ShutdownSequence:
+    """The service stop, in order: first ``before_exit`` (the collectors' stop: the agent
+    supervisor tells each session agent to exit, and the agent closes its notice window), and only
+    then the servers. The agents hear ``exit`` over the Local channel, so it must still answer.
+
+    ``request()`` (loop thread): the first call starts that sequence; a repeated call goes to
+    ``request_exit`` (stop serving now, then force), so an impatient second Ctrl+C still works.
+    """
+
+    def __init__(self, servers: Sequence[Any], before_exit: Callable[[], Awaitable[None]]) -> None:
+        self._servers = servers
+        self._before_exit = before_exit
+        self._task: asyncio.Task[None] | None = None
+
+    def request(self) -> None:
+        if self._task is None:
+            self._task = asyncio.get_running_loop().create_task(self._run(), name="shutdown")
+        else:
+            request_exit(self._servers)
+
+    async def _run(self) -> None:
+        try:
+            await self._before_exit()
+        finally:
+            for server in self._servers:  # graceful only: a repeated request may already have forced
+                server.should_exit = True
+
+    async def wait(self) -> None:
+        """Until a started sequence is done (re-raises its error); at once when none started."""
+        if self._task is not None:
+            await self._task
+
+
 @contextlib.contextmanager
-def _stop_on_signals(servers: Sequence[uvicorn.Server]) -> Iterator[None]:
-    """Ctrl+C / SIGTERM / SIGBREAK ask every server to exit gracefully."""
+def _stop_on_signals(on_signal: Callable[[], None]) -> Iterator[None]:
+    """Ctrl+C / SIGTERM / SIGBREAK call ``on_signal`` on the loop thread."""
     if threading.current_thread() is not threading.main_thread():
         yield
         return
     loop = asyncio.get_running_loop()
 
     def _handler(signum, frame) -> None:  # noqa: ARG001
-        loop.call_soon_threadsafe(request_exit, servers)
+        loop.call_soon_threadsafe(on_signal)
 
     sigs = [s for s in (signal.SIGINT, signal.SIGTERM, getattr(signal, "SIGBREAK", None)) if s]
     original = {s: signal.signal(s, _handler) for s in sigs}
@@ -94,6 +127,7 @@ async def serve(
         await services.monitor.start()
         try:
             await services.collectors.start()
+            shutdown: ShutdownSequence | None = None
             try:
                 configs = server_configs(
                     create_app("local", services, static_dir),
@@ -103,10 +137,15 @@ async def serve(
                     external_host,
                 )
                 servers = [_Server(cfg) for cfg in configs]
-                with _stop_on_signals(servers):
+                shutdown = ShutdownSequence(servers, services.collectors.stop)
+                with _stop_on_signals(shutdown.request):
                     await asyncio.gather(*(s.serve() for s in servers))
             finally:
-                await services.collectors.stop()
+                try:
+                    if shutdown is not None:
+                        await shutdown.wait()
+                finally:
+                    await services.collectors.stop()  # a no-op after the sequence stopped them
         finally:
             await services.monitor.stop()
     finally:

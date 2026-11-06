@@ -1,7 +1,10 @@
+import asyncio
+
 import httpx
+import pytest
 from fastapi import APIRouter
 
-from app.main import request_exit, server_configs
+from app.main import ShutdownSequence, request_exit, server_configs
 from app.services import build_services
 from app.settings.store import Settings
 from app.web.app_factory import create_app
@@ -19,6 +22,74 @@ def test_first_signal_graceful_second_forces_exit():
     assert all(s.should_exit and not s.force_exit for s in servers)
     request_exit(servers)
     assert all(s.should_exit and s.force_exit for s in servers)
+
+
+async def test_shutdown_runs_the_collectors_stop_while_the_servers_still_answer():
+    """Task 15 carry: the agents' ``exit`` goes out over the Local channel, so the servers may only
+    be asked to exit once the collectors (and with them the agent supervisor) have stopped."""
+    servers = [_FakeServer(), _FakeServer()]
+    release = asyncio.Event()
+    seen = []
+
+    async def stop_collectors():
+        seen.append([s.should_exit for s in servers])
+        await release.wait()
+
+    shutdown = ShutdownSequence(servers, stop_collectors)
+    shutdown.request()
+    await asyncio.sleep(0)
+    assert seen == [[False, False]]
+    await asyncio.sleep(0.01)
+    assert not any(s.should_exit for s in servers)  # still serving while the stop runs
+    release.set()
+    await shutdown.wait()
+    assert all(s.should_exit and not s.force_exit for s in servers)
+
+
+async def test_repeated_signals_during_the_collectors_stop_exit_then_force():
+    servers = [_FakeServer()]
+    release = asyncio.Event()
+    calls = []
+
+    async def stop_collectors():
+        calls.append(1)
+        await release.wait()
+
+    shutdown = ShutdownSequence(servers, stop_collectors)
+    shutdown.request()
+    await asyncio.sleep(0)
+    shutdown.request()  # impatient: stop serving now (graceful)
+    assert servers[0].should_exit and not servers[0].force_exit
+    release.set()
+    await shutdown.wait()
+    assert not servers[0].force_exit  # the stop finishing does not escalate to a force exit
+    shutdown.request()
+    assert servers[0].force_exit
+    assert calls == [1]  # the collectors are stopped once
+
+
+async def test_shutdown_asks_the_servers_to_exit_even_when_the_stop_fails():
+    servers = [_FakeServer()]
+
+    async def broken():
+        raise RuntimeError("boom")
+
+    shutdown = ShutdownSequence(servers, broken)
+    shutdown.request()
+    with pytest.raises(RuntimeError, match="boom"):
+        await shutdown.wait()
+    assert servers[0].should_exit
+
+
+async def test_wait_without_a_request_returns_at_once():
+    calls = []
+
+    async def stop_collectors():
+        calls.append(1)
+
+    server = _FakeServer()
+    await ShutdownSequence([server], stop_collectors).wait()
+    assert calls == [] and not server.should_exit
 
 
 def test_server_configs_ignore_proxy_headers_and_bound_shutdown(services):
