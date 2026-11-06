@@ -61,10 +61,11 @@ Every later plan reads this file before it is written and checks off the items i
   - reject a database newer than the code;
   - read `user_version` inside the transaction;
   - verify WAL mode is active.
-- [ ] Packaging:
+- [x] Packaging:
   - pin `.python-version` to the exact patch;
   - add PyInstaller hiddenimports for httptools, websockets and watchfiles;
   - switch back to `uvicorn[standard]` once pyyaml has a cp315 wheel.
+  (Plan 5 Task 1 pinned 3.15.2; Task 13 spike chose PyInstaller: `install/pyinstaller/mcp-monitor.spec` adds httptools, websockets and the pywin32 service modules, and excludes watchfiles (no reload, W27); `build.ps1` warns when pyyaml gets a cp315 wheel.)
 - [x] e2e test: assert `lp != ep`, assert the POST statuses, and set `stdin=DEVNULL`. (Plan 5 Task 7)
 - [ ] (From Plan 2) ACL on `scripts/` (SYSTEM + Administrators only; spec §5.8).
 - [ ] (From Plan 2) Retention purge for `mcp_actions` and `mcp_transitions` (`mcp_minutes` already has an hourly purge).
@@ -115,7 +116,7 @@ Every later plan reads this file before it is written and checks off the items i
 - [x] Fill the sessions navigation item and the dashboard "우회 탐지 이벤트" card. (Plan 4 Task 18)
 - [x] Fill the logs and audit-log navigation items and the dashboard "로그인 실패 추이" card (still `PlannedFeature`). (Plan 5 Task 10 nav, Task 11 logs page, Task 12 audit page + `LoginFailuresCard`)
 - [ ] The log table uses TanStack Virtual and no animation.
-- [ ] PyInstaller packaging: change the `--static-dir` default (now `<repo>/web/dist`) to a path relative to the executable.
+- [x] PyInstaller packaging: change the `--static-dir` default (now `<repo>/web/dist`) to a path relative to the executable. (Plan 5 Task 9 `default_static_dir`; Task 13 `test_bundle_serves_the_built_board` checks the frozen exe serves `<bundle>/web` with no `--static-dir`)
 
 ### Later
 - [ ] Server 422 responses carry no field information, so forms rely on client validation (U27).
@@ -138,7 +139,7 @@ Every later plan reads this file before it is written and checks off the items i
 - [ ] Retention purge also covers `rdp_connections`, `rdp_logon_failures` and `notice_displays` (V29). Before deleting a log file, call `TamperScanner.expect_log_removed(name)`; otherwise the scanner reports a `log_file_removed` tamper event.
 - [ ] The Windows service host calls `SessionCollector.nudge()` (reachable as `SessionsComponent.nudge()` in `app/collect/manager.py`) on `SERVICE_CONTROL_SESSIONCHANGE`, so a session change is picked up at once instead of at the next 0.5 s poll (V6).
 - [ ] The Windows service stop must go through `ShutdownSequence.request` (`server/app/main.py`), like Ctrl+C does today: the collectors stop first, so the agent supervisor can still deliver `exit` over the Local channel and each agent closes its Edge notice window, and only then the HTTP servers.
-- [ ] Packaging the agent: if PyInstaller builds `mcp-agent.exe`, set `AgentOptions.python` and the launch `argv` to that executable (instead of `<python> -m mcp_agent` with `PYTHONPATH`). Whatever runs the agent must be readable by every user session: today `AgentOptions.python` is the server venv's base interpreter, which uv installs under the installing user's `%APPDATA%\uv\python`, out of reach of a standard user's session under `WtsLauncher`. Every agent launch must pass both `MCPMON_AGENT_TOKEN` and `MCPMON_AGENT_SERVER_KEY` (32-byte hex) in the environment (the agent removes both at once); an agent started by hand without the key exits at argument parsing (exit 2). (Plan 5 Task 9: done for the launch — `AgentOptions.command` from `app.bundle.agent_command` (`bin\agent\mcp-agent.exe` or `runtime\python.exe -m mcp_agent`), no `PYTHONPATH` with a bundle, both keys via `agent_env`; dev mode keeps the base interpreter. Open: the bundle under Program Files, readable by users — Task 13/14.)
+- [ ] Packaging the agent: if PyInstaller builds `mcp-agent.exe`, set `AgentOptions.python` and the launch `argv` to that executable (instead of `<python> -m mcp_agent` with `PYTHONPATH`). Whatever runs the agent must be readable by every user session: today `AgentOptions.python` is the server venv's base interpreter, which uv installs under the installing user's `%APPDATA%\uv\python`, out of reach of a standard user's session under `WtsLauncher`. Every agent launch must pass both `MCPMON_AGENT_TOKEN` and `MCPMON_AGENT_SERVER_KEY` (32-byte hex) in the environment (the agent removes both at once); an agent started by hand without the key exits at argument parsing (exit 2). (Plan 5 Task 9: done for the launch — `AgentOptions.command` from `app.bundle.agent_command` (`bin\agent\mcp-agent.exe` or `runtime\python.exe -m mcp_agent`), no `PYTHONPATH` with a bundle, both keys via `agent_env`; dev mode keeps the base interpreter. Open: the bundle under Program Files, readable by users — Task 13/14. Task 13: the bundle carries `bin\agent\mcp-agent.exe` (PyInstaller, no console) and `agent/pyproject.toml` is 1.0.0; installing it under Program Files is Task 14.)
 - [ ] `install.ps1` enables the audit policy and registry values the collectors need: `auditpol` Process Creation (success), Logon (success, failure), Logoff (success), Other Logon/Logoff Events (success), Audit Policy Change (success); `ProcessCreationIncludeCmdLine_Enabled = 1`; `EnableScriptBlockLogging = 1` (commands in `docs/verification/win11-pro-p4-p5.md` §1).
 - [ ] Uninstall removes `data/collector-state.json` and each user's Edge notice profile folder (`%LOCALAPPDATA%\mcp-monitor\notice-edge`).
 - [x] Tamper baselines (script hashes, log file sizes, audit registry values) live in memory only, so a change made while the service is stopped is not reported. Persist the baseline or compare against the last known state at startup. (Plan 5 Task 7, preflight F07: `data/tamper-baseline.json`, saved after every scan and announced removal; the first scan after a start reports registry and log-file changes with `while_stopped: true`. Uninstall `-RemoveData` should take this file with `data/`.)

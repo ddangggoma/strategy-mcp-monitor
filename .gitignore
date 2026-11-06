@@ -9,6 +9,7 @@ server/.cache/
 /scripts/
 node_modules/
 dist/
+/build/
 dummy-mcps/run/
 dummy-mcps/.pytest_cache/
 agent/.pytest_cache/

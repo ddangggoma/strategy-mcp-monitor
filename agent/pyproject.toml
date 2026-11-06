@@ -1,6 +1,6 @@
 [project]
 name = "mcp-agent"
-version = "0.1.0"
+version = "1.0.0"
 description = "MCP Monitor session agent: notice window, window and idle events"
 requires-python = ">=3.15,<3.16"
 dependencies = []
