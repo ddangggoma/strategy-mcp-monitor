@@ -136,9 +136,27 @@ export function useUpdateMcp(id: number) {
   });
 }
 
-/** POST /api/mcps/{id}/actions/{kind} → `{run_id}` (the result arrives later as an SSE `action`). */
-export function useManualAction() {
+export interface ManualActionRequest {
+  mcp: Pick<McpDetail, "id" | "name" | "script_timeout_sec">;
+  kind: ScriptKind;
+}
+
+export interface ManualActionHandlers {
+  /** The 202: hand the run to the tab's tracker. */
+  onAccepted(req: ManualActionRequest, runId: string): void;
+  onFailed(err: unknown): void;
+}
+
+/**
+ * POST /api/mcps/{id}/actions/{kind} → `{run_id}` (the result arrives later as an SSE `action`).
+ * The handlers are mutation-level callbacks, not per-`mutate` ones: TanStack Query skips the latter
+ * once the calling component unmounts (a click, then a move to another page before the 202), and
+ * the run would never get its toast.
+ */
+export function useManualAction(handlers: ManualActionHandlers) {
   return useMutation({
-    mutationFn: ({ id, kind }: { id: number; kind: ScriptKind }) => ep.manualAction(id, kind),
+    mutationFn: ({ mcp, kind }: ManualActionRequest) => ep.manualAction(mcp.id, kind),
+    onSuccess: ({ run_id }, req) => handlers.onAccepted(req, run_id),
+    onError: (err) => handlers.onFailed(err),
   });
 }

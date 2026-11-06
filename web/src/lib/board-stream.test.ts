@@ -204,18 +204,34 @@ it("restart() during a backoff wait connects at once without a second timer", as
 
 it("reports statuses connecting → open → reconnecting", async () => {
   const statuses: StreamStatus[] = [];
-  const f = fakeFetch([streamWith(BOARD), openStream()]);
+  const second = openStream();
+  const f = fakeFetch([streamWith(BOARD), second]);
   const c = client({ fetchImpl: f, onStatus: (s) => statuses.push(s) });
   expect(c.status).toBe("stopped");
   c.start();
   await vi.advanceTimersByTimeAsync(0);
   expect(statuses).toEqual(["connecting", "open", "reconnecting"]);
   await vi.advanceTimersByTimeAsync(1000);
+  expect(statuses).toEqual(["connecting", "open", "reconnecting"]); // headers alone are not "open"
+  second.push(": heartbeat\n\n");
+  await vi.advanceTimersByTimeAsync(0);
   expect(statuses).toEqual(["connecting", "open", "reconnecting", "open"]);
   expect(c.status).toBe("open");
   c.stop();
   expect(statuses.at(-1)).toBe("stopped");
   expect(f.signalOf(1).aborted).toBe(true);
+});
+
+it("does not report an empty 200 (a lost slot race) as open", async () => {
+  const statuses: StreamStatus[] = [];
+  const f = fakeFetch([emptyStream(), emptyStream(), emptyStream()]);
+  client({ fetchImpl: f, onStatus: (s) => statuses.push(s) }).start();
+  await vi.advanceTimersByTimeAsync(0);
+  await vi.advanceTimersByTimeAsync(1000);
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(f).toHaveBeenCalledTimes(3);
+  expect(statuses).not.toContain("open"); // no reconnecting → open flip, so no reconcile per attempt
+  expect(statuses).toEqual(["connecting", "reconnecting"]);
 });
 
 it("stop() cancels a pending reconnect and ignores visibility changes", async () => {

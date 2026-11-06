@@ -207,6 +207,30 @@ async def test_variant_symlink_pointing_outside_dist_is_not_served(services, dis
     assert r.status_code == 200 and r.text == "a{}" and "content-encoding" not in r.headers
 
 
+@pytest.mark.parametrize(
+    ("path", "ctype"),
+    [
+        ("/", "text/html; charset=utf-8"),
+        ("/admin/mcps/3", "text/html; charset=utf-8"),
+        ("/notice", "text/html; charset=utf-8"),
+        ("/favicon.svg", "image/svg+xml"),
+        ("/assets/plain-1.css", "text/css; charset=utf-8"),
+    ],
+)
+async def test_head_answers_like_get_without_a_body(services, dist, path, ctype):
+    async with client(services, "local", dist) as c:
+        r = await c.head(path)
+    assert r.status_code == 200 and r.content == b""
+    assert r.headers["content-type"].startswith(ctype.split(";")[0])
+    assert r.headers["x-content-type-options"] == "nosniff"
+
+
+async def test_head_on_a_missing_asset_is_404(services, dist):
+    async with client(services, "local", dist) as c:
+        r = await c.head("/assets/nope-1.js")
+    assert r.status_code == 404
+
+
 async def test_api_paths_stay_json(services, dist):
     async with client(services, "external", dist) as c:
         r = await c.get("/api/nope")

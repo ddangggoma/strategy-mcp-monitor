@@ -382,6 +382,8 @@ export const copy = {
     discardDraft: "초안 버리기",
     /** The script was saved again (another tab) after the draft was made. */
     draftStale: (v: number) => `초안을 만든 뒤에 새 버전(버전 ${v})이 저장됐어요. 버전 이력에서 비교한 뒤 저장하세요.`,
+    /** The same, while the edits are on screen: Save would overwrite that version. */
+    newerWhileEditing: (v: number) => `편집하는 동안 새 버전(버전 ${v})이 저장됐어요. 지금 저장하면 그 버전을 덮어써요. 버전 이력에서 비교한 뒤 저장하세요.`,
     versions: "버전 이력",
     revert: "이 버전으로 되돌리기",
     noVersions: "아직 저장된 버전이 없어요.",
@@ -544,6 +546,8 @@ export const copy = {
     discardDraft: "초안 버리기",
     /** The notice was saved again (another tab, a revert) after the draft was made. */
     draftStale: (v: number) => `초안을 만든 뒤에 새 버전(버전 ${v})이 저장됐어요. 버전 이력에서 비교한 뒤 저장하세요.`,
+    /** The same, while the edits are on screen: Save would overwrite that version. */
+    newerWhileEditing: (v: number) => `편집하는 동안 새 버전(버전 ${v})이 저장됐어요. 지금 저장하면 그 버전을 덮어써요. 버전 이력에서 비교한 뒤 저장하세요.`,
     versions: "버전 이력",
     versionsError: "버전 이력을 불러오지 못했어요. 새로 고친 뒤 다시 시도하세요.",
     versionLabel: (v: number) => (v === 0 ? "기본 문구" : `버전 ${v}`),
@@ -552,8 +556,13 @@ export const copy = {
     builtInMeta: "처음부터 들어 있는 문구",
     systemAuthor: "알 수 없는 사용자",
     current: "현재",
+    /** The compare view's table of the short fields that differ. */
+    fieldChanges: "제목·버튼 문구 비교",
+    fieldHeader: "항목",
+    /** The body diff's summary when only the title or button text differ. */
+    bodySame: "본문은 같아요.",
     currentNote: "지금 표시되는 버전이에요.",
-    pickVersion: "버전을 고르면 저장된 본문과 비교해요.",
+    pickVersion: "버전을 고르면 저장된 내용과 비교해요.",
     versionError: "이 버전을 불러오지 못했어요. 다시 골라 보세요.",
     revert: "이 버전으로 되돌리기",
     reverted: (v: number) => (v === 0 ? "기본 문구에서 되돌림" : `버전 ${v}에서 되돌림`),

@@ -250,6 +250,18 @@ async def test_action_event_requested_differs_from_kind_on_restart_fallback(serv
         ("stop", "restart"), ("start", "restart"),
     ]
 
+async def test_restart_fallback_whose_stop_step_raises_still_ends_the_run(services):
+    """The run ends at the stop step. Its error record must not look like the intermediate stop step
+    (kind "stop", requested "restart"), which the web client waits past for the final one; it keeps
+    the run's own kind, a final step (plan review #17)."""
+    m = seed_mcp(services, make_user(services, "o@x.com"))  # no restart script: restart = stop, then start
+    authed = services.bus.subscribe(authed=True)
+    services.monitor._runner.raise_next = RuntimeError("boom")
+    await crash_to_action(services, m, Issue.UNRESPONSIVE)
+    events = [(d["kind"], d["requested"], d["status"]) for ev, d in authed.events if ev == "action"]
+    assert events == [("restart", "restart", "error")]
+    assert [c.path.name for c in services.monitor._runner.calls] == ["stop.bat"]  # start never ran
+
 async def test_tamper_log_fields(services):
     m = seed_mcp(services, make_user(services, "o@x.com"))
     services.monitor._runner.results.append(ok_result(status="error", exit_code=None, error="hash_mismatch", actual_sha256="cd" * 32))

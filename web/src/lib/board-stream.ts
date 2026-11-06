@@ -126,8 +126,7 @@ export class BoardStreamClient {
       if (gen !== this.generation) return;
       const type = res.headers.get("Content-Type") ?? "";
       if (res.status === 200 && type.startsWith("text/event-stream") && res.body) {
-        this.setStatus("open");
-        await this.read(gen, ctrl, res.body);
+        await this.read(gen, ctrl, res.body); // "open" on the first byte, see read()
       } else {
         if (res.status === 429) retryAfterMs = (parseRetryAfter(res.headers.get("Retry-After")) ?? 0) * 1000;
         res.body?.cancel().catch(() => {});
@@ -155,6 +154,9 @@ export class BoardStreamClient {
         const { done, value } = await reader.read();
         if (gen !== this.generation) return;
         if (done) break;
+        // the stream is open once something arrives: an empty 200 (the server lost the race for the
+        // last slot) has headers only and must not count as a reconnect
+        if (value.byteLength > 0) this.setStatus("open");
         this.armWatchdog(ctrl); // any byte counts, heartbeat comments included
         feed(decoder.decode(value, { stream: true }));
       }

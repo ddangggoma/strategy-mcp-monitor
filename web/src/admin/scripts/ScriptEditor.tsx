@@ -224,8 +224,8 @@ const baseOf = (s: ScriptContent): Base => ({ ext: s.ext, content: toLf(s.conten
 
 interface Start extends Base {
   restored: boolean;
-  /** The script was saved again after the draft was made. */
-  stale: boolean;
+  /** The saved version the content on screen was started from (older than `version` for a stale draft). */
+  editedFrom: number;
 }
 
 /** Start from a stored draft when it differs from the server's script; a draft equal to it is dropped. */
@@ -234,14 +234,14 @@ function startFrom(key: string, initial: ScriptContent): Start {
   const draft = loadDraft<unknown>(key);
   if (!isScriptDraft(draft)) {
     if (draft !== null) clearDraft(key);
-    return { ...base, restored: false, stale: false };
+    return { ...base, restored: false, editedFrom: base.version };
   }
   const content = toLf(draft.content);
   if (draft.ext === base.ext && content === base.content) {
     clearDraft(key);
-    return { ...base, restored: false, stale: false };
+    return { ...base, restored: false, editedFrom: base.version };
   }
-  return { ext: draft.ext, content, version: base.version, restored: true, stale: draft.baseVersion !== base.version };
+  return { ext: draft.ext, content, version: base.version, restored: true, editedFrom: draft.baseVersion };
 }
 
 export interface ScriptEditorProps {
@@ -265,7 +265,8 @@ export function ScriptEditor({ mcpId, kind, initial, onSaved, onDirtyChange }: S
   const [base, setBase] = useState<Base>(() => baseOf(initial));
   const [ext, setExt] = useState<ScriptExt>(start.ext);
   const [content, setContent] = useState(start.content);
-  const [restored, setRestored] = useState(start.restored ? { stale: start.stale } : null);
+  const [restored, setRestored] = useState(start.restored);
+  const [editedFrom, setEditedFrom] = useState(start.editedFrom);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const editor = useRef<CodeEditorHandle>(null);
@@ -275,8 +276,11 @@ export function ScriptEditor({ mcpId, kind, initial, onSaved, onDirtyChange }: S
   const length = useMemo(() => charCount(content), [content]);
   const tooLong = length > MAX_SCRIPT_CHARS;
   const canSave = dirty && !tooLong && !saving;
+  // a version saved elsewhere after the edits on screen were started: saving would overwrite it
+  const newer = dirty && base.version > editedFrom ? base.version : null;
 
-  // the server's script moved on (a revert, a save in another tab): adopt it unless there are edits here.
+  // the server's script moved on (a revert, a save in another tab): adopt it unless there are edits
+  // here; with edits, keep them and say so (`newer`) instead of letting Save silently overwrite it.
   // Only a newer version: right after a save the refetch may still hand back the older one.
   if (initial.version > base.version && !saving) {
     const next = baseOf(initial);
@@ -284,6 +288,7 @@ export function ScriptEditor({ mcpId, kind, initial, onSaved, onDirtyChange }: S
     if (!dirty) {
       setExt(next.ext);
       setContent(next.content);
+      setEditedFrom(next.version);
     }
   }
 
@@ -296,15 +301,20 @@ export function ScriptEditor({ mcpId, kind, initial, onSaved, onDirtyChange }: S
     setExt(nextExt);
     setContent(nextContent);
     setError(null);
-    if (nextExt === base.ext && nextContent === base.content) clearDraft(key);
-    else saveDraft(key, { ext: nextExt, content: nextContent, baseVersion: base.version } satisfies ScriptDraft);
+    if (nextExt === base.ext && nextContent === base.content) {
+      clearDraft(key);
+      setEditedFrom(base.version); // back to the saved text: nothing left to overwrite with
+    } else {
+      saveDraft(key, { ext: nextExt, content: nextContent, baseVersion: editedFrom } satisfies ScriptDraft);
+    }
   };
 
   const discard = () => {
     clearDraft(key);
     setExt(base.ext);
     setContent(base.content);
-    setRestored(null);
+    setEditedFrom(base.version);
+    setRestored(false);
     setError(null);
   };
 
@@ -322,7 +332,8 @@ export function ScriptEditor({ mcpId, kind, initial, onSaved, onDirtyChange }: S
       const saved = await putScript(mcpId, kind, sent);
       clearDraft(key);
       setBase({ ext: saved.ext, content: sent.content, version: saved.version });
-      setRestored(null);
+      setEditedFrom(saved.version);
+      setRestored(false);
       toast.success(copy.scripts.savedVersion(saved.version));
       onSaved(saved);
     } catch (err) {
@@ -353,13 +364,17 @@ export function ScriptEditor({ mcpId, kind, initial, onSaved, onDirtyChange }: S
       onKeyDown={onKeyDown}
       className="flex min-w-0 flex-col gap-3"
     >
-      {restored ? (
+      {restored || newer !== null ? (
         <div role="status" className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-md border border-border-strong bg-surface px-4 py-2.5 text-sm text-fg">
           <div className="flex min-w-0 items-start gap-2.5">
             <HistoryIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
             <div className="flex flex-col gap-0.5">
-              <p>{copy.scripts.draftRestored}</p>
-              {restored.stale ? <p className="text-fg-muted">{copy.scripts.draftStale(initial.version)}</p> : null}
+              {restored ? <p>{copy.scripts.draftRestored}</p> : null}
+              {newer !== null ? (
+                <p className={restored ? "text-fg-muted" : undefined}>
+                  {restored ? copy.scripts.draftStale(newer) : copy.scripts.newerWhileEditing(newer)}
+                </p>
+              ) : null}
             </div>
           </div>
           <Button variant="outline" size="sm" onClick={discard}>

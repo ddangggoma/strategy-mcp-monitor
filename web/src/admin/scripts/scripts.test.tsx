@@ -106,6 +106,24 @@ it("adopts a newer server version while there are no edits", async () => {
   expect(saveButton()).toHaveAttribute("aria-disabled", "true");
 });
 
+it("keeps the edits but says so when a newer version is saved elsewhere meanwhile", async () => {
+  const { qc } = await renderScripts({ me: ownerMe(), owner: 5, script: scriptFixture({ editable: true, version: 2, content: "old" }) });
+  view = await editorView();
+  replaceText(view, "my edit");
+  act(() => qc.setQueryData(qk.script(1, "start"), scriptFixture({ editable: true, version: 5, content: "theirs" })));
+  expect(await screen.findByText(copy.scripts.newerWhileEditing(5))).toBeInTheDocument();
+  expect(editorText()).toBe("my edit"); // nothing on screen is replaced
+  expect(saveButton()).not.toHaveAttribute("aria-disabled"); // the user may still overwrite, knowingly
+  // a reload keeps the warning: the draft still names the version the edits started from
+  expect(loadDraft("script:1:start")).toMatchObject({ content: "my edit", baseVersion: 2 });
+  replaceText(view, "my edit 2");
+  expect(loadDraft("script:1:start")).toMatchObject({ baseVersion: 2 });
+  // dropping the edits takes the newer version
+  await userEvent.click(screen.getByRole("button", { name: copy.scripts.discardDraft }));
+  expect(editorText()).toBe("theirs");
+  expect(screen.queryByText(copy.scripts.newerWhileEditing(5))).toBeNull();
+});
+
 it("Ctrl+S saves from inside the editor", async () => {
   const calls = trackCalls();
   await renderScripts({ me: ownerMe(), owner: 5, script: scriptFixture({ editable: true }) });
@@ -279,7 +297,7 @@ it("the current version needs no revert", async () => {
 // ---- drafts, errors, leaving ------------------------------------------------------------
 
 it("restores the script draft after re-login", async () => {
-  saveDraft("script:1:start", { ext: ".ps1", content: "Write-Host draft", baseVersion: 2 });
+  saveDraft("script:1:start", { ext: ".ps1", content: "Write-Host draft", baseVersion: 2 }, 5);
   await renderScripts({ me: ownerMe(), owner: 5, script: scriptFixture({ editable: true, version: 2, content: "Write-Host saved" }) });
   expect(await screen.findByText(copy.scripts.draftRestored, {}, { timeout: 5000 })).toBeInTheDocument();
   view = await editorView();
@@ -288,7 +306,7 @@ it("restores the script draft after re-login", async () => {
 });
 
 it("discarding the draft puts the saved script back", async () => {
-  saveDraft("script:1:start", { ext: ".ps1", content: "Write-Host draft", baseVersion: 2 });
+  saveDraft("script:1:start", { ext: ".ps1", content: "Write-Host draft", baseVersion: 2 }, 5);
   await renderScripts({ me: ownerMe(), owner: 5, script: scriptFixture({ editable: true, version: 2, content: "Write-Host saved" }) });
   await userEvent.click(await screen.findByRole("button", { name: copy.scripts.discardDraft }, { timeout: 5000 }));
   view = await editorView();
@@ -298,7 +316,7 @@ it("discarding the draft puts the saved script back", async () => {
 });
 
 it("a draft equal to the saved script is dropped silently", async () => {
-  saveDraft("script:1:start", { ext: ".ps1", content: "Write-Host saved\n", baseVersion: 1 });
+  saveDraft("script:1:start", { ext: ".ps1", content: "Write-Host saved\n", baseVersion: 1 }, 5);
   await renderScripts({ me: ownerMe(), owner: 5, script: scriptFixture({ editable: true, content: "Write-Host saved\r\n" }) });
   view = await editorView();
   expect(screen.queryByText(copy.scripts.draftRestored)).toBeNull();
@@ -306,7 +324,7 @@ it("a draft equal to the saved script is dropped silently", async () => {
 });
 
 it("warns when the script was saved again after the draft was made", async () => {
-  saveDraft("script:1:start", { ext: ".ps1", content: "Write-Host draft", baseVersion: 1 });
+  saveDraft("script:1:start", { ext: ".ps1", content: "Write-Host draft", baseVersion: 1 }, 5);
   await renderScripts({ me: ownerMe(), owner: 5, script: scriptFixture({ editable: true, version: 4 }) });
   expect(await screen.findByText(copy.scripts.draftStale(4), {}, { timeout: 5000 })).toBeInTheDocument();
 });
@@ -320,6 +338,41 @@ it("writes a draft on every change and drops it when the text is typed back", as
   expect(loadDraft("script:1:start")).toBeNull();
 });
 
+it("whole flow (RF1): edit, save → 401 → log in again → back on the editor with the draft", async () => {
+  let expired = true;
+  server.use(
+    http.put("/api/mcps/1/scripts/start", () =>
+      expired
+        ? HttpResponse.json({ error: "login_required" }, { status: 401 })
+        : HttpResponse.json({ kind: "start", ext: ".ps1", version: 3, sha256: "b".repeat(64) }),
+    ),
+    http.post("/api/auth/otp/verify", () => {
+      expired = false;
+      const me = ownerMe();
+      return HttpResponse.json({ user: me.user, csrf_token: "csrf-again" });
+    }),
+  );
+  const { router } = await renderScripts({ me: ownerMe(), owner: 5, script: scriptFixture({ editable: true, version: 2 }) });
+  view = await editorView();
+  replaceText(view, "Write-Host unsaved");
+  await userEvent.click(saveButton());
+
+  // the login page, then email and code as a person would
+  await userEvent.type(await screen.findByLabelText(copy.login.email, {}, { timeout: 5000 }), "user5@example.com");
+  await userEvent.click(screen.getByRole("button", { name: copy.login.sendCode }));
+  await screen.findByRole("group", { name: copy.login.codeGroup });
+  await userEvent.click(screen.getByLabelText(copy.login.codeDigit(1)));
+  await userEvent.paste("246810");
+
+  await waitFor(() => expect(router.state.location.href).toBe("/admin/mcps/1?tab=scripts&kind=start"));
+  expect(await screen.findByText(copy.scripts.draftRestored, {}, { timeout: 5000 })).toBeInTheDocument();
+  view = await editorView();
+  expect(editorText()).toBe("Write-Host unsaved");
+  await userEvent.click(saveButton());
+  expect(await screen.findByText(copy.scripts.savedVersion(3))).toBeInTheDocument();
+  expect(loadDraft("script:1:start")).toBeNull();
+});
+
 it("a 401 on save keeps the draft and sends the user to login with this page as redirect", async () => {
   server.use(http.put("/api/mcps/1/scripts/start", () => HttpResponse.json({ error: "login_required" }, { status: 401 })));
   const { router } = await renderScripts({ me: ownerMe(), owner: 5, script: scriptFixture({ editable: true }) });
@@ -330,7 +383,7 @@ it("a 401 on save keeps the draft and sends the user to login with this page as 
   expect(router.state.location.href).toBe("/admin/login?redirect=%2Fadmin%2Fmcps%2F1%3Ftab%3Dscripts%26kind%3Dstart");
   // F12: the unsaved-changes guard did not hold the forced navigation
   expect(screen.queryByRole("alertdialog", { name: copy.common.unsavedTitle })).toBeNull();
-  expect(loadDraft("script:1:start")).toMatchObject({ content: "Write-Host unsaved" });
+  expect(loadDraft("script:1:start", 5)).toMatchObject({ content: "Write-Host unsaved" });
 });
 
 it("shows encoding errors under the editor", async () => {

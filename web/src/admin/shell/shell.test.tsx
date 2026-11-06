@@ -133,14 +133,14 @@ it("logs out to the login page and restarts the stream", async () => {
 });
 
 it("logging out drops this tab's unsaved drafts (a 401 keeps them: scripts.test)", async () => {
-  saveDraft("script:1:start", { ext: ".ps1", content: "x", baseVersion: 1 });
-  saveDraft("mcp-create", { name: "files" });
+  saveDraft("script:1:start", { ext: ".ps1", content: "x", baseVersion: 1 }, 1);
+  saveDraft("mcp-create", { name: "files" }, 1);
   const { router } = await renderShell(meFixture("admin", "local"));
   await userEvent.click(screen.getByRole("button", { name: copy.common.accountMenu("user1") }));
   await userEvent.click(await screen.findByRole("menuitem", { name: copy.common.logout }));
   await waitFor(() => expect(router.state.location.pathname).toBe("/admin/login"));
-  expect(loadDraft("script:1:start")).toBeNull();
-  expect(loadDraft("mcp-create")).toBeNull();
+  expect(loadDraft("script:1:start", 1)).toBeNull();
+  expect(loadDraft("mcp-create", 1)).toBeNull();
 });
 
 it("logging out from a page with unsaved edits still reaches the login page", async () => {

@@ -259,19 +259,20 @@ function renderAs(Page: ComponentType, me: Me) {
 
 it("local-only pages on external explain and make no request", async () => {
   const spy = trackRequests();
-  for (const page of [UsersPage, SettingsPage]) renderAs(page, meFixture("admin", "external"));
+  const clients = [UsersPage, SettingsPage].map((page) => renderAs(page, meFixture("admin", "external")).qc);
   expect(screen.getAllByText(copy.deny.local_only)).toHaveLength(2);
   expect(screen.getByRole("heading", { level: 1, name: copy.users.title })).toBeInTheDocument();
   expect(screen.getByRole("heading", { level: 1, name: copy.settings.title })).toBeInTheDocument();
-  await new Promise((r) => setTimeout(r, 30));
+  // deterministic: a query would be in the cache from its first render, before any request leaves
+  for (const qc of clients) expect(qc.getQueryCache().getAll()).toEqual([]);
   expect(spy.paths().filter((p) => p.startsWith("/api/users") || p.startsWith("/api/settings"))).toEqual([]);
 });
 
 it("developer on local sees the admin-only reason", async () => {
   const spy = trackRequests();
-  for (const page of [UsersPage, SettingsPage]) renderAs(page, meFixture("developer", "local"));
+  const clients = [UsersPage, SettingsPage].map((page) => renderAs(page, meFixture("developer", "local")).qc);
   expect(screen.getAllByText(copy.deny.admin_only)).toHaveLength(2);
   expect(screen.queryByText(copy.deny.local_only)).not.toBeInTheDocument();
-  await new Promise((r) => setTimeout(r, 30));
+  for (const qc of clients) expect(qc.getQueryCache().getAll().filter((q) => q.state.fetchStatus !== "idle")).toEqual([]);
   expect(spy.paths()).toEqual([]);
 });

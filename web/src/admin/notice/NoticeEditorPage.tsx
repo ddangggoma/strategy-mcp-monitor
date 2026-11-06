@@ -115,8 +115,10 @@ function isNoticeDraft(d: unknown): d is NoticeDraft {
 
 interface Start {
   values: NoticeContent;
-  /** A draft was restored; `stale` when the notice was saved again after it was made. */
-  restored: { stale: boolean } | null;
+  /** A draft was restored. */
+  restored: boolean;
+  /** The saved version `values` were started from (older than the notice for a stale draft). */
+  editedFrom: number;
 }
 
 /** Start from a stored draft when it differs from the saved notice; an equal or malformed one is dropped. */
@@ -124,9 +126,9 @@ function startFrom(initial: Notice): Start {
   const draft = loadDraft<unknown>(DRAFT_KEY);
   if (!isNoticeDraft(draft) || sameContent(draft, initial)) {
     if (draft !== null) clearDraft(DRAFT_KEY);
-    return { values: contentOf(initial), restored: null };
+    return { values: contentOf(initial), restored: false, editedFrom: initial.version };
   }
-  return { values: contentOf(draft), restored: { stale: draft.baseVersion !== initial.version } };
+  return { values: contentOf(draft), restored: true, editedFrom: draft.baseVersion };
 }
 
 interface Selection {
@@ -140,6 +142,7 @@ function NoticeForm({ initial, onDirtyChange }: { initial: Notice; onDirtyChange
   const [base, setBase] = useState<Notice>(initial);
   const [values, setValues] = useState<NoticeContent>(start.values);
   const [restored, setRestored] = useState(start.restored);
+  const [editedFrom, setEditedFrom] = useState(start.editedFrom);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const body = useRef<HTMLTextAreaElement>(null);
@@ -153,12 +156,18 @@ function NoticeForm({ initial, onDirtyChange }: { initial: Notice; onDirtyChange
   );
   const valid = FIELDS.every((f) => problems[f] === null);
   const canSave = dirty && valid && !saving;
+  // a version saved elsewhere after the edits on screen were started: saving would overwrite it
+  const newer = dirty && base.version > editedFrom ? base.version : null;
 
-  // the saved notice moved on (a revert, another tab): adopt it unless there are edits here.
+  // the saved notice moved on (a revert, another tab): adopt it unless there are edits here; with
+  // edits, keep them and say so (`newer`) instead of letting Save silently overwrite it.
   // Only a newer version: right after a save the cache may still hold the older one for a moment.
   if (initial.version > base.version && !saving) {
     setBase(initial);
-    if (!dirty) setValues(contentOf(initial));
+    if (!dirty) {
+      setValues(contentOf(initial));
+      setEditedFrom(initial.version);
+    }
   }
 
   useEffect(() => {
@@ -179,8 +188,12 @@ function NoticeForm({ initial, onDirtyChange }: { initial: Notice; onDirtyChange
   const change = (next: NoticeContent) => {
     setValues(next);
     setError(null);
-    if (sameContent(next, base)) clearDraft(DRAFT_KEY);
-    else saveDraft(DRAFT_KEY, { ...next, baseVersion: base.version } satisfies NoticeDraft);
+    if (sameContent(next, base)) {
+      clearDraft(DRAFT_KEY);
+      setEditedFrom(base.version); // back to the saved text: nothing left to overwrite with
+    } else {
+      saveDraft(DRAFT_KEY, { ...next, baseVersion: editedFrom } satisfies NoticeDraft);
+    }
   };
   const set = (field: Field, value: string) => change({ ...values, [field]: value });
 
@@ -195,7 +208,8 @@ function NoticeForm({ initial, onDirtyChange }: { initial: Notice; onDirtyChange
   const discard = () => {
     clearDraft(DRAFT_KEY);
     setValues(contentOf(base));
-    setRestored(null);
+    setEditedFrom(base.version);
+    setRestored(false);
     setError(null);
   };
 
@@ -210,7 +224,8 @@ function NoticeForm({ initial, onDirtyChange }: { initial: Notice; onDirtyChange
       clearDraft(DRAFT_KEY);
       setBase(saved);
       setValues(contentOf(saved)); // the server's trimmed, normalized text
-      setRestored(null);
+      setEditedFrom(saved.version);
+      setRestored(false);
       qc.setQueryData(qk.notice, saved);
       if (created) {
         await qc.invalidateQueries({ queryKey: qk.noticeVersions });
@@ -229,7 +244,7 @@ function NoticeForm({ initial, onDirtyChange }: { initial: Notice; onDirtyChange
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      {restored ? (
+      {restored || newer !== null ? (
         <div
           role="status"
           className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-md border border-border-strong bg-surface px-4 py-2.5 text-sm text-fg"
@@ -237,8 +252,12 @@ function NoticeForm({ initial, onDirtyChange }: { initial: Notice; onDirtyChange
           <div className="flex min-w-0 items-start gap-2.5">
             <HistoryIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
             <div className="flex flex-col gap-0.5">
-              <p>{copy.notice.draftRestored}</p>
-              {restored.stale ? <p className="text-fg-muted">{copy.notice.draftStale(initial.version)}</p> : null}
+              {restored ? <p>{copy.notice.draftRestored}</p> : null}
+              {newer !== null ? (
+                <p className={restored ? "text-fg-muted" : undefined}>
+                  {restored ? copy.notice.draftStale(newer) : copy.notice.newerWhileEditing(newer)}
+                </p>
+              ) : null}
             </div>
           </div>
           <Button variant="outline" size="sm" onClick={discard}>
@@ -527,8 +546,56 @@ function VersionDetail({ version, current, dirty }: { version: number; current: 
           {copy.notice.versionError}
         </p>
       ) : (
-        <TextDiff before={content.data.body} after={current.body} labels={[label, copy.notice.current]} />
+        <VersionDiff before={content.data} after={current} label={label} />
       )}
+    </div>
+  );
+}
+
+const SHORT_FIELDS = ["title", "button_text"] as const;
+
+/** Title and button text side by side when they differ, then the body as a line diff. */
+function VersionDiff({ before, after, label }: { before: NoticeContent; after: NoticeContent; label: string }) {
+  const changed = SHORT_FIELDS.filter((f) => before[f] !== after[f]);
+  return (
+    <div className="flex min-w-0 flex-col gap-3">
+      {changed.length > 0 ? (
+        <div className="overflow-x-auto rounded-md border border-border bg-surface">
+          <table className="w-full border-collapse text-sm">
+            <caption className="sr-only">{copy.notice.fieldChanges}</caption>
+            <thead className="text-fg-muted">
+              <tr className="border-b border-border">
+                <th scope="col" className="px-3 py-1.5 text-left font-medium">
+                  <span className="sr-only">{copy.notice.fieldHeader}</span>
+                </th>
+                <th scope="col" className="px-3 py-1.5 text-left font-medium">
+                  {label}
+                </th>
+                <th scope="col" className="px-3 py-1.5 text-left font-medium">
+                  {copy.notice.current}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {changed.map((f) => (
+                <tr key={f} className="border-b border-border last:border-b-0">
+                  <th scope="row" className="px-3 py-1.5 text-left font-medium whitespace-nowrap text-fg-muted">
+                    {copy.notice.fields[f]}
+                  </th>
+                  <td className="px-3 py-1.5 break-words text-fg">{before[f]}</td>
+                  <td className="px-3 py-1.5 break-words text-fg">{after[f]}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+      <TextDiff
+        before={before.body}
+        after={after.body}
+        labels={[label, copy.notice.current]}
+        same={changed.length > 0 ? copy.notice.bodySame : undefined}
+      />
     </div>
   );
 }

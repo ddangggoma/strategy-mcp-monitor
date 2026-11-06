@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { copy } from "@/copy/ko";
@@ -7,6 +7,7 @@ import { loadDraft, saveDraft } from "@/lib/draft";
 import { meFixture, noticeFixture, noticeVersionFixture, userSummary } from "../../../tests/msw/fixtures";
 import { server, trackRequests } from "../../../tests/msw/server";
 import { renderWithProviders } from "../../../tests/render";
+import { qk } from "../query-keys";
 
 afterEach(() => sessionStorage.clear());
 
@@ -211,7 +212,7 @@ it("keeps a draft on every change and drops it when the text is typed back", asy
 });
 
 it("restores the notice draft after re-login", async () => {
-  saveDraft("notice", { title: "고치던 제목", body: "고치던 본문", button_text: "확인", baseVersion: 2 });
+  saveDraft("notice", { title: "고치던 제목", body: "고치던 본문", button_text: "확인", baseVersion: 2 }, 1);
   await renderEditor(noticeFixture({ version: 2 }));
   expect(field(copy.notice.fields.title)).toHaveValue("고치던 제목");
   expect(field(copy.notice.fields.body)).toHaveValue("고치던 본문");
@@ -225,21 +226,42 @@ it("restores the notice draft after re-login", async () => {
   expect(loadDraft("notice")).toBeNull();
 });
 
+it("keeps the edits but says so when a newer notice is saved elsewhere meanwhile", async () => {
+  const { qc } = await renderEditor(noticeFixture({ version: 2, title: "접속 안내" }));
+  await retype(copy.notice.fields.title, "내 제목");
+  act(() => qc.setQueryData(qk.notice, noticeFixture({ version: 5, title: "다른 사람 제목" })));
+  expect(await screen.findByText(copy.notice.newerWhileEditing(5))).toBeInTheDocument();
+  expect(field(copy.notice.fields.title)).toHaveValue("내 제목");
+  expect(saveButton()).not.toHaveAttribute("aria-disabled");
+  expect(loadDraft("notice")).toMatchObject({ title: "내 제목", baseVersion: 2 });
+  await userEvent.click(screen.getByRole("button", { name: copy.notice.discardDraft }));
+  expect(field(copy.notice.fields.title)).toHaveValue("다른 사람 제목");
+  expect(screen.queryByText(copy.notice.newerWhileEditing(5))).toBeNull();
+});
+
+it("does not give another user's draft to the admin who logs in next on this tab", async () => {
+  saveDraft("notice", { title: "X가 고치던 제목", body: "X의 본문", button_text: "확인", baseVersion: 2 }, 1);
+  await renderEditor(noticeFixture({ version: 2 }), { me: meFixture("admin", "local", 2) });
+  expect(field(copy.notice.fields.title)).toHaveValue(noticeFixture().title);
+  expect(screen.queryByText(copy.notice.draftRestored)).toBeNull();
+  expect(loadDraft("notice", 1)).toBeNull(); // gone, not kept for later
+});
+
 it("warns when the notice was saved again after the draft was made", async () => {
-  saveDraft("notice", { title: "고치던 제목", body: "본문", button_text: "확인", baseVersion: 2 });
+  saveDraft("notice", { title: "고치던 제목", body: "본문", button_text: "확인", baseVersion: 2 }, 1);
   await renderEditor(noticeFixture({ version: 5 }));
   expect(screen.getByText(copy.notice.draftStale(5))).toBeInTheDocument();
 });
 
 it("drops a draft equal to the saved notice, and a malformed one", async () => {
   const n = noticeFixture({ version: 2 });
-  saveDraft("notice", { title: n.title, body: n.body, button_text: n.button_text, baseVersion: 1 });
+  saveDraft("notice", { title: n.title, body: n.body, button_text: n.button_text, baseVersion: 1 }, 1);
   const { unmount } = await renderEditor(n);
   expect(screen.queryByText(copy.notice.draftRestored)).toBeNull();
   expect(loadDraft("notice")).toBeNull();
   unmount();
 
-  saveDraft("notice", { title: 42 });
+  saveDraft("notice", { title: 42 }, 1);
   await renderEditor(n);
   expect(field(copy.notice.fields.title)).toHaveValue(n.title);
   expect(loadDraft("notice")).toBeNull();
@@ -254,7 +276,7 @@ it("a 401 on save keeps the notice draft", async () => {
   expect(router.state.location.href).toBe("/admin/login?redirect=%2Fadmin%2Fnotice");
   // F12: the unsaved-changes guard did not hold the forced navigation
   expect(screen.queryByRole("alertdialog", { name: copy.common.unsavedTitle })).toBeNull();
-  expect(loadDraft("notice")).toMatchObject({ title: "저장 안 된 제목" });
+  expect(loadDraft("notice", 1)).toMatchObject({ title: "저장 안 된 제목" });
 });
 
 it("asks before leaving the page with unsaved edits", async () => {
@@ -316,6 +338,21 @@ it("compares a picked version's body with the saved one and reverts after confir
   expect(reverted).toBe("1");
   // no edits here: the editor follows the new current version
   await waitFor(() => expect(field(copy.notice.fields.body)).toHaveValue("옛 본문"));
+});
+
+it("shows a title or button-text change even when the body is the same", async () => {
+  await renderEditor(noticeFixture({ version: 2, title: "새 제목", button_text: "동의" }), {
+    history: [noticeVersionFixture({ version: 2 }), noticeVersionFixture({ version: 1 })],
+  });
+  server.use(http.get("/api/notice/versions/1", () => HttpResponse.json(noticeFixture({ version: 1, title: "옛 제목", button_text: "확인" }))));
+  await userEvent.click(within(versionList()).getByRole("button", { name: new RegExp(copy.notice.versionLabel(1)) }));
+  const fields = await screen.findByRole("table", { name: copy.notice.fieldChanges });
+  const titleRow = within(fields).getByRole("row", { name: new RegExp(copy.notice.fields.title) });
+  expect(within(titleRow).getAllByRole("cell").map((c) => c.textContent)).toEqual(["옛 제목", "새 제목"]);
+  const buttonRow = within(fields).getByRole("row", { name: new RegExp(copy.notice.fields.button_text) });
+  expect(within(buttonRow).getAllByRole("cell").map((c) => c.textContent)).toEqual(["확인", "동의"]);
+  expect(screen.queryByText(copy.diff.same)).toBeNull(); // the versions are not "the same"
+  expect(screen.getByText(copy.notice.bodySame)).toBeInTheDocument();
 });
 
 it("reverts to the built-in default (version 0)", async () => {

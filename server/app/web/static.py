@@ -13,6 +13,8 @@ CSP = (
     "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
 )
 IMMUTABLE = "public, max-age=31536000, immutable"
+# HEAD too: uptime probes and caches use it (Starlette answers it without a body)
+_GET_HEAD = ["GET", "HEAD"]
 HTML_PAGES = {"board": "board.html", "admin": "admin.html", "notice": "notice.html"}
 
 _CONTENT_TYPES = {
@@ -131,29 +133,29 @@ def static_router(dist: Path, *, notice: bool = True) -> APIRouter:
             headers["Content-Security-Policy"] = CSP
         return FileResponse(chosen, media_type=media_type, headers=headers)
 
-    @router.get("/")
+    @router.api_route("/", methods=_GET_HEAD)
     async def board(accept_encoding: AcceptEncoding = None) -> Response:
         return serve_file((HTML_PAGES["board"],), accept_encoding, hashed=False)
 
-    @router.get("/admin")
-    @router.get("/admin/{path:path}")  # SPA fallback: the client router resolves the rest
+    @router.api_route("/admin", methods=_GET_HEAD)
+    @router.api_route("/admin/{path:path}", methods=_GET_HEAD)  # SPA fallback: the client router resolves it
     async def admin(accept_encoding: AcceptEncoding = None) -> Response:
         return serve_file((HTML_PAGES["admin"],), accept_encoding, hashed=False)
 
     if notice:
 
-        @router.get("/notice")
+        @router.api_route("/notice", methods=_GET_HEAD)
         async def notice_page(accept_encoding: AcceptEncoding = None) -> Response:
             return serve_file((HTML_PAGES["notice"],), accept_encoding, hashed=False)
 
-    @router.get("/assets/{path:path}")
+    @router.api_route("/assets/{path:path}", methods=_GET_HEAD)
     async def asset(path: str, accept_encoding: AcceptEncoding = None) -> Response:
         parts = safe_parts(path)
         if parts is None:
             return _not_found()
         return serve_file(("assets", *parts), accept_encoding, hashed=True)
 
-    @router.get("/favicon.svg")
+    @router.api_route("/favicon.svg", methods=_GET_HEAD)
     async def favicon(accept_encoding: AcceptEncoding = None) -> Response:
         return serve_file(("favicon.svg",), accept_encoding, hashed=False)
 

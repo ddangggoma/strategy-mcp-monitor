@@ -89,12 +89,13 @@ it("sends normalized values and the maintenance switch as part of the same form"
 
 it("does nothing when nothing changed, and a field typed back to its value is clean", async () => {
   const calls = trackCalls();
-  await renderDetail(mcpDetailFixture({ id: 1, action_delay_sec: 30 }));
+  const { qc } = await renderDetail(mcpDetailFixture({ id: 1, action_delay_sec: 30 }));
   await retype(copy.mcp.fields.action_delay_sec, "31");
   await retype(copy.mcp.fields.action_delay_sec, "30");
   expect(saveButton()).toHaveAttribute("aria-disabled", "true");
   await userEvent.click(saveButton());
-  await new Promise((r) => setTimeout(r, 30));
+  // deterministic: a save would have created its mutation synchronously in the click handler
+  expect(qc.getMutationCache().getAll()).toEqual([]);
   expect(calls()).not.toContain("PUT /api/mcps/1");
 });
 

@@ -48,14 +48,14 @@ const ROW_BG: Record<Op, string | undefined> = { same: undefined, add: "bg-diff-
  * (colour is never the only cue, and the sign is named for screen readers), no animation. The table
  * scrolls inside its own frame; long lines scroll sideways instead of wrapping.
  */
-export function TextDiff({ before, after, labels }: { before: string; after: string; labels: [string, string] }) {
+export function TextDiff({ before, after, labels, same = copy.diff.same }: { before: string; after: string; labels: [string, string]; same?: string }) {
   const { rows, added, removed } = useMemo(() => diffRows(before, after), [before, after]);
   const caption = copy.diff.caption(labels[0], labels[1]);
   const changed = added + removed > 0;
 
   return (
     <div className="flex min-w-0 flex-col gap-2">
-      <p className="text-sm text-fg-muted">{changed ? copy.diff.summary(removed, added) : copy.diff.same}</p>
+      <p className="text-sm text-fg-muted">{changed ? copy.diff.summary(removed, added) : same}</p>
       <div
         role="region"
         aria-label={caption}

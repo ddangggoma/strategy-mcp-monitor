@@ -8,7 +8,7 @@ import {
 } from "@tanstack/react-table";
 import { Link, getRouteApi } from "@tanstack/react-router";
 import { ArrowDownIcon, ArrowUpIcon, ChevronsUpDownIcon, PlusIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { WithReason } from "@/components/app/WithReason";
 import { STATE_ICONS, StatusBadge } from "@/components/status/StatusBadge";
 import { UptimeMeter } from "@/components/status/UptimeMeter";
@@ -185,11 +185,21 @@ function McpTable({ data }: { data: McpDetail[] }) {
     enableSortingRemoval: false,
     initialState: { sorting: [{ id: "state", desc: false }] },
   });
-  // While the pointer is over the rows, a live state change must not move the row under it (the
-  // next click would land on another MCP's button): keep the order from when the pointer came in.
+  // While the pointer is over the rows or keyboard focus is in them, a live state change must not
+  // move the row under it (the next click or Enter would land on another MCP's button): keep the
+  // order from when the pointer came in or focus arrived, until both have left.
   const [held, setHeld] = useState<string[] | null>(null);
+  const holders = useRef({ pointer: false, focus: false });
   const sorted = table.getRowModel().rows;
   const rows = held ? holdOrder(sorted, held) : sorted;
+  const hold = (who: "pointer" | "focus") => {
+    if (!holders.current.pointer && !holders.current.focus) setHeld(sorted.map((r) => r.id));
+    holders.current[who] = true;
+  };
+  const release = (who: "pointer" | "focus") => {
+    holders.current[who] = false;
+    if (!holders.current.pointer && !holders.current.focus) setHeld(null);
+  };
 
   return (
     // the table scrolls inside its own frame in a narrow window; the page never scrolls sideways
@@ -229,7 +239,14 @@ function McpTable({ data }: { data: McpDetail[] }) {
             </TableRow>
           ))}
         </TableHeader>
-        <TableBody onPointerEnter={() => setHeld(sorted.map((r) => r.id))} onPointerLeave={() => setHeld(null)}>
+        <TableBody
+          onPointerEnter={() => hold("pointer")}
+          onPointerLeave={() => release("pointer")}
+          onFocus={() => hold("focus")}
+          onBlur={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget)) release("focus"); // not a move to another row
+          }}
+        >
           {rows.map((row) => (
             <TableRow key={row.id} data-id={row.original.id}>
               {row.getAllCells().map((cell) => {

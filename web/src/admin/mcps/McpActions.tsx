@@ -40,7 +40,11 @@ const KINDS: readonly { kind: ScriptKind; icon: LucideIcon }[] = [
 export function McpActions({ mcp, size = "md" }: { mcp: McpDetail; size?: "sm" | "md" }) {
   const me = useSession();
   const { tracker } = useLive();
-  const action = useManualAction();
+  const action = useManualAction({
+    onAccepted: ({ mcp: m, kind }, runId) =>
+      tracker?.track({ runId, mcpId: m.id, mcpName: m.name, requested: kind, timeoutMs: trackerTimeoutMs(m.script_timeout_sec) }),
+    onFailed: (err) => toast.error(messageForError(err instanceof ApiError ? err.code : "internal")),
+  });
   const [busy, setBusy] = useState<ScriptKind | null>(null);
   const [confirmStop, setConfirmStop] = useState(false);
   const stopButton = useRef<HTMLButtonElement>(null);
@@ -55,24 +59,7 @@ export function McpActions({ mcp, size = "md" }: { mcp: McpDetail; size?: "sm" |
   const run = (kind: ScriptKind) => {
     if (busy) return;
     setBusy(kind);
-    action.mutate(
-      { id: mcp.id, kind },
-      {
-        onSuccess: ({ run_id }) => {
-          tracker?.track({
-            runId: run_id,
-            mcpId: mcp.id,
-            mcpName: mcp.name,
-            requested: kind,
-            timeoutMs: trackerTimeoutMs(mcp.script_timeout_sec),
-          });
-        },
-        onError: (err) => {
-          toast.error(messageForError(err instanceof ApiError ? err.code : "internal"));
-        },
-        onSettled: () => setBusy(null),
-      },
-    );
+    action.mutate({ mcp, kind }, { onSettled: () => setBusy(null) }); // busy is this button's own state
   };
 
   return (

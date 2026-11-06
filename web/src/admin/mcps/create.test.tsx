@@ -170,7 +170,7 @@ it("keeps a draft and restores it on the next visit", async () => {
 });
 
 it("ignores a draft of the wrong shape", async () => {
-  saveDraft("mcp-create", { name: 5, scripts: "nope" });
+  saveDraft("mcp-create", { name: 5, scripts: "nope" }, 5);
   await renderCreate();
   expect(field(copy.mcp.fields.name)).toHaveValue("");
   expect(screen.queryByText(copy.scripts.draftRestored)).toBeNull();

@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { copy } from "@/copy/ko";
 import type { McpDetail, Me } from "@/lib/api-types";
-import { item, mcpDetailFixture, meFixture } from "../../../tests/msw/fixtures";
+import { historyFixture, item, mcpDetailFixture, meFixture, record } from "../../../tests/msw/fixtures";
 import { server, trackRequests } from "../../../tests/msw/server";
 import { renderWithProviders } from "../../../tests/render";
 import { connectLive } from "../live";
@@ -81,6 +81,30 @@ it("ignores action events for runs this tab did not start", async () => {
   expect(screen.getByText(copy.toasts.pending("calc", "start"))).toBeInTheDocument();
 });
 
+it("whole flow (RF3): after the stream reconnects, a run whose event was missed is settled from history", async () => {
+  const { store } = await renderList([mcpDetailFixture({ id: 1, name: "calc" })]);
+  server.use(http.post("/api/mcps/1/actions/start", () => HttpResponse.json({ run_id: "r9" }, { status: 202 })));
+  await userEvent.click(within(row("calc")).getByRole("button", { name: copy.mcp.start }));
+  await screen.findByText(copy.toasts.pending("calc", "start"));
+  // the stream drops; the run's SSE event goes out meanwhile and is never seen by this tab
+  act(() => store.setStatus("reconnecting"));
+  const asked: string[] = [];
+  server.use(
+    http.get("/api/mcps/1/history", ({ request }) => {
+      asked.push(new URL(request.url).search);
+      return HttpResponse.json({
+        ...historyFixture(),
+        actions: [record({ run_id: "r9", kind: "start", requested: "start", status: "failed", exit_code: 2, duration_ms: 1500 })],
+      });
+    }),
+  );
+  act(() => store.setStatus("open")); // reconnected: AppShell asks the tracker to reconcile
+  expect(await screen.findByText(copy.toasts.failed("calc", "start"))).toBeInTheDocument();
+  expect(screen.getByText(copy.toasts.exitAndDuration(2, "1.5초"))).toBeInTheDocument();
+  expect(asked).toEqual(["?hours=1"]);
+  expect(screen.queryByText(copy.toasts.pending("calc", "start"))).not.toBeInTheDocument();
+});
+
 it("drops pending toasts when the shell goes away (Sonner would replay them to the next login)", async () => {
   const { unmount } = await renderList([mcpDetailFixture({ id: 1, name: "calc" })]);
   server.use(http.post("/api/mcps/1/actions/start", () => HttpResponse.json({ run_id: "r9" }, { status: 202 })));
@@ -119,6 +143,41 @@ it("409 action_in_progress shows an error toast", async () => {
   await userEvent.click(within(row("calc")).getByRole("button", { name: copy.mcp.start }));
   expect(await screen.findByText(copy.errors.action_in_progress)).toBeInTheDocument();
   expect(screen.queryByText(copy.toasts.pending("calc", "start"))).not.toBeInTheDocument();
+});
+
+it("keeps the toast when the button is gone before the 202 (moved to the detail page)", async () => {
+  const { router, store } = await renderList([mcpDetailFixture({ id: 1, name: "calc" })]);
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  server.use(
+    http.post("/api/mcps/1/actions/restart", async () => {
+      await gate;
+      return HttpResponse.json({ run_id: "r9" }, { status: 202 });
+    }),
+  );
+  await userEvent.click(within(row("calc")).getByRole("button", { name: copy.mcp.restart }));
+  await act(() => router.navigate({ to: "/admin/mcps/$mcpId", params: { mcpId: "1" } }));
+  await waitFor(() => expect(screen.queryByRole("table", { name: copy.mcp.listLabel })).toBeNull()); // the row unmounted
+  release();
+  expect(await screen.findByText(copy.toasts.pending("calc", "restart"))).toBeInTheDocument();
+  act(() => store.apply(actionEvent({ kind: "start", requested: "restart" })));
+  expect(await screen.findByText(copy.toasts.ok("calc", "restart"))).toBeInTheDocument();
+});
+
+it("keeps the error toast when the button is gone before the answer", async () => {
+  const { router } = await renderList([mcpDetailFixture({ id: 1, name: "calc" })]);
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  server.use(
+    http.post("/api/mcps/1/actions/start", async () => {
+      await gate;
+      return HttpResponse.json({ error: "action_in_progress" }, { status: 409 });
+    }),
+  );
+  await userEvent.click(within(row("calc")).getByRole("button", { name: copy.mcp.start }));
+  await act(() => router.navigate({ to: "/admin" }));
+  release();
+  expect(await screen.findByText(copy.errors.action_in_progress)).toBeInTheDocument();
 });
 
 it("marks the button busy while the request is in flight", async () => {
@@ -195,6 +254,20 @@ it("does not move rows under the pointer when a state changes, and re-sorts once
   await within(row("files")).findByText(copy.states.FAILED);
   expect(rowNames()).toEqual(["calc", "files"]);
   await userEvent.unhover(body);
+  await waitFor(() => expect(rowNames()).toEqual(["files", "calc"]));
+});
+
+it("does not move rows while keyboard focus is in them, and re-sorts once focus leaves", async () => {
+  const { store } = await renderList([mcpDetailFixture({ id: 1, name: "calc" }), mcpDetailFixture({ id: 2, name: "files" })]);
+  act(() => within(row("calc")).getByRole("button", { name: copy.mcp.start }).focus());
+  act(() => store.apply({ event: "mcp", data: JSON.stringify(item(2, "FAILED", "files")) }));
+  await within(row("files")).findByText(copy.states.FAILED);
+  expect(rowNames()).toEqual(["calc", "files"]);
+  // moving focus from row to row keeps the order too
+  const filesStart = within(row("files")).getByRole("button", { name: copy.mcp.start });
+  act(() => filesStart.focus());
+  expect(rowNames()).toEqual(["calc", "files"]);
+  act(() => filesStart.blur());
   await waitFor(() => expect(rowNames()).toEqual(["files", "calc"]));
 });
 
