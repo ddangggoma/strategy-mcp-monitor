@@ -1,5 +1,8 @@
 """Collector command-line flags (``--session-source``, ``--collect-console``, ``--activity``,
-``--agent-launcher``, ``--agent-dialog``, ``--agent-dir``) → ``CollectorConfig``."""
+``--agent-launcher``, ``--agent-dialog``, ``--agent-dir``) → ``CollectorConfig``.
+
+In a deployment bundle (``app.bundle``) the agent runs the bundle's command with the bundle root
+as its working folder; in development, the base interpreter with ``PYTHONPATH`` = ``--agent-dir``."""
 
 from __future__ import annotations
 
@@ -8,6 +11,7 @@ import sys
 from pathlib import Path
 
 from app.activity.agent_supervisor import AgentOptions
+from app.bundle import Bundle, agent_command
 from app.clock import Clock
 from app.collect.config import CollectorConfig
 from app.sessions.jsonsource import JsonFileWtsSource
@@ -29,7 +33,8 @@ def session_source(value: str) -> str:
     raise argparse.ArgumentTypeError("expected wts, none or json:<path>")
 
 
-def add_collector_arguments(parser: argparse.ArgumentParser) -> None:
+def add_collector_arguments(parser: argparse.ArgumentParser, bundle: Bundle | None = None) -> None:
+    """``bundle``: the deployment bundle this process runs from (``find_bundle()``), or None."""
     parser.add_argument(
         "--session-source",
         type=session_source,
@@ -65,9 +70,12 @@ def add_collector_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--agent-dir",
         type=Path,
-        default=DEFAULT_AGENT_DIR,
-        help="the session agent's folder (default: <repo>/agent)",
+        default=bundle.root if bundle is not None else DEFAULT_AGENT_DIR,
+        help="the session agent's working folder (default: the bundle root, else <repo>/agent, "
+        "which is then also its PYTHONPATH)",
     )
+    # Not a flag: the bundle's agent command, None = <base interpreter> -m mcp_agent.
+    parser.set_defaults(agent_command=agent_command(bundle) if bundle is not None else None)
 
 
 def collector_config(ns: argparse.Namespace, *, clock: Clock, root: Path) -> CollectorConfig:
@@ -100,6 +108,7 @@ def collector_config(ns: argparse.Namespace, *, clock: Clock, root: Path) -> Col
     agent = AgentOptions(
         dialog=ns.agent_dialog,
         agent_dir=ns.agent_dir,
+        command=ns.agent_command,
         url_dir=root / "run" if ns.agent_dialog == "print" else None,
     )
     return CollectorConfig(

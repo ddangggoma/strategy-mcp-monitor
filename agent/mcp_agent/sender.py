@@ -31,8 +31,13 @@ def to_event(e: RawWinEvent) -> dict[str, Any]:
             "title": _text(e.title, TITLE_MAX)}
 
 
-def to_payload(items: list[RawWinEvent | dict[str, Any]]) -> dict[str, Any]:
-    return {"events": [to_event(x) if isinstance(x, RawWinEvent) else x for x in items]}
+def to_payload(items: list[RawWinEvent | dict[str, Any]], dropped: int = 0) -> dict[str, Any]:
+    """The ``POST /api/agent/events`` body; ``dropped`` (events lost since the last report) only
+    when there are any."""
+    body: dict[str, Any] = {"events": [to_event(x) if isinstance(x, RawWinEvent) else x for x in items]}
+    if dropped:
+        body["dropped"] = dropped
+    return body
 
 
 class _Poster(Protocol):
@@ -45,7 +50,9 @@ class EventSender:
 
     ``flush`` stops at the first ``ServerUnavailable`` and keeps the rest for the next try;
     ``AgentRejected`` propagates; a batch the server refuses as invalid (other 4xx) is dropped
-    rather than retried forever."""
+    rather than retried forever. The events dropped and not yet reported ride on the next batch as
+    ``dropped`` (the server logs ``system collector.dropped``, review M13); a batch the server
+    accepted reports them once."""
 
     def __init__(self, client: _Poster, *, events_max: int = 200, buffer_max: int = 2000) -> None:
         self._client = client
@@ -54,6 +61,7 @@ class EventSender:
         self._buffer_max = buffer_max
         self._lock = threading.Lock()
         self.dropped = 0
+        self._reported = 0  # of ``dropped``, accepted by the server
 
     @property
     def pending(self) -> int:
@@ -71,9 +79,11 @@ class EventSender:
         with self._lock:
             while self._buffer:
                 batch = [self._buffer[i] for i in range(min(self._events_max, len(self._buffer)))]
+                unreported = self.dropped - self._reported
                 try:
                     # Window titles only go to a server that proved itself since the last outage (I1).
-                    self._client.post(EVENTS_PATH, to_payload(batch), verified_only=True)
+                    self._client.post(EVENTS_PATH, to_payload(batch, unreported), verified_only=True)
+                    self._reported += unreported
                 except ServerUnavailable:
                     return
                 except RuntimeError as e:

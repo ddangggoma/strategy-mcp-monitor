@@ -10,7 +10,7 @@ from collections.abc import Callable, Sequence
 from datetime import datetime
 from typing import Any, Literal
 
-from app.win.launch import LaunchError, LaunchSpec
+from app.win.launch import LaunchSpec
 from app.win.peer import PeerInfo
 from app.win.wmi import ProcessEvent
 from app.win.wts import WtsSnapshot
@@ -210,11 +210,12 @@ class FakeProcessWatch:
 
 class FakeProcess:
     """An ``AgentProcess``: runs until ``exit(code)``; ``kill()`` sets ``killed`` and the next
-    ``poll()`` returns 1 (unless it had already exited)."""
+    ``poll()`` returns 1 (unless it had already exited). ``kill_threads``: the thread of each kill."""
 
     def __init__(self, pid: int) -> None:
         self.pid = pid
         self.killed = False
+        self.kill_threads: list[int] = []
         self._code: int | None = None
 
     def exit(self, code: int) -> None:
@@ -224,6 +225,7 @@ class FakeProcess:
         return self._code
 
     def kill(self) -> None:
+        self.kill_threads.append(threading.get_ident())
         self.killed = True
         if self._code is None:
             self._code = 1
@@ -231,16 +233,19 @@ class FakeProcess:
 
 class FakeLauncher:
     """An ``AgentLauncher`` that records each ``LaunchSpec`` and hands out ``FakeProcess``es with
-    pids 1000, 1001, … . ``fail_next`` is raised by the next ``launch`` (once; no spec recorded)."""
+    pids 1000, 1001, … . ``fail_next`` is raised by the next ``launch`` (once; no spec recorded).
+    ``threads``: the thread of each ``launch`` call."""
 
     name = "fake"
 
     def __init__(self) -> None:
         self.specs: list[LaunchSpec] = []
         self.procs: list[FakeProcess] = []
-        self.fail_next: LaunchError | None = None
+        self.fail_next: Exception | None = None
+        self.threads: list[int] = []
 
     def launch(self, spec: LaunchSpec) -> FakeProcess:
+        self.threads.append(threading.get_ident())
         if self.fail_next is not None:
             error, self.fail_next = self.fail_next, None
             raise error

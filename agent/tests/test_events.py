@@ -331,3 +331,49 @@ def test_activity_final_flush_sends_nothing_after_an_unproven_401(fake_server):
     assert a._sender is not None and a._sender.pending > 0
     a.stop()
     assert not any(r[1] == "/api/agent/events" for r in fake_server.requests)
+
+
+# --- M13 (Plan 5 Task 9): the dropped count reaches the server ---------------------------------
+
+class CountingClient:
+    """Records each posted body; ``outcomes`` (an exception or None per post) are used in order."""
+    def __init__(self, *outcomes):
+        self.outcomes, self.bodies = list(outcomes), []
+    def post(self, path, body=None, *, verified_only=False):
+        self.bodies.append(body)
+        outcome = self.outcomes.pop(0) if self.outcomes else None
+        if outcome is not None:
+            raise outcome
+
+def idle(n):
+    return {"type": "idle", "at": "2026-11-04T14:00:00.000+09:00", "idle_sec": n}
+
+def test_overflow_drops_ride_on_the_next_batch_once():
+    client = CountingClient(); s = EventSender(client, events_max=2, buffer_max=2)
+    for n in range(5):
+        s.add(idle(n))
+    s.flush()
+    assert [b.get("dropped") for b in client.bodies] == [3] and s.dropped == 3
+    s.add(idle(9)); s.flush()
+    assert "dropped" not in client.bodies[1]  # reported once
+
+def test_dropped_count_waits_while_the_server_is_unavailable():
+    client = CountingClient(ServerUnavailable("down")); s = EventSender(client, events_max=5, buffer_max=1)
+    s.add(idle(0)); s.add(idle(1)); s.flush()
+    assert client.bodies[0]["dropped"] == 1
+    s.flush()
+    assert client.bodies[1] == {"events": [idle(1)], "dropped": 1}
+
+def test_a_refused_batch_is_counted_in_the_next_report(capsys):
+    client = CountingClient(RuntimeError("POST /api/agent/events: unexpected status 422"))
+    s = EventSender(client, events_max=1)
+    s.add(idle(0)); s.add(idle(1)); s.flush()
+    assert [b.get("dropped") for b in client.bodies] == [None, 1] and s.dropped == 1
+    s.add(idle(2)); s.flush()
+    assert "dropped" not in client.bodies[2]
+    assert "dropped 1 events" in capsys.readouterr().err
+
+def test_payload_has_no_dropped_key_when_nothing_was_dropped():
+    assert to_payload([idle(1)]) == {"events": [idle(1)]}
+    assert to_payload([idle(1)], dropped=0) == {"events": [idle(1)]}
+    assert to_payload([idle(1)], dropped=4) == {"events": [idle(1)], "dropped": 4}

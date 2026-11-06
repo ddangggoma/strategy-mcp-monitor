@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from app import __version__
+from app.bundle import default_root, default_static_dir, find_bundle
 from app.clock import SystemClock
 from app.collect.cli import add_collector_arguments, collector_config
 from app.db import DatabaseTooNewError
@@ -17,7 +18,7 @@ from app.main import PortInUseError, ServeControl, serve
 from app.paths import AppPaths
 from app.rootlock import RootInUseError, RootLock
 
-DEFAULT_STATIC_DIR = Path(__file__).resolve().parents[2] / "web" / "dist"
+_ROOT_HELP = r"data root (default: %%ProgramData%%\MCP Monitor in a deployment bundle, else cwd)"
 
 
 def _dev_otp_code(value: str) -> str:
@@ -37,16 +38,21 @@ def _is_loopback(host: str) -> bool:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    bundle = find_bundle()
     parser = argparse.ArgumentParser(prog="python -m app", description="MCP monitor server")
     parser.add_argument("--version", action="version", version=f"mcp-monitor {__version__}")
-    parser.add_argument("--root", type=Path, default=Path.cwd(), help="data root (default: cwd)")
+    parser.add_argument(
+        "--root", type=Path, default=default_root(bundle),
+        help=_ROOT_HELP,
+    )
     parser.add_argument("--local-port", type=int, default=8700)
     parser.add_argument("--external-port", type=int, default=8701)
     parser.add_argument(
         "--external-host", default="0.0.0.0", help="address of the external channel (default: 0.0.0.0)"
     )
     parser.add_argument(
-        "--static-dir", type=Path, default=DEFAULT_STATIC_DIR, help="built web app (default: web/dist)"
+        "--static-dir", type=Path, default=default_static_dir(bundle),
+        help="built web app (default: <bundle>/web, else web/dist)",
     )
     parser.add_argument(
         "--dev-otp-code",
@@ -59,7 +65,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="allow --dev-otp-code while the external channel is reachable from the network",
     )
-    add_collector_arguments(parser)
+    add_collector_arguments(parser, bundle)
     args = parser.parse_args(argv)
     if args.dev_otp_code is not None and not args.allow_lan_dev and not _is_loopback(args.external_host):
         parser.error(
@@ -103,7 +109,10 @@ def reindex(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m app reindex", description="rebuild the log search index from the JSONL files"
     )
-    parser.add_argument("--root", type=Path, default=Path.cwd(), help="data root (default: cwd)")
+    parser.add_argument(
+        "--root", type=Path, default=default_root(find_bundle()),
+        help=_ROOT_HELP,
+    )
     ns = parser.parse_args(argv)
     root = ns.root.resolve()
     paths = AppPaths(root)

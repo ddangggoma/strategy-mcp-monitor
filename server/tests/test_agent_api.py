@@ -381,3 +381,30 @@ async def test_a_window_title_with_a_notice_token_is_redacted(local_client, serv
     assert (await local_client.post("/api/agent/events", json={"events": [ev]}, headers=H(agent))).status_code == 204
     [line] = await audit_events(services, "activity.window")
     assert line["title"] == "127.0.0.1:8700/notice#d=4&t=<redacted>"
+
+
+# --- M13 (Plan 5 Task 9): the agent's dropped events are logged ---------------------------------
+
+def dropped_lines(lines):
+    return [e for e in lines if e.get("event") == "collector.dropped"]
+
+async def test_agent_dropped_count_is_logged_with_the_session(local_client, services, agent):
+    await hello(local_client, agent)
+    body = {**json.loads(FIX.read_text("utf-8")), "dropped": 7}
+    assert (await local_client.post("/api/agent/events", json=body, headers=H(agent))).status_code == 204
+    [line] = dropped_lines(await audit_events(services, "system"))
+    assert (line["source"], line["count"], line["session_id"], line["user"]) == ("agent", 7, 2, "CORP\\hong")
+    assert len(await audit_events(services, "activity.window")) == 3  # the batch itself still counts
+
+async def test_agent_dropped_count_zero_or_missing_logs_nothing(local_client, services, agent):
+    await hello(local_client, agent)
+    for body in ({"events": [], "dropped": 0}, {"events": []}):
+        assert (await local_client.post("/api/agent/events", json=body, headers=H(agent))).status_code == 204
+    assert dropped_lines(await audit_events(services, "system")) == []
+
+async def test_agent_dropped_count_is_validated(local_client, services, agent):
+    await hello(local_client, agent)
+    for dropped in (-1, "3", 1.5, True, None, 2**63):
+        r = await local_client.post("/api/agent/events", json={"events": [], "dropped": dropped}, headers=H(agent))
+        assert r.status_code == 422, dropped
+    assert dropped_lines(await audit_events(services, "system")) == []

@@ -36,6 +36,7 @@ from app.win.peer import PeerInfo
 router = APIRouter()
 
 EVENTS_MAX = 200
+DROPPED_MAX = 2**31 - 1
 DisplayId = Annotated[int, Path(ge=1, le=2**63 - 1)]  # SQLite INTEGER range; larger overflows
 
 
@@ -74,6 +75,8 @@ class EventsBody(BaseModel):
         list[Annotated[WindowEventIn | IdleEventIn, Field(discriminator="type")]],
         Field(max_length=EVENTS_MAX),
     ]
+    dropped: Annotated[StrictInt, Field(ge=0, le=DROPPED_MAX)] = 0
+    """Events the agent lost (buffer overflow, refused batches) since its last accepted report."""
 
 
 @dataclass(frozen=True)
@@ -155,7 +158,7 @@ async def agent_heartbeat(body: HeartbeatBody, caller: Caller, services: Svc) ->
 
 @router.post("/api/agent/events", status_code=204)
 async def agent_events(body: EventsBody, caller: Caller, services: Svc) -> Response:
-    services.agents.events(caller.slot, body.events)
+    services.agents.events(caller.slot, body.events, dropped=body.dropped)
     return Response(status_code=204)
 
 

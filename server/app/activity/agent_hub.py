@@ -250,13 +250,21 @@ class AgentHub:
         """Liveness only: the board's idle time and lock state come from WTS (V26)."""
         slot.last_seen = self._clock.now()
 
-    def events(self, slot: AgentSlot, events: Sequence[WindowEventIn | IdleEventIn]) -> None:
+    def events(
+        self, slot: AgentSlot, events: Sequence[WindowEventIn | IdleEventIn], *, dropped: int = 0
+    ) -> None:
         """``activity.window`` / ``activity.idle`` lines at the event time (V28: clamped to now
-        with ``clock_skew`` when the agent's clock is more than 300 s off)."""
+        with ``clock_skew`` when the agent's clock is more than 300 s off). ``dropped``: events the
+        agent lost since its last report → ``system collector.dropped`` (``source: "agent"``, M13)."""
+        ctx = self._context.fields(slot.session_id)
+        if dropped:
+            self._log.emit(
+                "system", event="collector.dropped", source="agent", count=dropped,
+                session_id=slot.session_id, user=ctx["user"],
+            )
         if not self.window_events:
             return
         now = self._clock.now()
-        ctx = self._context.fields(slot.session_id)
         limit = timedelta(seconds=CLOCK_SKEW_SEC)
         for e in events:
             at = e.at

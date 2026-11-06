@@ -157,7 +157,7 @@ async def test_supervisor_launches_a_real_stdlib_agent_and_stop_kills_it(service
     s = AgentSupervisor(services.agents, LocalLauncher(), services.rdp, services.tamper, services.log, clock,
                         AgentOptions(agent_dir=tmp_path / "agent", stop_grace_sec=0.2))
     services.rdp.add_listener(s.on_session_change)
-    services.rdp.apply(snap(clock.now(), ws(current_session_id())))
+    services.rdp.apply(snap(clock.now(), ws(current_session_id()))); await s.tick()
     started = tmp_path / "started"
     try:
         await eventually(lambda: started.exists() and started.read_text("utf-8").strip() != "", timeout=15)
