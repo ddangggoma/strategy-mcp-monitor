@@ -9,6 +9,7 @@ from pathlib import Path
 from app.clock import Clock
 from app.collect.config import CollectorConfig
 from app.sessions.jsonsource import JsonFileWtsSource
+from app.win.eventlog import EventLogSource, PywinEventLogSource
 from app.win.wts import CtypesWtsSource, WtsSource
 
 _JSON_PREFIX = "json:"
@@ -40,16 +41,20 @@ def add_collector_arguments(parser: argparse.ArgumentParser) -> None:
 def collector_config(ns: argparse.Namespace, *, clock: Clock, root: Path) -> CollectorConfig:
     """Build the collector configuration from parsed flags.
 
-    ``root`` is the data root; nothing uses it yet (Task 7 keeps the event-log bookmarks under it).
+    ``wts`` also turns on the event log; ``none`` and ``json:`` (a PC without real RDP sessions)
+    leave it off. ``root`` is the data root: the event-log bookmarks default to its data folder
+    in ``build_services``, so nothing here needs it yet.
     """
     source = ns.session_source
     wts: WtsSource | None
+    event_log: EventLogSource | None = None
     if source == "wts":
         wts = CtypesWtsSource(clock)
+        event_log = PywinEventLogSource()
     elif source == "none":
         wts = None
     else:
         path = Path(source.removeprefix(_JSON_PREFIX))
         print(f"WARNING: dev session source {path}", file=sys.stderr, flush=True)
         wts = JsonFileWtsSource(path, clock)
-    return CollectorConfig(wts=wts, collect_console=ns.collect_console)
+    return CollectorConfig(wts=wts, collect_console=ns.collect_console, event_log=event_log)

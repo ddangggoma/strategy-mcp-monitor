@@ -10,6 +10,7 @@ from app.auth.otp import DummyOtpProvider, OtpProvider, OtpService
 from app.auth.sessions import SessionStore
 from app.clock import Clock, SystemClock
 from app.collect.config import CollectorConfig
+from app.collect.eventlog import BookmarkStore, EventLogComponent
 from app.collect.manager import Collectors, SessionsComponent
 from app.db import Database
 from app.logstore.writer import DailyJsonlWriter, LogWriter
@@ -57,6 +58,9 @@ class Services:
     """The RDP session tracker (``sessions`` is the login ``SessionStore``; ruling F01)."""
     collectors: Collectors
     """Windows collectors; ``serve()`` starts them after the monitor and stops them before it."""
+    eventlog: EventLogComponent | None
+    """Event log subscriptions when ``CollectorConfig.event_log`` is set; mappers register their
+    handlers with ``eventlog.on(...)`` inside ``build_services`` (before ``collectors.start()``)."""
 
 
 def _load_or_create_otp_secret(db: Database) -> bytes:
@@ -124,6 +128,13 @@ def build_services(
             config_collectors.wts, rdp, manager, ReverseDns(clock=clock), clock,
             interval_sec=config_collectors.poll_interval_sec,
         ))
+    eventlog: EventLogComponent | None = None
+    if config_collectors.event_log is not None:
+        bookmarks = BookmarkStore(
+            config_collectors.bookmarks_path or paths.data_dir / "collector-state.json"
+        )
+        eventlog = EventLogComponent(config_collectors.event_log, bookmarks, manager, clock)
+        manager.add(eventlog)
     return Services(
         paths=paths,
         db=db,
@@ -146,4 +157,5 @@ def build_services(
         rdp_history=rdp_history,
         rdp=rdp,
         collectors=manager,
+        eventlog=eventlog,
     )

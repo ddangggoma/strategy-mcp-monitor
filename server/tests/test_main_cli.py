@@ -7,6 +7,7 @@ from app.collect.cli import collector_config
 from app.main import server_configs
 from app.sessions.jsonsource import JsonFileWtsSource
 from app.web.app_factory import create_app
+from app.win.eventlog import PywinEventLogSource
 from app.win.wts import CtypesWtsSource
 
 REPO = Path(__file__).resolve().parents[2]
@@ -105,3 +106,11 @@ def test_server_configs_bind_the_external_host(services):
     cfgs = server_configs(local, external, 1, 2, external_host="127.0.0.1")
     assert [(c.host, c.port) for c in cfgs] == [("127.0.0.1", 1), ("127.0.0.1", 2)]
     assert server_configs(local, external)[1].host == "0.0.0.0"
+
+
+def test_event_log_source_follows_the_session_source(tmp_path, clock):
+    cfg = collector_config(parse_args([]), clock=clock, root=tmp_path)
+    assert isinstance(cfg.event_log, PywinEventLogSource) and cfg.bookmarks_path is None
+    assert collector_config(parse_args(["--session-source", "none"]), clock=clock, root=tmp_path).event_log is None
+    path = tmp_path / "s.json"; path.write_text('{"sessions": []}', "utf-8")
+    assert collector_config(parse_args(["--session-source", f"json:{path}"]), clock=clock, root=tmp_path).event_log is None
