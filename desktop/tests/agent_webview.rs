@@ -45,25 +45,43 @@ fn notice_window(pid: u32) -> Option<HWND> {
         .map(|(h, _)| h)
 }
 
-/// The WebView2 browser process (`msedgewebview2.exe` without `--type=`) whose user data folder is
-/// under `profile` (its command line names it).
-fn webview_browsers(profile: &std::path::Path) -> Vec<u32> {
-    let script = format!(
-        "Get-CimInstance Win32_Process -Filter \"Name='msedgewebview2.exe'\" | Where-Object {{ \
-         $_.CommandLine -like '*{}*' -and $_.CommandLine -notlike '*--type=*' }} | \
-         ForEach-Object {{ $_.ProcessId }}",
-        profile.display()
-    );
+/// `(pid, parent pid, command line)` of every `msedgewebview2.exe`.
+fn webview_processes() -> Vec<(u32, u32, String)> {
+    let script = "Get-CimInstance Win32_Process -Filter \"Name='msedgewebview2.exe'\" | \
+                  ForEach-Object { \"$($_.ProcessId)|$($_.ParentProcessId)|$($_.CommandLine)\" }";
     let out = std::process::Command::new(mcp_monitor::winutil::system_tool(
         r"WindowsPowerShell\v1.0\powershell.exe",
     ))
-    .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+    .args(["-NoProfile", "-NonInteractive", "-Command", script])
     .output()
     .unwrap();
     String::from_utf8_lossy(&out.stdout)
         .lines()
-        .filter_map(|l| l.trim().parse().ok())
+        .filter_map(|l| {
+            let mut parts = l.trim().splitn(3, '|');
+            let pid = parts.next()?.parse().ok()?;
+            let parent = parts.next()?.parse().ok()?;
+            Some((pid, parent, parts.next().unwrap_or_default().to_string()))
+        })
         .collect()
+}
+
+/// The notice's WebView2 browser process: the `msedgewebview2.exe` the agent started itself.
+fn webview_browser(agent: u32) -> Option<u32> {
+    let all = webview_processes();
+    let found = all
+        .iter()
+        .find(|(_, parent, _)| *parent == agent)
+        .map(|p| p.0);
+    if found.is_none() {
+        for (pid, parent, cmd) in &all {
+            eprintln!(
+                "msedgewebview2 {pid} (parent {parent}): {}",
+                &cmd[..cmd.len().min(200)]
+            );
+        }
+    }
+    found
 }
 
 /// The agent process; if the test fails, its exit status, standard error and the requests the
@@ -176,22 +194,13 @@ fn a_killed_webview_is_reported_closed_and_the_notice_comes_back() {
     let mut agent = spawn_agent(&srv, &scratch);
     let first = wait_for(30, || notice_window(agent.id()));
     // the notice's WebView2 browser process dies
-    let profile = scratch.join(r"mcp-monitor\notice-webview");
-    let browsers = wait_for(15, || {
-        Some(webview_browsers(&profile)).filter(|v| !v.is_empty())
-    });
-    let taskkill = mcp_monitor::winutil::system_tool("taskkill.exe");
-    for pid in browsers {
-        let out = std::process::Command::new(&taskkill)
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .output()
-            .unwrap();
-        eprintln!(
-            "taskkill {pid}: {:?} {}",
-            out.status,
-            String::from_utf8_lossy(&out.stdout)
-        );
-    }
+    let browser = wait_for(15, || webview_browser(agent.id()));
+    let out = std::process::Command::new(mcp_monitor::winutil::system_tool("taskkill.exe"))
+        .args(["/PID", &browser.to_string(), "/T", "/F"])
+        .output()
+        .unwrap();
+    eprintln!("{}", String::from_utf8_lossy(&out.stdout));
+    assert!(out.status.success(), "taskkill failed");
     wait_for(10, || {
         srv.requests()
             .iter()
