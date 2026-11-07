@@ -16,7 +16,7 @@ import pytest
 
 from app import __version__
 from tests.live import free_port
-from tests.test_install_scripts import ps
+from tests.test_install_scripts import ps, scratch_path  # noqa: F401 (the tmp_path fixture: a scratch folder a data root may sit in)
 
 pytestmark = pytest.mark.bundle
 B = Path(os.environ.get("MCPMON_BUNDLE", "missing"))

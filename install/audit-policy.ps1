@@ -50,7 +50,8 @@ function Stop-WithArgumentError([string]$Message) {
 function Get-FullPath([string]$Path) {
     # A drive that does not exist (Q:) has no PowerShell provider path: .NET still makes it absolute.
     try { $Path = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path) } catch { }
-    $full = [System.IO.Path]::GetFullPath($Path)
+    # A device path or a name .NET cannot read is an argument error, not a script failure (exit 1).
+    try { $full = [System.IO.Path]::GetFullPath($Path) } catch { Stop-WithArgumentError "경로 $Path 을(를) 해석할 수 없습니다: $($_.Exception.Message)" }
     if ($full.Length -gt 3) { $full = $full.TrimEnd('\') }
     return $full
 }
@@ -82,11 +83,49 @@ function Get-RegistryValue([string]$Key, [string]$Name) {
     return $item.$Name
 }
 
-# --- data root helpers (the same in install.ps1 and audit-policy.ps1; the first two also in uninstall.ps1) ---
-# uninstall -RemoveData deletes the data root whole: never a drive root, a system folder or a folder above one.
+# --- data root helpers (the same in install.ps1 and audit-policy.ps1; the first four also in uninstall.ps1) ---
+# Letters of this PC's local fixed volumes ("C", "D"). A subst drive has no volume of its own, a network or
+# removable drive is not a local fixed one: none of them is listed (re-review 3).
+function Get-LocalDriveLetters {
+    if (-not (Test-Path variable:script:LocalDriveLetters)) {
+        $script:LocalDriveLetters = @(Get-CimInstance -ClassName Win32_Volume -Filter "DriveType = 3" |
+            Where-Object { $_.DriveLetter } | ForEach-Object { $_.DriveLetter.Substring(0, 1).ToUpperInvariant() })
+    }
+    return $script:LocalDriveLetters
+}
+
+# The first existing folder from the drive down to $Full itself that is a junction or symbolic link ($null:
+# none). Through one, another folder (the install folder, a system folder) would pass under a different name.
+function Get-PathLinkProblem([string]$Full) {
+    $path = $Full.Substring(0, 3)
+    foreach ($part in @($Full.Substring(3).Split([char]'\') | Where-Object { $_ })) {
+        $path = $path.TrimEnd('\') + '\' + $part
+        try { $attributes = [System.IO.File]::GetAttributes($path) } catch {
+            $e = $_.Exception
+            while ($e.InnerException -and $e -is [System.Management.Automation.MethodInvocationException]) { $e = $e.InnerException }
+            # Nothing exists below a missing folder.
+            if ($e -is [System.IO.FileNotFoundException] -or $e -is [System.IO.DirectoryNotFoundException]) { return $null }
+            return "$path 을(를) 확인하지 못했습니다: $($e.Message)"
+        }
+        if ($attributes -band [System.IO.FileAttributes]::ReparsePoint) { return "$path 은(는) 정션 또는 심볼릭 링크입니다(경로에 둘 수 없음)" }
+    }
+    return $null
+}
+
+# A folder these scripts create, fill or delete whole (the data root, the install folder): a path on a local
+# fixed drive (C:\...) without a junction or symbolic link in it (\\?\ and \\.\ device paths, UNC and admin
+# shares, subst and network drives would let one folder pass the comparisons below under another name, re-review
+# 3), never a drive root, a system folder or a folder above one, nothing inside Windows (I3).
 function Get-UnsafeRootReason([string]$Root) {
+    if ($Root -match '^[\\/]{2}') { return "$Root 은(는) 로컬 드라이브의 경로(예: D:\MCP Monitor)가 아닙니다(UNC·장치 경로)" }
     $full = Get-FullPath $Root
+    if ($full -notmatch '^[A-Za-z]:\\') { return "$Root 은(는) 로컬 드라이브의 경로(예: D:\MCP Monitor)가 아닙니다" }
+    if ((Get-LocalDriveLetters) -notcontains $full.Substring(0, 1).ToUpperInvariant()) {
+        return "$($full.Substring(0, 2)) 은(는) 이 PC의 로컬 고정 디스크가 아닙니다(subst·네트워크·이동식 드라이브)"
+    }
     if ($full.TrimEnd('\') -eq ([System.IO.Path]::GetPathRoot($full)).TrimEnd('\')) { return "$full 은(는) 드라이브 루트입니다" }
+    $link = Get-PathLinkProblem $full
+    if ($link) { return $link }
     $system = @($env:SystemRoot, $env:ProgramData, $env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramW6432,
         (Split-Path -Parent $env:PUBLIC), $env:PUBLIC, $env:USERPROFILE, $env:LOCALAPPDATA, $env:APPDATA) | Where-Object { $_ }
     foreach ($s in $system) {
@@ -118,6 +157,12 @@ function Get-TreeItems([string]$Root) {
     return $out.ToArray()
 }
 
+# The .NET exception under PowerShell's MethodInvocationException wrapper.
+function Get-InnerException([System.Exception]$Exception) {
+    while ($Exception.InnerException -and $Exception -is [System.Management.Automation.MethodInvocationException]) { $Exception = $Exception.InnerException }
+    return $Exception
+}
+
 # Why an existing folder must not become the data root ($null: safe). Only an empty folder or an earlier
 # data root (marker) is taken over, and only when SYSTEM, Administrators or the account running this script
 # ($Owners) own every item and nothing is a junction or symbolic link: a user who created the folder before
@@ -127,17 +172,72 @@ function Get-DataRootProblem([string]$Root, [string[]]$Owners) {
     $info = New-Object System.IO.DirectoryInfo $Root
     if (-not $info.Exists) { return "$Root 은(는) 폴더가 아닙니다" }
     if ($info.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return "$Root 은(는) 정션 또는 심볼릭 링크입니다" }
-    try {
-        $items = @(Get-TreeItems $Root)
-        foreach ($item in @($info) + $items) {
-            if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return "$($item.FullName) 은(는) 정션 또는 심볼릭 링크입니다" }
-            $owner = $item.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Owner).GetOwner([System.Security.Principal.SecurityIdentifier]).Value
-            if ($Owners -notcontains $owner) { return "$($item.FullName) 의 소유자($owner)가 SYSTEM·Administrators가 아닙니다" }
+    for ($attempt = 1; ; $attempt++) {
+        try {
+            $items = @(Get-TreeItems $Root)
+            foreach ($item in @($info) + $items) {
+                if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return "$($item.FullName) 은(는) 정션 또는 심볼릭 링크입니다" }
+                $owner = $item.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Owner).GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+                if ($Owners -notcontains $owner) { return "$($item.FullName) 의 소유자($owner)가 SYSTEM·Administrators가 아닙니다" }
+            }
+            break
+        } catch {
+            $e = Get-InnerException $_.Exception
+            # The running service's retention may gzip or delete a log between the listing and the read: look once more.
+            if ($attempt -lt 2 -and ($e -is [System.IO.FileNotFoundException] -or $e -is [System.IO.DirectoryNotFoundException])) { continue }
+            return "$Root 을(를) 확인하지 못했습니다: $($e.Message)"
         }
-    } catch {
-        return "$Root 을(를) 확인하지 못했습니다: $($_.Exception.Message)"
     }
     if ($items.Count -gt 0 -and -not (Test-DataRootMarker $Root)) { return "$Root 이(가) 비어 있지 않고 MCP Monitor 데이터 폴더도 아닙니다" }
+    return $null
+}
+
+# $false when the data root exists but this account may not list it: an installed data root (SYSTEM and
+# Administrators only) seen from a PowerShell without admin rights (-DryRun, re-review 4).
+function Test-DataRootReadable([string]$Root) {
+    if (-not (Test-Path -LiteralPath $Root -PathType Container)) { return $true }
+    try {
+        [void](New-Object System.IO.DirectoryInfo $Root).EnumerateFileSystemInfos().GetEnumerator().MoveNext()
+        return $true
+    } catch {
+        return -not ((Get-InnerException $_.Exception) -is [System.UnauthorizedAccessException])
+    }
+}
+
+# Why the folders above the data root would let a user who is not an administrator swap it ($null: none,
+# re-review 2). Every existing folder between the drive root and the data root must be owned by SYSTEM,
+# Administrators, TrustedInstaller or $Owners and give no other account DELETE, WRITE_DAC, WRITE_OWNER or
+# FILE_DELETE_CHILD: with any of them a user renames the folder while the service is stopped and puts a tree
+# of his own in its place, which the service then runs as SYSTEM. Inherit-only ACEs (they apply below, not
+# to the folder), CREATOR OWNER / OWNER RIGHTS placeholders and app-container SIDs (S-1-15-*, never alone
+# enough for access) do not count. C:\ProgramData and a folder directly under a drive root pass.
+function Get-AncestorProblem([string]$Root, [string[]]$Owners) {
+    $trusted = @($Owners) + "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"
+    # DELETE, WRITE_DAC, WRITE_OWNER, FILE_DELETE_CHILD, GENERIC_ALL
+    $danger = 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x40 -bor 0x10000000
+    $sidType = [System.Security.Principal.SecurityIdentifier]
+    $full = Get-FullPath $Root
+    $drive = ([System.IO.Path]::GetPathRoot($full)).TrimEnd('\')
+    $chain = @()
+    $dir = Split-Path -Parent $full
+    while ($dir -and $dir.TrimEnd('\') -ne $drive) { $chain = @($dir) + $chain; $dir = Split-Path -Parent $dir }
+    foreach ($folder in $chain) {
+        # A missing folder (and everything below it) is made with the data root's own ACL (New-ProtectedDirectory).
+        if (-not (Test-Path -LiteralPath $folder -PathType Container)) { return $null }
+        try { $acl = (New-Object System.IO.DirectoryInfo $folder).GetAccessControl() }
+        catch { return "$folder 의 권한을 확인하지 못했습니다: $((Get-InnerException $_.Exception).Message)" }
+        $advice = "데이터 루트는 관리자만 바꿀 수 있는 폴더 아래나 드라이브 바로 아래(예: D:\MCP Monitor)에 두세요"
+        $owner = $acl.GetOwner($sidType).Value
+        if ($trusted -notcontains $owner) { return "$folder 의 소유자($owner)가 관리자가 아닙니다. $advice" }
+        foreach ($rule in @($acl.GetAccessRules($true, $true, $sidType))) {
+            $sid = $rule.IdentityReference.Value
+            if ($rule.AccessControlType -ne "Allow" -or ($rule.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) -or
+                $trusted -contains $sid -or $sid -like "S-1-3-*" -or $sid -like "S-1-15-*") { continue }
+            if (([int64]$rule.FileSystemRights -band $danger) -ne 0) {
+                return "$folder 을(를) 관리자가 아닌 계정($sid)이 지우거나 이름·권한을 바꿀 수 있습니다($($rule.FileSystemRights)). $advice"
+            }
+        }
+    }
     return $null
 }
 
@@ -151,9 +251,9 @@ function Reset-ItemAcl([System.IO.FileSystemInfo]$Item, [string]$Owner) {
     $Item.SetAccessControl($acl)
 }
 
-# The data root's own ACL built from scratch (not edited: icacls /grant:r keeps every other explicit ACE):
+# The data root's ACL built from scratch (not edited: icacls /grant:r keeps every other explicit ACE):
 # owner $Owner, inheritance off, full control for $Sids only, inherited by everything below.
-function Set-RootAcl([string]$Root, [string]$Owner, [string[]]$Sids) {
+function New-RootSecurity([string]$Owner, [string[]]$Sids) {
     $sec = New-Object System.Security.AccessControl.DirectorySecurity
     $sec.SetOwner((New-Object System.Security.Principal.SecurityIdentifier $Owner))
     $sec.SetAccessRuleProtection($true, $false)
@@ -161,7 +261,23 @@ function Set-RootAcl([string]$Root, [string]$Owner, [string[]]$Sids) {
         $sec.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule(
             (New-Object System.Security.Principal.SecurityIdentifier $sid), "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")))
     }
-    (New-Object System.IO.DirectoryInfo $Root).SetAccessControl($sec)
+    return $sec
+}
+
+function Set-RootAcl([string]$Root, [string]$Owner, [string[]]$Sids) {
+    (New-Object System.IO.DirectoryInfo $Root).SetAccessControl((New-RootSecurity $Owner $Sids))
+}
+
+# Creates $Path and every missing folder above it, each in one call with the data root's final ACL: there is
+# no moment in which it inherits the parent's ACL (C:\ProgramData lets Users add files and folders), and a
+# missing parent of a custom data root is as closed as the root itself (re-review 1, 2). A folder that already
+# exists is left as it is (CreateDirectory does nothing), so the caller checks what it finds afterwards.
+function New-ProtectedDirectory([string]$Path, [string]$Owner, [string[]]$Sids) {
+    $sec = New-RootSecurity $Owner $Sids
+    $missing = @()
+    $dir = $Path
+    while ($dir -and -not (Test-Path -LiteralPath $dir)) { $missing = @($dir) + $missing; $dir = Split-Path -Parent $dir }
+    foreach ($d in $missing) { [void][System.IO.Directory]::CreateDirectory($d, $sec) }
 }
 
 # What differs from the ACL Initialize-DataRoot sets (empty: exactly that), read back from the disk.
@@ -197,17 +313,24 @@ function Get-DataRootAclProblems([string]$Root, [string]$Owner, [string[]]$Sids)
     return $problems.ToArray()
 }
 
-# Creates or takes over the data root (finding C1): the checks of Get-DataRootProblem, the root's ACL from
-# scratch, the same checks again once nobody else can write, every item below reset, logs\ data\ scripts\
-# and the marker, then the ACL read back: any difference fails the step.
+# Creates or takes over the data root (finding C1): the checks of Get-DataRootProblem and Get-AncestorProblem;
+# a missing root created with its final ACL and then checked as found (a folder another account made in the
+# moment before keeps that account's owner and ACL: refused, re-review 1); an existing root checked as found
+# before its ACL changes; the root's ACL from scratch; the same checks again once nobody else can write; every
+# item below reset; logs\ data\ scripts\ and the marker; then the ACL read back: any difference fails the step.
 function Initialize-DataRoot([string]$Root, [string]$Owner, [string[]]$Sids, [string[]]$Owners, [string]$CreatedBy) {
     $problem = Get-DataRootProblem $Root $Owners
+    if (-not $problem) { $problem = Get-AncestorProblem $Root $Owners }
     if ($problem) { throw $problem }
     if (-not (Test-Path -LiteralPath $Root)) {
-        $parent = Split-Path -Parent $Root
-        if ($parent) { [void][System.IO.Directory]::CreateDirectory($parent) }
-        [void][System.IO.Directory]::CreateDirectory($Root)
+        New-ProtectedDirectory $Root $Owner $Sids
+        $problems = @(Get-DataRootAclProblems $Root $Owner $Sids)
+        if ($problems.Count -gt 0) { throw "$Root 을(를) 다른 계정이 먼저 만들었습니다: $($problems -join '; ')" }
+        $problem = Get-AncestorProblem $Root $Owners
+        if ($problem) { throw $problem }
     }
+    $problem = Get-DataRootProblem $Root $Owners
+    if ($problem) { throw $problem }
     Set-RootAcl $Root $Owner $Sids
     $problem = Get-DataRootProblem $Root $Owners
     if ($problem) { throw $problem }
@@ -316,6 +439,7 @@ function Invoke-Plan {
 
 # --- arguments ----------------------------------------------------------------------------------
 if ($Enable -eq [bool]$Restore) { Stop-WithArgumentError "-Enable 또는 -Restore <백업 파일> 중 하나만 주세요." }
+$Notes = New-Object System.Collections.Generic.List[string]
 $DataRoot = Get-FullPath $DataRoot
 $BackupPath = "$DataRoot\data\auditpol-backup.csv"
 $InstallStatePath = "$DataRoot\data\install-state.json"
@@ -329,7 +453,14 @@ if ($Enable) {
     $unsafe = Get-UnsafeRootReason $DataRoot
     if ($unsafe) { Stop-WithArgumentError "-DataRoot: $unsafe" }
     $DataRootOwners = @("S-1-5-18", "S-1-5-32-544", [Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
-    $problem = Get-DataRootProblem $DataRoot $DataRootOwners
+    if (-not (Test-Admin) -and -not (Test-DataRootReadable $DataRoot)) {
+        # An installed data root without admin rights (-DryRun): what it holds is checked again in secure_data_root.
+        $Notes.Add("$DataRoot 은(는) 관리자만 읽을 수 있어 안을 확인하지 못했습니다(소유자·내용 검사, 이전 레지스트리 기록). 관리자 권한으로 다시 실행하면 확인합니다.")
+    } else {
+        $problem = Get-DataRootProblem $DataRoot $DataRootOwners
+        if ($problem) { Stop-WithArgumentError "-DataRoot: $problem" }
+    }
+    $problem = Get-AncestorProblem $DataRoot $DataRootOwners
     if ($problem) { Stop-WithArgumentError "-DataRoot: $problem" }
 }
 $Bundle = Read-JsonFile (Join-Path (Split-Path -Parent $PSScriptRoot) "bundle.json")
@@ -374,7 +505,9 @@ if ($DryRun) {
         data_root    = $DataRoot
         service_mode = $null
         steps        = $Steps.ToArray()
+        notes        = $Notes.ToArray()
     }
+    foreach ($note in $Notes) { [Console]::Error.WriteLine("참고: $note") }
     Write-Output ($plan | ConvertTo-Json -Depth 6 -Compress)
     exit 0
 }

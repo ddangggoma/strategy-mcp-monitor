@@ -8,6 +8,9 @@
   고지 창 Edge 프로필(%LOCALAPPDATA%\mcp-monitor)을 지웁니다. -RestoreAuditPolicy일 때만 설치 전 감사 정책
   (auditpol 백업)과 레지스트리 값(install-state.json의 registry_before)을 되돌립니다.
 
+  -InstallDir와 -DataRoot(-RemoveData)는 install.ps1과 같은 경로 검사를 거칩니다: 로컬 고정 디스크의
+  경로만, 장치·UNC·subst 경로와 경로 안의 정션·심볼릭 링크는 거부합니다(종료 코드 2).
+
   install.ps1과 같은 구조입니다: 계획을 만들고, -DryRun이면 JSON으로 출력하고 끝(관리자 불필요, 아무것도
   바꾸지 않음), 아니면 실행합니다. 첫 단계는 관리자 확인입니다(W29).
 
@@ -43,7 +46,8 @@ function Stop-WithArgumentError([string]$Message) {
 function Get-FullPath([string]$Path) {
     # A drive that does not exist (Q:) has no PowerShell provider path: .NET still makes it absolute.
     try { $Path = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path) } catch { }
-    $full = [System.IO.Path]::GetFullPath($Path)
+    # A device path or a name .NET cannot read is an argument error, not a script failure (exit 1).
+    try { $full = [System.IO.Path]::GetFullPath($Path) } catch { Stop-WithArgumentError "경로 $Path 을(를) 해석할 수 없습니다: $($_.Exception.Message)" }
     if ($full.Length -gt 3) { $full = $full.TrimEnd('\') }
     return $full
 }
@@ -69,11 +73,49 @@ function Test-Admin {
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-# --- data root helpers (the same in install.ps1 and audit-policy.ps1; the first two also in uninstall.ps1) ---
-# uninstall -RemoveData deletes the data root whole: never a drive root, a system folder or a folder above one.
+# --- data root helpers (the same in install.ps1 and audit-policy.ps1; the first four also in uninstall.ps1) ---
+# Letters of this PC's local fixed volumes ("C", "D"). A subst drive has no volume of its own, a network or
+# removable drive is not a local fixed one: none of them is listed (re-review 3).
+function Get-LocalDriveLetters {
+    if (-not (Test-Path variable:script:LocalDriveLetters)) {
+        $script:LocalDriveLetters = @(Get-CimInstance -ClassName Win32_Volume -Filter "DriveType = 3" |
+            Where-Object { $_.DriveLetter } | ForEach-Object { $_.DriveLetter.Substring(0, 1).ToUpperInvariant() })
+    }
+    return $script:LocalDriveLetters
+}
+
+# The first existing folder from the drive down to $Full itself that is a junction or symbolic link ($null:
+# none). Through one, another folder (the install folder, a system folder) would pass under a different name.
+function Get-PathLinkProblem([string]$Full) {
+    $path = $Full.Substring(0, 3)
+    foreach ($part in @($Full.Substring(3).Split([char]'\') | Where-Object { $_ })) {
+        $path = $path.TrimEnd('\') + '\' + $part
+        try { $attributes = [System.IO.File]::GetAttributes($path) } catch {
+            $e = $_.Exception
+            while ($e.InnerException -and $e -is [System.Management.Automation.MethodInvocationException]) { $e = $e.InnerException }
+            # Nothing exists below a missing folder.
+            if ($e -is [System.IO.FileNotFoundException] -or $e -is [System.IO.DirectoryNotFoundException]) { return $null }
+            return "$path 을(를) 확인하지 못했습니다: $($e.Message)"
+        }
+        if ($attributes -band [System.IO.FileAttributes]::ReparsePoint) { return "$path 은(는) 정션 또는 심볼릭 링크입니다(경로에 둘 수 없음)" }
+    }
+    return $null
+}
+
+# A folder these scripts create, fill or delete whole (the data root, the install folder): a path on a local
+# fixed drive (C:\...) without a junction or symbolic link in it (\\?\ and \\.\ device paths, UNC and admin
+# shares, subst and network drives would let one folder pass the comparisons below under another name, re-review
+# 3), never a drive root, a system folder or a folder above one, nothing inside Windows (I3).
 function Get-UnsafeRootReason([string]$Root) {
+    if ($Root -match '^[\\/]{2}') { return "$Root 은(는) 로컬 드라이브의 경로(예: D:\MCP Monitor)가 아닙니다(UNC·장치 경로)" }
     $full = Get-FullPath $Root
+    if ($full -notmatch '^[A-Za-z]:\\') { return "$Root 은(는) 로컬 드라이브의 경로(예: D:\MCP Monitor)가 아닙니다" }
+    if ((Get-LocalDriveLetters) -notcontains $full.Substring(0, 1).ToUpperInvariant()) {
+        return "$($full.Substring(0, 2)) 은(는) 이 PC의 로컬 고정 디스크가 아닙니다(subst·네트워크·이동식 드라이브)"
+    }
     if ($full.TrimEnd('\') -eq ([System.IO.Path]::GetPathRoot($full)).TrimEnd('\')) { return "$full 은(는) 드라이브 루트입니다" }
+    $link = Get-PathLinkProblem $full
+    if ($link) { return $link }
     $system = @($env:SystemRoot, $env:ProgramData, $env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramW6432,
         (Split-Path -Parent $env:PUBLIC), $env:PUBLIC, $env:USERPROFILE, $env:LOCALAPPDATA, $env:APPDATA) | Where-Object { $_ }
     foreach ($s in $system) {
@@ -216,6 +258,9 @@ if ($RemoveData) {
 $State = Read-JsonFile "$DataRoot\data\install-state.json"
 if (-not $PSBoundParameters.ContainsKey("InstallDir") -and (Get-Prop $State "install_dir")) { $InstallDir = Get-Prop $State "install_dir" }
 $InstallDir = Get-FullPath $InstallDir
+# remove_install_dir deletes this folder whole (re-review 3: no device, UNC or subst path, no link in it).
+$unsafe = Get-UnsafeRootReason $InstallDir
+if ($unsafe) { Stop-WithArgumentError "-InstallDir: $unsafe" }
 # Removing the install folder would take a data root inside it along (I3): only with -RemoveData.
 if (-not $RemoveData -and ($DataRoot -eq $InstallDir -or (Test-Inside $DataRoot $InstallDir))) {
     Stop-WithArgumentError "-DataRoot($DataRoot)가 설치 폴더($InstallDir) 안에 있어 데이터를 남길 수 없습니다(-RemoveData로 함께 지우기)."

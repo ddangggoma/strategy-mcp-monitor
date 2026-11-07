@@ -14,7 +14,9 @@ import ctypes
 import json
 import os
 import re
+import shutil
 import subprocess
+import uuid
 from pathlib import Path
 
 import pytest
@@ -28,6 +30,29 @@ PS = [str(Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v
 GUID = re.compile(r"\{0CCE92[0-9A-F]{2}-69AE-11D9-BED3-505054503030\}")
 AUDIT_KEY = r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Audit\ProcessCreationIncludeCmdLine_Enabled"
 PS_KEY = r"HKLM\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging\EnableScriptBlockLogging"
+ICACLS = str(Path(os.environ["SystemRoot"]) / "System32" / "icacls.exe")
+SCRATCH = Path(os.environ["LOCALAPPDATA"]) / "mcp-monitor-install-tests"
+
+
+@pytest.fixture(name="tmp_path")
+def scratch_path():
+    """A scratch folder whose parents only SYSTEM, Administrators and this account can change.
+
+    install.ps1 refuses a data root below a folder another account may delete or rename (re-review 2), and
+    this PC's %TEMP% gives a sandbox's user group Modify, so pytest's own tmp_path would be refused. A folder
+    under %LOCALAPPDATA% inherits only the profile's ACL. Removed after the test.
+    """
+    path = SCRATCH / uuid.uuid4().hex[:12]
+    path.mkdir(parents=True)
+    yield path
+    shutil.rmtree(path, ignore_errors=True)
+    if path.exists():  # a test failed before it unlocked its folder
+        subprocess.run([ICACLS, str(path), "/reset", "/T", "/C", "/Q"], capture_output=True)
+        shutil.rmtree(path, ignore_errors=True)
+    try:
+        SCRATCH.rmdir()
+    except OSError:
+        pass
 
 
 def ps(*args, timeout=120):
@@ -94,10 +119,14 @@ def test_scripts_are_utf8_with_bom(name):
     raw.decode("utf-8")
 
 
+# Each script stays one self-contained file (audit-policy.ps1 is also used alone, before an install): the
+# shared code is copied, and this test keeps the copies one implementation.
 SHARED = ["Stop-WithArgumentError", "Get-FullPath", "Test-Inside", "Get-Prop", "Read-JsonFile", "Test-Admin", "Add-Step",
-          "ConvertTo-CommandLineArg", "Invoke-Native", "Get-UnsafeRootReason", "Test-DataRootMarker"]
+          "ConvertTo-CommandLineArg", "Invoke-Native", "Get-LocalDriveLetters", "Get-PathLinkProblem",
+          "Get-UnsafeRootReason", "Test-DataRootMarker"]
 # The data root helpers install.ps1 and audit-policy.ps1 both use (C1): identical in the two.
-DATA_ROOT = ["Get-RegistryValue", "Get-TreeItems", "Get-DataRootProblem", "Reset-ItemAcl", "Set-RootAcl",
+DATA_ROOT = ["Get-RegistryValue", "Get-TreeItems", "Get-InnerException", "Get-DataRootProblem", "Test-DataRootReadable",
+             "Get-AncestorProblem", "Reset-ItemAcl", "New-RootSecurity", "Set-RootAcl", "New-ProtectedDirectory",
              "Get-DataRootAclProblems", "Initialize-DataRoot"]
 
 
@@ -488,7 +517,7 @@ def test_audit_policy_refuses_without_admin(tmp_path):
 # -- the data root (plan review C1, I3) -----------------------------------------------------------
 
 EVERYONE = "S-1-1-0"
-ICACLS = str(Path(os.environ["SystemRoot"]) / "System32" / "icacls.exe")
+AUTHENTICATED_USERS = "S-1-5-11"
 
 
 def me_sid():
@@ -618,6 +647,10 @@ def test_initialize_data_root_creates_a_new_root(tmp_path):
     assert out == ["0"]
     assert sorted(p.name for p in root.iterdir()) == ["data", "logs", "scripts"]
     assert json.loads((root / "data" / "mcp-monitor-data-root.json").read_text("utf-8"))["created_by"] == "audit-policy"
+    # re-review 2: the missing parent is made with the root's ACL too (protected, the given SIDs only)
+    for folder in (tmp_path / "new", root):
+        s = sddl(folder)
+        assert s.startswith(f"O:{me}") and "D:P" in s and "WD)" not in s and "AU)" not in s, (folder, s)
 
 
 def test_initialize_data_root_refuses_a_foreign_folder(tmp_path):
@@ -662,3 +695,151 @@ def test_audit_policy_enable_refuses_unsafe_data_roots(tmp_path):
     for root in (os.environ["SystemDrive"] + "\\", str(foreign)):
         p = ps("-File", str(INSTALL / "audit-policy.ps1"), "-DryRun", "-Enable", "-DataRoot", root)
         assert p.returncode == 2 and p.stdout.strip() == "", p.stdout + p.stderr
+
+
+# -- re-review (d510b97..1a11c2c) items 1-4 --------------------------------------------------------
+
+def test_initialize_data_root_refuses_a_root_made_just_before_it(tmp_path):
+    """Re-review 1: a folder another account creates between the first check and the creation keeps that
+    account's owner and ACL, and CreateDirectory leaves an existing folder as it is: the folder is checked as
+    found, before Set-RootAcl would make it look like ours, and refused. Here the folder is made (inherited
+    ACL) by a wrapper around the creation, the moment the attacker of the review aims for."""
+    root = tmp_path / "MCP Monitor"
+    me = me_sid()
+    sids = f"@('S-1-5-18', 'S-1-5-32-544', '{me}')"
+    out = run_actions("install.ps1", tmp_path, "",
+                      "$create = ${function:New-ProtectedDirectory}\n"
+                      "function New-ProtectedDirectory([string]$Path, [string]$Owner, [string[]]$Sids) {\n"
+                      "    [void][IO.Directory]::CreateDirectory($Path); & $create $Path $Owner $Sids }\n"
+                      f"try {{ Initialize-DataRoot '{root}' '{me}' {sids} {sids} 'install'; Write-Output 'accepted' }}"
+                      " catch { Write-Output \"refused: $($_.Exception.Message)\" }\n")
+    assert len(out) == 1 and out[0].startswith("refused: ") and "먼저 만들었습니다" in out[0], out
+    assert "D:P" not in sddl(root) and not (root / "data").exists()  # left as found: not taken over
+
+
+def test_install_refuses_a_data_root_below_a_folder_others_may_rename(bundle, tmp_path):
+    """Re-review 2: D:\\apps inherits Authenticated Users:(M) from a data volume's root; a user renames it while
+    the service is stopped and puts his own tree at the data root's path. Inherit-only ACEs (they apply below,
+    where the root is protected) do not count."""
+    apps = tmp_path / "apps"
+    apps.mkdir()
+    root = str(apps / "MCP Monitor")
+    install = ["-File", str(INSTALL / "install.ps1"), "-DryRun", "-Source", str(bundle), "-InstallDir", str(tmp_path / "i"), "-DataRoot", root]
+    enable = ["-File", str(INSTALL / "audit-policy.ps1"), "-DryRun", "-Enable", "-DataRoot", root]
+    subprocess.run([ICACLS, str(apps), "/grant", f"*{AUTHENTICATED_USERS}:(OI)(CI)M"], check=True, capture_output=True)
+    for args in (install, enable):
+        p = ps(*args)
+        assert p.returncode == 2 and p.stdout.strip() == "", p.stdout + p.stderr
+        assert "-DataRoot" in p.stderr and str(apps) in p.stderr and AUTHENTICATED_USERS in p.stderr, p.stderr
+    subprocess.run([ICACLS, str(apps), "/remove:g", f"*{AUTHENTICATED_USERS}"], check=True, capture_output=True)
+    subprocess.run([ICACLS, str(apps), "/grant", f"*{AUTHENTICATED_USERS}:(OI)(CI)(IO)M"], check=True, capture_output=True)
+    for args in (install, enable):
+        p = ps(*args)
+        assert p.returncode == 0, p.stdout + p.stderr
+
+
+def test_ancestor_check_passes_the_default_and_drive_level_roots(tmp_path):
+    # The default C:\ProgramData\MCP Monitor (Users may add folders to ProgramData, not delete or rename them)
+    # and a folder directly under a drive root (the drive root itself is not checked). Read-only on this PC.
+    drive = os.environ["SystemDrive"]
+    out = run_actions("install.ps1", tmp_path, "",
+                      f"Write-Output \"[$(Get-AncestorProblem '{os.environ['ProgramData']}\\MCP Monitor' @('S-1-5-18', 'S-1-5-32-544'))]\"\n"
+                      f"Write-Output \"[$(Get-AncestorProblem '{drive}\\MCP Monitor' @('S-1-5-18', 'S-1-5-32-544'))]\"\n")
+    assert out == ["[]", "[]"]
+
+
+def unc(path):
+    path = str(path)
+    return f"\\\\localhost\\{path[0]}$\\{path[3:]}"
+
+
+@pytest.mark.parametrize("form", ["device", "dot_device", "admin_share", "link_in_path"])
+def test_install_refuses_device_unc_and_linked_paths(bundle, tmp_path, form):
+    # Re-review 3: \\?\C:\...\i\var and \\localhost\C$\...\i\var passed the overlap check (the next reinstall's
+    # /MIR deletes them); a junction in the path makes another folder pass under a different name.
+    inst = tmp_path / "i"
+    junction(tmp_path / "link", tmp_path / "real")
+    bad = {"device": lambda p: "\\\\?\\" + str(p), "dot_device": lambda p: "\\\\.\\" + str(p), "admin_share": unc,
+           "link_in_path": lambda p: str(tmp_path / "link" / p.name)}[form]
+    for name, args in (("-DataRoot", ["-InstallDir", str(inst), "-DataRoot", bad(inst / "var")]),
+                       ("-InstallDir", ["-InstallDir", bad(tmp_path / "i2"), "-DataRoot", str(tmp_path / "d")])):
+        p = ps("-File", str(INSTALL / "install.ps1"), "-DryRun", "-Source", str(bundle), *args)
+        assert p.returncode == 2 and p.stdout.strip() == "", (name, p.stdout + p.stderr)
+        assert name in p.stderr, (name, p.stderr)
+    p = ps("-File", str(INSTALL / "audit-policy.ps1"), "-DryRun", "-Enable", "-DataRoot", bad(tmp_path / "d"))
+    assert p.returncode == 2 and p.stdout.strip() == "", p.stdout + p.stderr
+
+
+@pytest.mark.parametrize("form", ["device", "admin_share", "link_in_path"])
+def test_uninstall_refuses_device_unc_and_linked_paths(tmp_path, form):
+    # \\?\C:\ProgramData passed Get-UnsafeRootReason: -RemoveData would have deleted ProgramData once any user
+    # had planted data\mcp-monitor-data-root.json there.
+    marked = tmp_path / "real" / "marked"
+    (marked / "data").mkdir(parents=True); (marked / "data" / "mcp-monitor-data-root.json").write_text("{}", "utf-8")
+    junction(tmp_path / "link", tmp_path / "real")
+    bad = {"device": lambda p: "\\\\?\\" + str(p), "admin_share": unc,
+           "link_in_path": lambda p: str(tmp_path / "link" / p.name)}[form]
+    for args in (["-InstallDir", str(tmp_path / "i"), "-DataRoot", bad(marked), "-RemoveData"],
+                 ["-InstallDir", bad(marked), "-DataRoot", str(tmp_path / "d")]):
+        p = ps("-File", str(INSTALL / "uninstall.ps1"), "-DryRun", *args)
+        assert p.returncode == 2 and p.stdout.strip() == "", (args, p.stdout + p.stderr)
+    assert (marked / "data" / "mcp-monitor-data-root.json").is_file()
+
+
+def test_unsafe_root_reason_needs_a_local_fixed_volume(tmp_path):
+    # A subst or network drive has no local fixed volume of its own: shown here by a PC whose volume list
+    # lacks the drive (creating a real subst drive would change this logon session).
+    out = run_actions("uninstall.ps1", tmp_path, "",
+                      "Write-Output ((Get-LocalDriveLetters) -join ',')\n"
+                      f"Write-Output \"[$(Get-UnsafeRootReason '{tmp_path / 'd'}')]\"\n"
+                      "function Get-LocalDriveLetters { @('Q') }\n"
+                      f"Write-Output (Get-UnsafeRootReason '{tmp_path / 'd'}')\n")
+    letters = out[0].split(",")
+    assert os.environ["SystemDrive"][0].upper() in letters and str(tmp_path)[0].upper() in letters, out
+    assert out[1] == "[]", out
+    assert "로컬 고정 디스크가 아닙니다" in out[2], out
+
+
+def test_data_root_problem_looks_again_when_a_file_goes_away(tmp_path):
+    # Re-review 4: retention may gzip or delete a log while the walk runs: one more look, then "could not check".
+    root = tmp_path / "r"
+    root.mkdir()
+    sids = f"@('S-1-5-18', 'S-1-5-32-544', '{me_sid()}')"
+    out = run_actions("install.ps1", tmp_path, "",
+                      "$script:walks = 0\n"
+                      "function Get-TreeItems([string]$Root) { $script:walks++; if ($script:walks -eq 1) { throw (New-Object System.IO.FileNotFoundException 'gone') }; @() }\n"
+                      f"Write-Output \"[$(Get-DataRootProblem '{root}' {sids})] $script:walks\"\n"
+                      "function Get-TreeItems([string]$Root) { $script:walks++; throw (New-Object System.IO.FileNotFoundException 'gone') }\n"
+                      f"Write-Output (Get-DataRootProblem '{root}' {sids})\n"
+                      "Write-Output $script:walks\n")
+    assert out[0] == "[] 2" and "확인하지 못했습니다" in out[1] and out[2] == "4", out
+
+
+def test_dry_run_without_admin_plans_over_an_installed_data_root(bundle, tmp_path):
+    """Re-review 4: an installed data root (SYSTEM + Administrators only) cannot be listed without admin rights;
+    -DryRun prints the plan with a note instead of exit 2. secure_data_root checks it again when run."""
+    root = tmp_path / "MCP Monitor"
+    (root / "data").mkdir(parents=True)
+    (root / "data" / "mcp-monitor-data-root.json").write_text("{}", "utf-8")
+    lock = ("$s = New-Object System.Security.AccessControl.DirectorySecurity; $s.SetAccessRuleProtection($true, $false); "
+            "foreach ($sid in 'S-1-5-18', 'S-1-5-32-544') { $s.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("
+            "(New-Object System.Security.Principal.SecurityIdentifier $sid), 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow'))) }; "
+            f"(New-Object System.IO.DirectoryInfo '{root}').SetAccessControl($s)")
+    p = ps("-Command", lock)
+    assert p.returncode == 0, p.stderr
+    try:
+        with pytest.raises(PermissionError):
+            os.listdir(root)
+        for script, args in (("install.ps1", ["-Source", str(bundle), "-InstallDir", str(tmp_path / "i")]), ("audit-policy.ps1", ["-Enable"])):
+            p = ps("-File", str(INSTALL / script), "-DryRun", *args, "-DataRoot", str(root))
+            assert p.returncode == 0, (script, p.stdout + p.stderr)
+            plan = json.loads(p.stdout)
+            assert step(plan, "secure_data_root")["args"] == [str(root)]
+            assert len(plan["notes"]) == 1 and "관리자 권한으로 다시 실행하면 확인합니다" in plan["notes"][0], plan["notes"]
+            assert "참고:" in p.stderr
+        # a real run without admin still stops at require_admin (exit 1), not at the argument check
+        p = real_run("install.ps1", "-Source", str(bundle), "-InstallDir", str(tmp_path / "i"), "-DataRoot", str(root))
+        assert p.returncode == 1 and "관리자 권한(Administrator)" in p.stdout, p.stdout + p.stderr
+    finally:
+        subprocess.run([ICACLS, str(root), "/reset", "/T", "/C", "/Q"], capture_output=True)
+    assert dry("install.ps1", "-Source", str(bundle), "-InstallDir", str(tmp_path / "i"), "-DataRoot", str(root))["notes"] == []
