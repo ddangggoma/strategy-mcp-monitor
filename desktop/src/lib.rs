@@ -4,6 +4,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 pub mod cli;
+pub mod install;
 pub mod payload;
 pub mod payload_pack;
 pub mod version;
