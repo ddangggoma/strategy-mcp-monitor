@@ -205,7 +205,12 @@ pub type NoticeRegistry = Arc<Mutex<HashMap<String, Arc<NoticeState>>>>;
 
 /// The app-level window-event handler (`tauri::Builder::on_window_event`): a close request is
 /// refused unless we close the window; `Destroyed` is recorded (and the label forgotten).
-pub fn on_notice_window_event(registry: &NoticeRegistry, label: &str, event: &tauri::WindowEvent) {
+pub fn on_notice_window_event(
+    registry: &NoticeRegistry,
+    label: &str,
+    event: &tauri::WindowEvent,
+    log: &Log,
+) {
     let state = registry
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -218,9 +223,13 @@ pub fn on_notice_window_event(registry: &NoticeRegistry, label: &str, event: &ta
         tauri::WindowEvent::CloseRequested { api, .. } => {
             if state.should_prevent_close() {
                 api.prevent_close();
+                log("notice window: close request refused");
             }
         }
         tauri::WindowEvent::Destroyed => {
+            if state.should_prevent_close() {
+                log("notice window: gone without a close_notice");
+            }
             state.on_destroyed();
             registry
                 .lock()
@@ -286,6 +295,7 @@ unsafe fn configure_webview(
     controller: webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Controller,
     spec: &NoticeSpec,
     state: Arc<NoticeState>,
+    log: Log,
 ) -> windows::core::Result<()> {
     use webview2_com::Microsoft::Web::WebView2::Win32::{
         COREWEBVIEW2_PROCESS_FAILED_KIND, ICoreWebView2Settings3,
@@ -309,6 +319,10 @@ unsafe fn configure_webview(
                     args.ProcessFailedKind(&mut kind)?;
                 }
                 if process_failure_closes(kind.0) {
+                    log(&format!(
+                        "notice window: WebView2 process failed (kind {})",
+                        kind.0
+                    ));
                     state.on_process_failed();
                 }
                 Ok(())
@@ -428,7 +442,7 @@ fn build_window(
         .map_err(|e| e.to_string())?;
     let configured = window.with_webview(move |wv| {
         // SAFETY: with_webview runs this on the main thread.
-        if let Err(e) = unsafe { configure_webview(wv.controller(), &spec, state) } {
+        if let Err(e) = unsafe { configure_webview(wv.controller(), &spec, state, log.clone()) } {
             log(&format!("notice window settings: {e}"));
         }
     });
@@ -472,6 +486,7 @@ impl NoticeWindow for WebViewNotice {
         );
         match built {
             Ok(window) => {
+                (self.log)("notice window: shown");
                 let (stop, ticks) = mpsc::channel();
                 if let Ok(hwnd) = window.hwnd() {
                     start_topmost_ticker(self.app.clone(), hwnd.0 as isize, ticks);
@@ -560,10 +575,10 @@ pub fn run_webview_agent(cfg: AgentConfig) -> i32 {
     let built = {
         let (code, done, log) = (code.clone(), done.clone(), log.clone());
         let runner_for = runner_for.clone();
-        let (events, notices) = (registry.clone(), registry);
+        let (events, notices, events_log) = (registry.clone(), registry, log.clone());
         tauri::Builder::default()
             .on_window_event(move |window, event| {
-                on_notice_window_event(&events, window.label(), event)
+                on_notice_window_event(&events, window.label(), event, &events_log)
             })
             .setup(move |app| {
                 let handle = app.handle().clone();
@@ -738,6 +753,9 @@ mod tests {
 
     #[test]
     fn a_destroyed_notice_window_is_recorded_and_forgotten() {
+        let lines = Arc::new(Mutex::new(Vec::<String>::new()));
+        let l = lines.clone();
+        let log: Log = Arc::new(move |s: &str| l.lock().unwrap().push(s.to_string()));
         let registry = NoticeRegistry::default();
         let (ours, theirs) = (
             Arc::new(NoticeState::default()),
@@ -752,13 +770,22 @@ mod tests {
             .unwrap()
             .insert("notice-2".into(), theirs.clone());
         theirs.begin_close();
-        on_notice_window_event(&registry, "notice-1", &tauri::WindowEvent::Destroyed);
-        on_notice_window_event(&registry, "notice-2", &tauri::WindowEvent::Destroyed);
-        on_notice_window_event(&registry, "main", &tauri::WindowEvent::Destroyed); // not a notice
+        on_notice_window_event(&registry, "notice-1", &tauri::WindowEvent::Destroyed, &log);
+        on_notice_window_event(&registry, "notice-2", &tauri::WindowEvent::Destroyed, &log);
+        on_notice_window_event(&registry, "main", &tauri::WindowEvent::Destroyed, &log); // not a notice
         assert!(ours.take_closed_by_user());
         assert!(!theirs.take_closed_by_user());
         assert!(registry.lock().unwrap().is_empty());
-        on_notice_window_event(&registry, "notice-1", &tauri::WindowEvent::Focused(true));
+        on_notice_window_event(
+            &registry,
+            "notice-1",
+            &tauri::WindowEvent::Focused(true),
+            &log,
+        );
+        assert_eq!(
+            lines.lock().unwrap().as_slice(),
+            ["notice window: gone without a close_notice"]
+        );
         assert!(!ours.take_closed_by_user());
     }
 
