@@ -66,22 +66,30 @@ fn webview_processes() -> Vec<(u32, u32, String)> {
         .collect()
 }
 
-/// The notice's WebView2 browser process: the `msedgewebview2.exe` the agent started itself.
-fn webview_browser(agent: u32) -> Option<u32> {
+/// Every `msedgewebview2.exe` below the agent in the process tree (the notice's WebView2
+/// browser and its renderer, GPU and utility processes); each is printed with its `--type`.
+fn webview_tree(agent: u32) -> Vec<u32> {
     let all = webview_processes();
-    let found = all
-        .iter()
-        .find(|(_, parent, _)| *parent == agent)
-        .map(|p| p.0);
-    if found.is_none() {
-        for (pid, parent, cmd) in &all {
-            eprintln!(
-                "msedgewebview2 {pid} (parent {parent}): {}",
-                &cmd[..cmd.len().min(200)]
-            );
+    let mut tree = vec![agent];
+    let mut grew = true;
+    while grew {
+        grew = false;
+        for (pid, parent, _) in &all {
+            if tree.contains(parent) && !tree.contains(pid) {
+                tree.push(*pid);
+                grew = true;
+            }
         }
     }
-    found
+    tree.remove(0);
+    for (pid, parent, cmd) in all.iter().filter(|p| tree.contains(&p.0)) {
+        let kind = cmd
+            .split_whitespace()
+            .find(|a| a.starts_with("--type="))
+            .unwrap_or("(browser)");
+        eprintln!("msedgewebview2 {pid} (parent {parent}) {kind}");
+    }
+    tree
 }
 
 /// The agent process; if the test fails, its exit status, standard error and the requests the
@@ -194,13 +202,17 @@ fn a_killed_webview_is_reported_closed_and_the_notice_comes_back() {
     let mut agent = spawn_agent(&srv, &scratch);
     let first = wait_for(30, || notice_window(agent.id()));
     // the notice's WebView2 browser process dies
-    let browser = wait_for(15, || webview_browser(agent.id()));
-    let out = std::process::Command::new(mcp_monitor::winutil::system_tool("taskkill.exe"))
-        .args(["/PID", &browser.to_string(), "/T", "/F"])
-        .output()
-        .unwrap();
-    eprintln!("{}", String::from_utf8_lossy(&out.stdout));
-    assert!(out.status.success(), "taskkill failed");
+    let tree = wait_for(15, || {
+        Some(webview_tree(agent.id())).filter(|t| !t.is_empty())
+    });
+    let taskkill = mcp_monitor::winutil::system_tool("taskkill.exe");
+    for pid in tree {
+        let out = std::process::Command::new(&taskkill)
+            .args(["/PID", &pid.to_string(), "/F"])
+            .output()
+            .unwrap();
+        eprintln!("{}", String::from_utf8_lossy(&out.stdout).trim());
+    }
     wait_for(10, || {
         srv.requests()
             .iter()
