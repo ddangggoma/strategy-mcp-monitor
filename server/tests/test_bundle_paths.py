@@ -4,7 +4,14 @@ from pathlib import Path
 
 from app.__main__ import parse_args, reindex
 from app.activity.agent_supervisor import AgentOptions, agent_argv, agent_env
-from app.bundle import Bundle, agent_command, default_root, default_static_dir, find_bundle
+from app.bundle import (
+    Bundle,
+    agent_command,
+    default_agent_dialog,
+    default_root,
+    default_static_dir,
+    find_bundle,
+)
 from app.collect.cli import collector_config
 
 REPO = Path(__file__).resolve().parents[2]
@@ -121,3 +128,60 @@ def test_reindex_defaults_to_the_bundle_root(monkeypatch, tmp_path, capsys):
     assert reindex([]) == 0
     assert (tmp_path / "pd" / "MCP Monitor" / "data").is_dir()
     assert "indexed 0 rows from 0 files" in capsys.readouterr().out
+
+
+# --- Plan 6 Task 2: the desktop bundle (agent: desktop) ------------------------------------
+
+def write_bundle(root: Path, **kw) -> None:
+    (root / "bundle.json").write_text(json.dumps({"layout": "pyinstaller", "version": "1.1.0", **kw}), "utf-8")
+
+
+def server_exe(root: Path) -> Path:
+    exe = root / "bin" / "monitor" / "mcp-monitor-server.exe"
+    exe.parent.mkdir(parents=True, exist_ok=True); exe.write_bytes(b"")
+    return exe
+
+
+def test_desktop_bundle_runs_the_rust_agent_with_a_webview_notice(tmp_path):
+    write_bundle(tmp_path, agent="desktop")
+    b = find_bundle(server_exe(tmp_path))
+    assert b == Bundle(tmp_path, "pyinstaller", "1.1.0", "desktop")
+    assert agent_command(b) == (str(tmp_path / "mcp-monitor.exe"), "agent")
+    assert default_agent_dialog(b) == "webview"
+
+
+def test_python_agent_is_the_default_and_an_unknown_agent_is_no_bundle(tmp_path):
+    write_bundle(tmp_path)
+    b = find_bundle(server_exe(tmp_path))
+    assert b is not None and b.agent == "python" and default_agent_dialog(b) == "edge"
+    assert default_agent_dialog(None) == "edge"
+    write_bundle(tmp_path, agent="java")
+    assert find_bundle(server_exe(tmp_path)) is None
+
+
+def test_webview_dialog_argv_and_env():
+    o = AgentOptions(command=("C:/P/mcp-monitor.exe", "agent"), dialog="webview")
+    assert agent_argv(o, "http://127.0.0.1:8700", 2) == [
+        "C:/P/mcp-monitor.exe", "agent", "--server", "http://127.0.0.1:8700", "--dialog", "webview"]
+    assert agent_env(o, "tok", "ab" * 32) == {"MCPMON_AGENT_TOKEN": "tok", "MCPMON_AGENT_SERVER_KEY": "ab" * 32}
+
+
+def test_agent_values_that_are_not_an_agent_kind_mean_no_bundle(tmp_path):
+    exe = server_exe(tmp_path)
+    for agent in (None, "", "Desktop", 1, ["desktop"]):
+        write_bundle(tmp_path, agent=agent)
+        assert find_bundle(exe) is None, agent
+    write_bundle(tmp_path, agent="python")
+    assert find_bundle(exe) == Bundle(tmp_path, "pyinstaller", "1.1.0", "python")
+
+
+def test_cli_in_a_desktop_bundle_runs_mcp_monitor_agent_from_the_bundle_root(monkeypatch, tmp_path, clock):
+    write_bundle(tmp_path, agent="desktop")
+    monkeypatch.setattr(sys, "executable", str(server_exe(tmp_path)))
+    monkeypatch.setenv("ProgramData", str(tmp_path / "pd"))
+    cfg = collector_config(parse_args(["--session-source", f"json:{tmp_path / 's.json'}", "--agent-launcher", "local"]),
+                           clock=clock, root=tmp_path / "pd")
+    assert (cfg.agent.dialog, cfg.agent.agent_dir, cfg.agent.url_dir) == ("webview", tmp_path, None)
+    assert agent_argv(cfg.agent, "http://127.0.0.1:8700", 2) == [
+        str(tmp_path / "mcp-monitor.exe"), "agent", "--server", "http://127.0.0.1:8700", "--dialog", "webview"]
+    assert "PYTHONPATH" not in agent_env(cfg.agent, "t", "k")

@@ -69,7 +69,7 @@ def test_reindex_refuses_a_root_in_use(tmp_path):
 
 def test_version_flag():
     p = run_app("--version")
-    assert p.returncode == 0 and p.stdout.strip() == "mcp-monitor 1.0.0"
+    assert p.returncode == 0 and p.stdout.strip() == "mcp-monitor 1.1.0"
 
 
 def test_service_mode_from_a_console_exits_2():

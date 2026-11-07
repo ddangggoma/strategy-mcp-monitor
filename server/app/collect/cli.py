@@ -2,7 +2,8 @@
 ``--agent-launcher``, ``--agent-dialog``, ``--agent-dir``) → ``CollectorConfig``.
 
 In a deployment bundle (``app.bundle``) the agent runs the bundle's command with the bundle root
-as its working folder; in development, the base interpreter with ``PYTHONPATH`` = ``--agent-dir``."""
+as its working folder (a desktop bundle: ``mcp-monitor.exe agent --dialog webview``); in
+development, the base interpreter with ``PYTHONPATH`` = ``--agent-dir``."""
 
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ import sys
 from pathlib import Path
 
 from app.activity.agent_supervisor import AgentOptions
-from app.bundle import Bundle, agent_command
+from app.bundle import Bundle, agent_command, default_agent_dialog
 from app.clock import Clock
 from app.collect.config import CollectorConfig
 from app.sessions.jsonsource import JsonFileWtsSource
@@ -62,10 +63,11 @@ def add_collector_arguments(parser: argparse.ArgumentParser, bundle: Bundle | No
     )
     parser.add_argument(
         "--agent-dialog",
-        choices=("edge", "print"),
-        default="edge",
-        help="notice window: edge (an Edge app window) or print (DEV/E2E: the agent writes the "
-        "notice URL to <root>/run/agent-<session>.url)",
+        choices=("edge", "print", "webview"),
+        default=default_agent_dialog(bundle),
+        help="notice window: webview (the desktop agent's WebView2 window; default in a desktop bundle), "
+        "edge (the development agent's Edge app window), or print (DEV/E2E: the agent writes the notice "
+        "URL to <root>/run/agent-<session>.url)",
     )
     parser.add_argument(
         "--agent-dir",
@@ -76,6 +78,20 @@ def add_collector_arguments(parser: argparse.ArgumentParser, bundle: Bundle | No
     )
     # Not a flag: the bundle's agent command, None = <base interpreter> -m mcp_agent.
     parser.set_defaults(agent_command=agent_command(bundle) if bundle is not None else None)
+
+
+def agent_dialog_error(dialog: str, bundle: Bundle | None) -> str | None:
+    """Why the agent this process would start cannot show ``dialog``, or None (preflight F29).
+
+    The desktop agent (``mcp-monitor.exe agent``) knows ``webview`` and ``print``, the Python agent
+    ``edge`` and ``print``; any other pair would make every launch exit 2 (a restart storm)."""
+    desktop = bundle is not None and bundle.agent == "desktop"
+    if dialog == "webview" and not desktop:
+        return ("--agent-dialog webview needs a desktop bundle (bundle.json \"agent\": \"desktop\"); "
+                "the development agent shows edge or print")
+    if dialog == "edge" and desktop:
+        return "--agent-dialog edge is not available in a desktop bundle; its agent shows webview or print"
+    return None
 
 
 def collector_config(ns: argparse.Namespace, *, clock: Clock, root: Path) -> CollectorConfig:

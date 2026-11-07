@@ -11,7 +11,7 @@ from typing import Any
 from app import __version__
 from app.bundle import default_root, default_static_dir, find_bundle
 from app.clock import SystemClock
-from app.collect.cli import add_collector_arguments, collector_config
+from app.collect.cli import add_collector_arguments, agent_dialog_error, collector_config
 from app.db import DatabaseTooNewError
 from app.logstore.indexer import IndexStatus, LogIndex
 from app.main import PortInUseError, ServeControl, serve
@@ -67,6 +67,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     add_collector_arguments(parser, bundle)
     args = parser.parse_args(argv)
+    if (dialog_error := agent_dialog_error(args.agent_dialog, bundle)) is not None:
+        parser.error(dialog_error)
     if args.dev_otp_code is not None and not args.allow_lan_dev and not _is_loopback(args.external_host):
         parser.error(
             f"--dev-otp-code with --external-host {args.external_host} would let anyone on the network "

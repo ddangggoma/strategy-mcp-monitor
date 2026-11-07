@@ -14,14 +14,13 @@ import ctypes
 import json
 import os
 import re
-import shutil
 import subprocess
-import uuid
 from pathlib import Path
 
 import pytest
 
 from app.winsvc import DESCRIPTION
+from tests.live import scratch_path  # noqa: F401 (the tmp_path fixture: a scratch folder a data root may sit in)
 
 REPO = Path(__file__).resolve().parents[2]
 INSTALL = REPO / "install"
@@ -31,29 +30,6 @@ GUID = re.compile(r"\{0CCE92[0-9A-F]{2}-69AE-11D9-BED3-505054503030\}")
 AUDIT_KEY = r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Audit\ProcessCreationIncludeCmdLine_Enabled"
 PS_KEY = r"HKLM\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging\EnableScriptBlockLogging"
 ICACLS = str(Path(os.environ["SystemRoot"]) / "System32" / "icacls.exe")
-SCRATCH = Path(os.environ["LOCALAPPDATA"]) / "mcp-monitor-install-tests"
-
-
-@pytest.fixture(name="tmp_path")
-def scratch_path():
-    """A scratch folder whose parents only SYSTEM, Administrators and this account can change.
-
-    install.ps1 refuses a data root below a folder another account may delete or rename (re-review 2), and
-    this PC's %TEMP% gives a sandbox's user group Modify, so pytest's own tmp_path would be refused. A folder
-    under %LOCALAPPDATA% inherits only the profile's ACL. Removed after the test.
-    """
-    path = SCRATCH / uuid.uuid4().hex[:12]
-    path.mkdir(parents=True)
-    yield path
-    shutil.rmtree(path, ignore_errors=True)
-    if path.exists():  # a test failed before it unlocked its folder
-        subprocess.run([ICACLS, str(path), "/reset", "/T", "/C", "/Q"], capture_output=True)
-        shutil.rmtree(path, ignore_errors=True)
-    try:
-        SCRATCH.rmdir()
-    except OSError:
-        pass
-
 
 def ps(*args, timeout=120):
     si = subprocess.STARTUPINFO()

@@ -1,11 +1,42 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import shutil
 import socket
-from collections.abc import AsyncIterator
+import subprocess
+import uuid
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
+import pytest
 import uvicorn
+
+SCRATCH = Path(os.environ["LOCALAPPDATA"]) / "mcp-monitor-install-tests"
+ICACLS = str(Path(os.environ["SystemRoot"]) / "System32" / "icacls.exe")
+
+
+@pytest.fixture(name="tmp_path")
+def scratch_path() -> Iterator[Path]:
+    """A scratch folder whose parents only SYSTEM, Administrators and this account can change.
+
+    Import it as ``from tests.live import scratch_path`` to replace pytest's ``tmp_path`` in a module.
+    The installers refuse a data root below a folder another account may delete or rename (re-review 2),
+    and this PC's %TEMP% gives a sandbox's user group Modify, so pytest's own tmp_path would be refused.
+    A folder under %LOCALAPPDATA% inherits only the profile's ACL. Removed after the test.
+    """
+    path = SCRATCH / uuid.uuid4().hex[:12]
+    path.mkdir(parents=True)
+    yield path
+    shutil.rmtree(path, ignore_errors=True)
+    if path.exists():  # a test failed before it unlocked its folder
+        subprocess.run([ICACLS, str(path), "/reset", "/T", "/C", "/Q"], capture_output=True)
+        shutil.rmtree(path, ignore_errors=True)
+    try:
+        SCRATCH.rmdir()
+    except OSError:
+        pass
 
 
 def free_port() -> int:
