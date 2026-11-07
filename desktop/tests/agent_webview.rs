@@ -66,15 +66,49 @@ fn webview_browsers(profile: &std::path::Path) -> Vec<u32> {
         .collect()
 }
 
+/// The agent process; if the test fails, its exit status, standard error and the requests the
+/// server saw are printed, and it is killed.
+struct Agent<'a> {
+    child: std::process::Child,
+    stderr: std::path::PathBuf,
+    srv: &'a AgentServer,
+}
+
+impl Agent<'_> {
+    fn id(&self) -> u32 {
+        self.child.id()
+    }
+}
+
+impl Drop for Agent<'_> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            eprintln!("agent status: {:?}", self.child.try_wait());
+            eprintln!(
+                "agent stderr:\n{}",
+                std::fs::read_to_string(&self.stderr).unwrap_or_default()
+            );
+            let paths: Vec<String> = self.srv.requests().into_iter().map(|r| r.path).collect();
+            eprintln!("requests: {paths:?}");
+        }
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
 /// The agent with its own `%LOCALAPPDATA%` (F23: the notice profile goes to the scratch folder).
-fn spawn_agent(srv: &AgentServer, scratch: &Scratch) -> std::process::Child {
-    exe()
+fn spawn_agent<'a>(srv: &'a AgentServer, scratch: &Scratch) -> Agent<'a> {
+    let stderr = scratch.join("agent-stderr.txt");
+    let child = exe()
         .args(["agent", "--server", &srv.url()])
         .env("MCPMON_AGENT_TOKEN", "tok")
         .env("MCPMON_AGENT_SERVER_KEY", "11".repeat(32))
         .env("LOCALAPPDATA", scratch.path())
+        .env("RUST_BACKTRACE", "1")
+        .stderr(std::fs::File::create(&stderr).unwrap())
         .spawn()
-        .unwrap()
+        .unwrap();
+    Agent { child, stderr, srv }
 }
 
 /// WebView2 processes can hold the profile for a moment after the agent exits.
@@ -93,8 +127,8 @@ fn webview_notice_is_topmost_ignores_wm_close_and_closes_on_command() {
     srv.serve_page("/notice", PAGE);
     let notice = format!("{}/notice#d=7&t=tok_ABCDEFGHIJKLmnop", srv.url());
     srv.queue(json!({"type": "show_notice", "display_id": 7, "attempt": 1, "url": notice}));
-    let mut child = spawn_agent(&srv, &scratch);
-    let hwnd = wait_for(30, || notice_window(child.id()));
+    let mut agent = spawn_agent(&srv, &scratch);
+    let hwnd = wait_for(30, || notice_window(agent.id()));
     let ex = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32;
     assert!(ex & WS_EX_TOPMOST.0 != 0, "not top-most");
     // the close button is grey (re-applied with the top-most tick, so allow one tick)
@@ -120,7 +154,7 @@ fn webview_notice_is_topmost_ignores_wm_close_and_closes_on_command() {
         (!unsafe { IsWindow(Some(hwnd)) }.as_bool()).then_some(())
     });
     srv.queue(json!({"type": "exit"}));
-    assert_eq!(child.wait().unwrap().code(), Some(0));
+    assert_eq!(agent.child.wait().unwrap().code(), Some(0));
     assert!(
         !srv.requests()
             .iter()
@@ -137,8 +171,8 @@ fn a_killed_webview_is_reported_closed_and_the_notice_comes_back() {
     srv.serve_page("/notice", PAGE);
     let notice = format!("{}/notice#d=7&t=tok_ABCDEFGHIJKLmnop", srv.url());
     srv.queue(json!({"type": "show_notice", "display_id": 7, "attempt": 1, "url": notice}));
-    let mut child = spawn_agent(&srv, &scratch);
-    let first = wait_for(30, || notice_window(child.id()));
+    let mut agent = spawn_agent(&srv, &scratch);
+    let first = wait_for(30, || notice_window(agent.id()));
     // the notice's WebView2 browser process dies
     let profile = scratch.join(r"mcp-monitor\notice-webview");
     let browsers = wait_for(15, || {
@@ -158,10 +192,10 @@ fn a_killed_webview_is_reported_closed_and_the_notice_comes_back() {
     });
     // the server shows it again: a new window replaces the dead one
     srv.queue(json!({"type": "show_notice", "display_id": 7, "attempt": 2, "url": notice}));
-    let second = wait_for(30, || notice_window(child.id()).filter(|h| *h != first));
+    let second = wait_for(30, || notice_window(agent.id()).filter(|h| *h != first));
     assert!(!unsafe { IsWindow(Some(first)) }.as_bool());
     assert!(unsafe { IsWindow(Some(second)) }.as_bool());
     srv.queue(json!({"type": "exit"}));
-    assert_eq!(child.wait().unwrap().code(), Some(0));
+    assert_eq!(agent.child.wait().unwrap().code(), Some(0));
     remove_profile(&scratch);
 }
