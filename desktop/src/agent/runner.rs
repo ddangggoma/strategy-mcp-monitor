@@ -37,8 +37,10 @@ pub const POLL_SEC: f64 = 25.0;
 /// Check for a window the user closed at least this often.
 pub const POLL_WHILE_SHOWN_SEC: f64 = 2.0;
 pub const DEFAULT_HEARTBEAT_SEC: f64 = 5.0;
-/// How long the end of `run` waits for the heartbeat thread (busy with a request).
-pub const HEARTBEAT_JOIN_SEC: u64 = 5;
+/// How long the end of `run` waits for the heartbeat thread (busy with a request; it is otherwise
+/// left to the process exit). With the window activity's stop budget it must fit the 2 s the
+/// server gives an agent after `exit` before it ends the process (review item 11).
+pub const HEARTBEAT_JOIN: Duration = Duration::from_millis(300);
 
 pub trait NoticeWindow: Send {
     fn open(&mut self, url: &str, display_id: i64) -> Result<(), String>;
@@ -292,7 +294,7 @@ impl AgentRunner {
     }
 
     /// Runs until told to exit or the session ends; returns the exit code. The window is always
-    /// closed at the end, and the heartbeat thread is waited for (up to 5 s).
+    /// closed at the end, and the heartbeat thread is waited for (up to [`HEARTBEAT_JOIN`]).
     pub fn run(mut self) -> i32 {
         let rejection = Arc::new(Rejection::default());
         let mut heartbeat = None;
@@ -311,7 +313,7 @@ impl AgentRunner {
         });
         self.window.close();
         if let Some((done, handle)) = stopping {
-            match done.recv_timeout(Duration::from_secs(HEARTBEAT_JOIN_SEC)) {
+            match done.recv_timeout(HEARTBEAT_JOIN) {
                 Ok(()) | Err(RecvTimeoutError::Disconnected) => {
                     let _ = handle.join();
                 }
@@ -907,6 +909,18 @@ mod tests {
         );
         assert!(w.opened.lock().unwrap().is_empty() && sleeps.lock().unwrap().is_empty());
         assert_eq!(paths(&fake), ["/api/agent/hello"]);
+    }
+
+    /// Review item 11: after `exit` the server ends the agent 2 s later; the wait for a busy
+    /// heartbeat and the window activity's stop (its last flush) both fit before that.
+    #[test]
+    fn the_end_of_a_run_fits_the_servers_exit_grace() {
+        let grace = Duration::from_secs(2);
+        assert!(
+            HEARTBEAT_JOIN + crate::agent::activity::EXIT_STOP_BUDGET < grace,
+            "{HEARTBEAT_JOIN:?} + {:?}",
+            crate::agent::activity::EXIT_STOP_BUDGET
+        );
     }
 
     #[test]
