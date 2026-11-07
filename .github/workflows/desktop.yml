@@ -2,6 +2,9 @@
 # The dev PC's Smart App Control blocks freshly built unsigned test binaries,
 # so the Rust test loop runs here instead (Plan 6, 2026-11-07). The server's agent integration
 # tests run here too, with both agents (the Rust one needs the exe built here, Task 11).
+# The release job runs install\build-desktop.ps1 end to end with the real payload and uploads the
+# release mcp-monitor.exe (Task 13). Server or web changes alone do not trigger it: run it by hand
+# (workflow_dispatch) when a release needs the latest payload.
 name: desktop
 
 on:
@@ -13,6 +16,11 @@ on:
       - "server/app/activity/**"
       - "server/tests/test_integration_agent.py"
       - "server/tests/desktop_bundle_main.py"
+      - "server/tests/test_desktop_build.py"
+      - "server/tests/test_desktop_exe.py"
+      - "install/build.ps1"
+      - "install/build-desktop.ps1"
+      - "install/pyinstaller/**"
   pull_request:
     paths:
       - "desktop/**"
@@ -20,6 +28,11 @@ on:
       - "server/app/activity/**"
       - "server/tests/test_integration_agent.py"
       - "server/tests/desktop_bundle_main.py"
+      - "server/tests/test_desktop_build.py"
+      - "server/tests/test_desktop_exe.py"
+      - "install/build.ps1"
+      - "install/build-desktop.ps1"
+      - "install/pyinstaller/**"
   workflow_dispatch:
 
 permissions:
@@ -117,9 +130,12 @@ jobs:
         run: uv run python -m pytest -m integration tests/test_integration_agent.py -v -rs
 
   release:
+    # install\build-desktop.ps1 end to end (Plan 6 Task 13): the real payload (install\build.ps1:
+    # pip-audit, pnpm audit, web build, PyInstaller server), cargo audit, the release build with
+    # the payload embedded, its checks; then the `desktop` server tests against the result.
     name: release build · audit
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     needs: test
     steps:
       - uses: actions/checkout@v5
@@ -139,17 +155,49 @@ jobs:
           key: desktop-release-${{ runner.os }}-1.99.1-${{ hashFiles('desktop/Cargo.lock') }}
           restore-keys: desktop-release-${{ runner.os }}-1.99.1-
 
-      - name: cargo build --release (fixture payload)
-        run: cargo build --release --locked
+      - name: Install cargo-audit 0.22.2
+        run: |
+          if (-not (Get-Command cargo-audit -ErrorAction SilentlyContinue)) {
+            cargo install cargo-audit --version 0.22.2 --locked
+          }
+          cargo audit --version
+
+      - name: Install Node 26.13.0
+        uses: actions/setup-node@v5.0.0
+        with:
+          node-version: "26.13.0"
+
+      - name: Install pnpm 12.16.1 and the web dependencies
+        working-directory: web
+        run: |
+          npm install --global "pnpm@12.16.1"
+          pnpm --version
+          pnpm install --frozen-lockfile
+
+      - name: Install uv 0.13.7
+        run: python -m pip install --disable-pip-version-check "uv==0.13.7"
+
+      - name: Server environment (Python 3.15.2 from uv)
+        working-directory: server
+        run: uv sync --locked
+
+      - name: install\build-desktop.ps1 (real payload, audits, release build, checks)
+        # Windows PowerShell 5.1, as on a release PC. No -SignThumbprint: nothing is signed (D5).
+        working-directory: .
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File install\build-desktop.ps1
+          if ($LASTEXITCODE -ne 0) { throw "build-desktop.ps1 exited $LASTEXITCODE" }
+          Get-ChildItem dist\mcp-monitor-*.exe* | Format-Table Name, Length
 
       - name: Smoke-run the release exe
         # The exe is GUI-subsystem. pwsh waits for a GUI exe and reads its output only when the
         # exe sits inside a pipeline: `$x = & gui.exe` alone starts it in the background, closes
         # the stdout pipe and leaves $LASTEXITCODE unset. So: a pipe via `| Write-Output`, then a
         # file via Start-Process -RedirectStandardOutput.
+        working-directory: .
         run: |
-          $exe = '.\target\release\mcp-monitor.exe'
-          $pattern = '^mcp-monitor 1\.1\.0 \(payload [0-9a-f]{12}, (fixture|release)\)$'
+          $exe = '.\dist\mcp-monitor-1.1.0.exe'
+          $pattern = '^mcp-monitor 1\.1\.0 \(payload [0-9a-f]{12}, release\)$'
           $out = & $exe --version | Write-Output
           if ($LASTEXITCODE -ne 0) { throw "mcp-monitor --version (pipe) exited $LASTEXITCODE" }
           Write-Host "pipe: $out"
@@ -161,17 +209,35 @@ jobs:
           Write-Host "file: $text"
           if ($text -notmatch $pattern) { throw "unexpected --version output in a file: '$text'" }
 
-      - name: cargo audit
-        run: |
-          if (-not (Get-Command cargo-audit -ErrorAction SilentlyContinue)) {
-            cargo install cargo-audit --version 0.22.2 --locked
-          }
-          # Fails on vulnerabilities; "unmaintained/unsound" warnings are Linux-only tauri crates (Task 1).
-          cargo audit
+      - name: Server tests for the build scripts
+        working-directory: server
+        run: uv run python -m pytest tests/test_desktop_build.py -v
 
-      - name: Upload release exe (fixture payload)
+      - name: Server tests against the release exe (marker desktop)
+        # The runner is elevated: the "install without admin" test skips with its reason (-rs).
+        working-directory: server
+        env:
+          MCPMON_DESKTOP_EXE: ${{ github.workspace }}\dist\mcp-monitor-1.1.0.exe
+        run: uv run python -m pytest -m desktop -v -rs
+
+      - name: Server agent integration with the release exe
+        # The same bytes as dist\mcp-monitor-1.1.0.exe, under the name the desktop bundle runs
+        # (tests.desktop_bundle_main needs mcp-monitor.exe).
+        working-directory: server
+        env:
+          MCPMON_DESKTOP_EXE: ${{ github.workspace }}\desktop\target\release\mcp-monitor.exe
+        run: |
+          $a = (Get-FileHash $env:MCPMON_DESKTOP_EXE).Hash
+          $b = (Get-FileHash ..\dist\mcp-monitor-1.1.0.exe).Hash
+          if ($a -ne $b) { throw "target\release\mcp-monitor.exe is not the built release exe" }
+          uv run python -m pytest -m integration tests/test_integration_agent.py -v -rs
+
+      - name: Upload the release exe (real payload)
         uses: actions/upload-artifact@v4
         with:
-          name: mcp-monitor-fixture-${{ github.sha }}
-          path: desktop/target/release/mcp-monitor.exe
+          name: mcp-monitor-release-${{ github.sha }}
+          path: |
+            dist/mcp-monitor-1.1.0.exe
+            dist/mcp-monitor-1.1.0.exe.sha256
+          if-no-files-found: error
           retention-days: 7
