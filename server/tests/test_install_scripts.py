@@ -125,8 +125,8 @@ SHARED = ["Stop-WithArgumentError", "Get-FullPath", "Test-Inside", "Get-Prop", "
           "ConvertTo-CommandLineArg", "Invoke-Native", "Get-LocalDriveLetters", "Get-PathLinkProblem",
           "Get-UnsafeRootReason", "Test-DataRootMarker"]
 # The data root helpers install.ps1 and audit-policy.ps1 both use (C1): identical in the two.
-DATA_ROOT = ["Get-RegistryValue", "Get-TreeItems", "Get-InnerException", "Get-DataRootProblem", "Test-DataRootReadable",
-             "Get-AncestorProblem", "Reset-ItemAcl", "New-RootSecurity", "Set-RootAcl", "New-ProtectedDirectory",
+DATA_ROOT = ["Get-RegistryValue", "Get-TreeItems", "Get-InnerException", "Get-UntrustedRule", "Get-DataRootProblem",
+             "Test-DataRootReadable", "Get-FolderAcl", "Get-AncestorProblem", "Reset-ItemAcl", "New-RootSecurity", "Set-RootAcl", "New-ProtectedDirectory",
              "Get-DataRootAclProblems", "Initialize-DataRoot"]
 
 
@@ -607,16 +607,16 @@ def test_data_root_problem_names_a_foreign_owner(tmp_path):
 
 def test_initialize_data_root_rebuilds_the_acl_from_scratch(tmp_path):
     """C1 on a scratch folder (no admin: this account owns the folder and stands in for Administrators):
-    an earlier data root whose root and a file carry an extra Everyone:F ACE comes out with exactly the
-    given SIDs, inheritance off at the root and nothing explicit below, and the read-back check passes;
-    an ACE added afterwards is caught by that check."""
+    an earlier data root whose root and a file carry an extra Everyone read ACE (a right that does not get
+    the folder refused) comes out with exactly the given SIDs, inheritance off at the root and nothing
+    explicit below, and the read-back check passes; an ACE added afterwards is caught by that check."""
     root = tmp_path / "MCP Monitor"
     (root / "data").mkdir(parents=True)
     (root / "data" / "install-state.json").write_text("{}", "utf-8")
     log = root / "logs" / "2026-11-01.jsonl"
     log.parent.mkdir(); log.write_text("{}\n", "utf-8")
-    subprocess.run([ICACLS, str(root), "/grant", f"*{EVERYONE}:(OI)(CI)F"], check=True, capture_output=True)
-    subprocess.run([ICACLS, str(log), "/grant", f"*{EVERYONE}:F"], check=True, capture_output=True)
+    subprocess.run([ICACLS, str(root), "/grant", f"*{EVERYONE}:(OI)(CI)RX"], check=True, capture_output=True)
+    subprocess.run([ICACLS, str(log), "/grant", f"*{EVERYONE}:R"], check=True, capture_output=True)
     assert ";;;WD)" in sddl(root) and ";;;WD)" in sddl(log)  # WD = Everyone
     me = me_sid()
     sids = f"@('S-1-5-18', 'S-1-5-32-544', '{me}')"
@@ -740,12 +740,89 @@ def test_install_refuses_a_data_root_below_a_folder_others_may_rename(bundle, tm
 
 def test_ancestor_check_passes_the_default_and_drive_level_roots(tmp_path):
     # The default C:\ProgramData\MCP Monitor (Users may add folders to ProgramData, not delete or rename them)
-    # and a folder directly under a drive root (the drive root itself is not checked). Read-only on this PC.
-    drive = os.environ["SystemDrive"]
+    # and a folder directly under each local drive root with this PC's real drive root ACLs: C:\ (Authenticated
+    # Users may add folders) and a data volume's root (Authenticated Users Modify on the root itself, which can
+    # be neither deleted nor renamed; no delete-child, permission or owner rights). Read-only on this PC.
+    letters = run_actions("install.ps1", tmp_path, "", "Write-Output ((Get-LocalDriveLetters) -join ',')")[0].split(",")
+    assert os.environ["SystemDrive"][0].upper() in letters
+    body = f"Write-Output \"[$(Get-AncestorProblem '{os.environ['ProgramData']}\\MCP Monitor' @('S-1-5-18', 'S-1-5-32-544'))]\"\n"
+    body += "".join(f"Write-Output \"[$(Get-AncestorProblem '{x}:\\MCP Monitor' @('S-1-5-18', 'S-1-5-32-544'))]\"\n" for x in letters)
+    assert run_actions("install.ps1", tmp_path, "", body) == ["[]"] * (1 + len(letters))
+
+
+@pytest.mark.parametrize("grant, refused", [("(DC)", True), ("(WDAC)", True), ("(WO)", True), ("F", True),
+                                            ("M", False), ("(AD)", False), ("(OI)(CI)(IO)M", False)])
+def test_ancestor_check_includes_the_drive_root(tmp_path, grant, refused):
+    """Fix wave: a drive root that lets a non-admin delete its children (FILE_DELETE_CHILD) or change its
+    permissions or owner lets him rename the data root away at any time, without a handle. The drive root's
+    ACL is stood in for by a scratch folder (a real drive root's ACL must not change); DELETE on the drive
+    root itself (a data volume's default Authenticated Users:(M)) does not count."""
+    fake = tmp_path / "fake-drive-root"
+    fake.mkdir()
+    subprocess.run([ICACLS, str(fake), "/grant", f"*{AUTHENTICATED_USERS}:{grant}"], check=True, capture_output=True)
+    drive = str(tmp_path)[:3]
+    sids = f"@('S-1-5-18', 'S-1-5-32-544', '{me_sid()}')"
     out = run_actions("install.ps1", tmp_path, "",
-                      f"Write-Output \"[$(Get-AncestorProblem '{os.environ['ProgramData']}\\MCP Monitor' @('S-1-5-18', 'S-1-5-32-544'))]\"\n"
-                      f"Write-Output \"[$(Get-AncestorProblem '{drive}\\MCP Monitor' @('S-1-5-18', 'S-1-5-32-544'))]\"\n")
-    assert out == ["[]", "[]"]
+                      "$real = ${function:Get-FolderAcl}\n"
+                      f"function Get-FolderAcl([string]$Path) {{ if ($Path -eq '{drive}') {{ $Path = '{fake}' }}; & $real $Path }}\n"
+                      f"Write-Output \"[$(Get-AncestorProblem '{tmp_path / 'MCP Monitor'}' {sids})]\"\n")
+    assert len(out) == 1, out
+    if refused:
+        assert drive in out[0] and AUTHENTICATED_USERS in out[0] and "드라이브" in out[0], out
+    else:
+        assert out == ["[]"]
+
+
+def granted(path, grant):
+    subprocess.run([ICACLS, str(path), "/grant", f"*{AUTHENTICATED_USERS}:{grant}"], check=True, capture_output=True)
+
+
+@pytest.mark.parametrize("case", ["inherited_modify", "write_dac", "write_owner", "delete_on_a_file", "write_on_a_script"])
+def test_existing_data_root_others_may_delete_or_rechmod_is_refused(bundle, tmp_path, case):
+    """Fix wave: an existing data root was accepted after checking only owners and contents. A standard user
+    opens it (or an item in it) with DELETE, WRITE_DAC, WRITE_OWNER or write access before the install and
+    keeps the handle: after Set-RootAcl he renames the root through that handle and puts his own tree (config.db,
+    scripts) where the SYSTEM service looks. Such a root is refused before its ACL changes, with advice to delete
+    it and let the install create it; nothing is changed."""
+    if case == "inherited_modify":
+        # an admin pre-creates an empty D:\MCP Monitor that inherits Authenticated Users:(M) from D:\
+        vol = tmp_path / "vol"
+        vol.mkdir()
+        granted(vol, "(OI)(CI)(IO)M")  # inherit-only: the folder above itself passes the ancestor check
+        root = vol / "MCP Monitor"
+        root.mkdir()
+    else:
+        root = tmp_path / "MCP Monitor"
+        (root / "data").mkdir(parents=True); (root / "data" / "mcp-monitor-data-root.json").write_text("{}", "utf-8")
+        (root / "data" / "config.db").write_bytes(b"")
+        (root / "scripts").mkdir(); (root / "scripts" / "a.ps1").write_text("x", "utf-8")
+        target, grant = {"write_dac": (root, "(WDAC)"), "write_owner": (root, "(WO)"),
+                         "delete_on_a_file": (root / "data" / "config.db", "(D)"),
+                         "write_on_a_script": (root / "scripts" / "a.ps1", "(WD)")}[case]
+        granted(target, grant)
+    before = sddl(root)
+    for args in (["-File", str(INSTALL / "install.ps1"), "-DryRun", "-Source", str(bundle), "-InstallDir", str(tmp_path / "i"), "-DataRoot", str(root)],
+                 ["-File", str(INSTALL / "audit-policy.ps1"), "-DryRun", "-Enable", "-DataRoot", str(root)]):
+        p = ps(*args)
+        assert p.returncode == 2 and p.stdout.strip() == "", p.stdout + p.stderr
+        assert "-DataRoot" in p.stderr and AUTHENTICATED_USERS in p.stderr and "지우고" in p.stderr, p.stderr
+    me = me_sid()
+    sids = f"@('S-1-5-18', 'S-1-5-32-544', '{me}')"
+    out = run_actions("install.ps1", tmp_path, "",
+                      f"try {{ Initialize-DataRoot '{root}' '{me}' {sids} {sids} 'install'; Write-Output 'accepted' }}"
+                      " catch { Write-Output \"refused: $($_.Exception.Message)\" }\n")
+    assert len(out) == 1 and out[0].startswith("refused: ") and AUTHENTICATED_USERS in out[0], out
+    assert sddl(root) == before and "D:P" not in before  # left as found
+
+
+def test_existing_data_root_with_harmless_extra_rights_is_accepted(bundle, tmp_path):
+    # Read and execute for others, and inherit-only rights that never reach the root, take nothing over.
+    root = tmp_path / "MCP Monitor"
+    root.mkdir()
+    granted(root, "(OI)(CI)RX")
+    subprocess.run([ICACLS, str(root), "/grant", f"*{EVERYONE}:(OI)(CI)(IO)RX"], check=True, capture_output=True)
+    assert step(dry("install.ps1", "-Source", str(bundle), "-InstallDir", str(tmp_path / "i"), "-DataRoot", str(root)),
+                "secure_data_root")["args"] == [str(root)]
 
 
 def unc(path):

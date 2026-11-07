@@ -163,22 +163,50 @@ function Get-InnerException([System.Exception]$Exception) {
     return $Exception
 }
 
+# The first ACE of $Acl that gives an account other than $Owners and TrustedInstaller one of $Rights on the
+# item itself ($null: none). Deny ACEs, inherit-only ACEs (they apply below, not to the item), CREATOR OWNER /
+# OWNER RIGHTS placeholders and app-container SIDs (S-1-15-*, never alone enough for access) do not count.
+function Get-UntrustedRule($Acl, [string[]]$Owners, [int64]$Rights) {
+    $trusted = @($Owners) + "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"
+    foreach ($rule in @($Acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))) {
+        $sid = $rule.IdentityReference.Value
+        if ($rule.AccessControlType -ne "Allow" -or ($rule.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) -or
+            $trusted -contains $sid -or $sid -like "S-1-3-*" -or $sid -like "S-1-15-*") { continue }
+        if (([int64]$rule.FileSystemRights -band $Rights) -ne 0) { return $rule }
+    }
+    return $null
+}
+
 # Why an existing folder must not become the data root ($null: safe). Only an empty folder or an earlier
 # data root (marker) is taken over, and only when SYSTEM, Administrators or the account running this script
 # ($Owners) own every item and nothing is a junction or symbolic link: a user who created the folder before
-# the install would otherwise keep write access to what the service runs as SYSTEM (finding C1).
+# the install would otherwise keep write access to what the service runs as SYSTEM (finding C1). Nor may any
+# other account have DELETE, WRITE_DAC, WRITE_OWNER, FILE_DELETE_CHILD, write access or a generic all/write
+# right on the root or an item below it, explicit or inherited: a handle he opens with it before the install
+# keeps that access after Set-RootAcl, so he could rename the root away through it and put his own config.db
+# and scripts in its place, or write into them (fix wave). Such a folder is deleted and the install makes it.
 function Get-DataRootProblem([string]$Root, [string[]]$Owners) {
     if (-not (Test-Path -LiteralPath $Root)) { return $null }
     $info = New-Object System.IO.DirectoryInfo $Root
     if (-not $info.Exists) { return "$Root 은(는) 폴더가 아닙니다" }
     if ($info.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return "$Root 은(는) 정션 또는 심볼릭 링크입니다" }
+    # DELETE, WRITE_DAC, WRITE_OWNER, FILE_DELETE_CHILD, GENERIC_ALL, GENERIC_WRITE, FILE_WRITE_DATA, FILE_APPEND_DATA
+    $open = 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x40 -bor 0x10000000 -bor 0x40000000 -bor 0x2 -bor 0x4
+    $sections = [System.Security.AccessControl.AccessControlSections]"Owner, Access"
     for ($attempt = 1; ; $attempt++) {
         try {
             $items = @(Get-TreeItems $Root)
             foreach ($item in @($info) + $items) {
                 if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return "$($item.FullName) 은(는) 정션 또는 심볼릭 링크입니다" }
-                $owner = $item.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Owner).GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+                $acl = $item.GetAccessControl($sections)
+                $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
                 if ($Owners -notcontains $owner) { return "$($item.FullName) 의 소유자($owner)가 SYSTEM·Administrators가 아닙니다" }
+                $rule = Get-UntrustedRule $acl $Owners $open
+                if ($rule) {
+                    return "$($item.FullName) 을(를) 관리자가 아닌 계정($($rule.IdentityReference.Value))이 지우거나 쓰거나 권한·소유자를 바꿀 수 있습니다" +
+                        "($($rule.FileSystemRights)). 그 권한으로 설치 전에 열어 둔 핸들은 설치가 권한을 바꾼 뒤에도 남습니다. " +
+                        "$Root 을(를) 지우고 설치가 새로 만들게 하세요(이전 데이터를 지킬 때는 그 권한을 없애고 PC를 다시 시작한 뒤 설치하세요)"
+                }
             }
             break
         } catch {
@@ -204,39 +232,47 @@ function Test-DataRootReadable([string]$Root) {
     }
 }
 
+# The ACL of a folder above the data root (a test stands a scratch folder in for a drive root here).
+function Get-FolderAcl([string]$Path) {
+    return (New-Object System.IO.DirectoryInfo $Path).GetAccessControl()
+}
+
 # Why the folders above the data root would let a user who is not an administrator swap it ($null: none,
-# re-review 2). Every existing folder between the drive root and the data root must be owned by SYSTEM,
-# Administrators, TrustedInstaller or $Owners and give no other account DELETE, WRITE_DAC, WRITE_OWNER or
-# FILE_DELETE_CHILD: with any of them a user renames the folder while the service is stopped and puts a tree
-# of his own in its place, which the service then runs as SYSTEM. Inherit-only ACEs (they apply below, not
-# to the folder), CREATOR OWNER / OWNER RIGHTS placeholders and app-container SIDs (S-1-15-*, never alone
-# enough for access) do not count. C:\ProgramData and a folder directly under a drive root pass.
+# re-review 2). Every existing folder from the drive root down to the data root's parent must be owned by
+# SYSTEM, Administrators, TrustedInstaller or $Owners and give no other account (Get-UntrustedRule) DELETE,
+# WRITE_DAC, WRITE_OWNER, FILE_DELETE_CHILD or GENERIC_ALL: with any of them a user renames the folder (or,
+# with FILE_DELETE_CHILD, the folder below it) while the service is stopped and puts a tree of his own in its
+# place, which the service then runs as SYSTEM. The drive root itself can be neither deleted nor renamed, so
+# DELETE on it does not count (a data volume's root gives Authenticated Users Modify on itself). C:\, a data
+# volume's default root, C:\ProgramData and a folder directly under a drive root pass.
 function Get-AncestorProblem([string]$Root, [string[]]$Owners) {
     $trusted = @($Owners) + "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"
     # DELETE, WRITE_DAC, WRITE_OWNER, FILE_DELETE_CHILD, GENERIC_ALL
     $danger = 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x40 -bor 0x10000000
-    $sidType = [System.Security.Principal.SecurityIdentifier]
     $full = Get-FullPath $Root
-    $drive = ([System.IO.Path]::GetPathRoot($full)).TrimEnd('\')
+    $drive = [System.IO.Path]::GetPathRoot($full)
     $chain = @()
     $dir = Split-Path -Parent $full
-    while ($dir -and $dir.TrimEnd('\') -ne $drive) { $chain = @($dir) + $chain; $dir = Split-Path -Parent $dir }
+    while ($dir) { $chain = @($dir) + $chain; $dir = Split-Path -Parent $dir }
     foreach ($folder in $chain) {
         # A missing folder (and everything below it) is made with the data root's own ACL (New-ProtectedDirectory).
         if (-not (Test-Path -LiteralPath $folder -PathType Container)) { return $null }
-        try { $acl = (New-Object System.IO.DirectoryInfo $folder).GetAccessControl() }
+        try { $acl = Get-FolderAcl $folder }
         catch { return "$folder 의 권한을 확인하지 못했습니다: $((Get-InnerException $_.Exception).Message)" }
-        $advice = "데이터 루트는 관리자만 바꿀 수 있는 폴더 아래나 드라이브 바로 아래(예: D:\MCP Monitor)에 두세요"
-        $owner = $acl.GetOwner($sidType).Value
-        if ($trusted -notcontains $owner) { return "$folder 의 소유자($owner)가 관리자가 아닙니다. $advice" }
-        foreach ($rule in @($acl.GetAccessRules($true, $true, $sidType))) {
-            $sid = $rule.IdentityReference.Value
-            if ($rule.AccessControlType -ne "Allow" -or ($rule.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) -or
-                $trusted -contains $sid -or $sid -like "S-1-3-*" -or $sid -like "S-1-15-*") { continue }
-            if (([int64]$rule.FileSystemRights -band $danger) -ne 0) {
-                return "$folder 을(를) 관리자가 아닌 계정($sid)이 지우거나 이름·권한을 바꿀 수 있습니다($($rule.FileSystemRights)). $advice"
-            }
+        $isDrive = $folder.TrimEnd('\') -eq $drive.TrimEnd('\')
+        if ($isDrive) {
+            $what = "드라이브 루트 $folder 에서 관리자가 아닌 계정이 그 안의 폴더를 지우거나 이름을 바꾸거나 드라이브 루트의 권한을 바꿀 수 있습니다"
+            $advice = "드라이브 루트의 그 권한을 없애거나 데이터 루트를 다른 드라이브에 두세요"
+            $rights = $danger -band -bnot 0x10000
+        } else {
+            $what = "$folder 을(를) 관리자가 아닌 계정이 지우거나 이름·권한을 바꿀 수 있습니다"
+            $advice = "데이터 루트는 관리자만 바꿀 수 있는 폴더 아래나 드라이브 바로 아래(예: D:\MCP Monitor)에 두세요"
+            $rights = $danger
         }
+        $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+        if ($trusted -notcontains $owner) { return "$folder 의 소유자($owner)가 관리자가 아닙니다. $advice" }
+        $rule = Get-UntrustedRule $acl $Owners $rights
+        if ($rule) { return "$what($($rule.IdentityReference.Value): $($rule.FileSystemRights)). $advice" }
     }
     return $null
 }
