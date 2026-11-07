@@ -5,7 +5,9 @@
 //! opens no other window, has no context menu, devtools or browser accelerator keys, and uses an
 //! InPrivate profile under `%LOCALAPPDATA%\mcp-monitor\notice-webview` (removed by uninstall's
 //! `remove_webview_profiles`). If it goes away anyway (destroyed from outside, or a WebView2
-//! browser/renderer process died), the runner reports a user close and the server shows it again.
+//! browser/renderer process died: `ProcessFailed`, `BrowserProcessExited`, or the browser process
+//! found gone when the runner polls), the runner reports a user close, the dead window is closed,
+//! and the server shows the notice again in a fresh window.
 //! Windows cannot block input to other apps; "modal" means the above (K01).
 //!
 //! The Tauri event loop owns the main thread; the runner (with the window activity, F09) runs on
@@ -106,11 +108,58 @@ pub fn process_failure_closes(kind: i32) -> bool {
     matches!(kind, 0 | 1)
 }
 
+/// The WebView2 browser process a notice window's page lives in. The real one is a process handle
+/// opened while the window was made ([`BrowserHandle`]); the tests use a fake.
+pub trait BrowserProcess: Send {
+    /// True once the process has exited.
+    fn exited(&self) -> bool;
+}
+
+/// The browser process by a `SYNCHRONIZE` handle, opened right after the window was made (so a
+/// reused pid cannot stand in for it later). Closed on drop.
+struct BrowserHandle(isize);
+
+impl BrowserHandle {
+    fn open(pid: u32) -> windows::core::Result<BrowserHandle> {
+        use windows::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE};
+        // SAFETY: a plain open; the handle is kept as an integer and closed on drop.
+        let h = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, false, pid) }?;
+        Ok(BrowserHandle(h.0 as isize))
+    }
+}
+
+impl BrowserProcess for BrowserHandle {
+    fn exited(&self) -> bool {
+        use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0};
+        use windows::Win32::System::Threading::WaitForSingleObject;
+        // SAFETY: a handle we own, opened with SYNCHRONIZE; a zero timeout only polls.
+        unsafe { WaitForSingleObject(HANDLE(self.0 as *mut _), 0) == WAIT_OBJECT_0 }
+    }
+}
+
+impl Drop for BrowserHandle {
+    fn drop(&mut self) {
+        use windows::Win32::Foundation::{CloseHandle, HANDLE};
+        // SAFETY: closed once, here.
+        let _ = unsafe { CloseHandle(HANDLE(self.0 as *mut _)) };
+    }
+}
+
 /// One notice window's close bookkeeping, shared with its window-event and WebView2 handlers.
-#[derive(Debug, Default)]
+///
+/// The page can go away three ways, and any one of them is enough (review I3): the window is
+/// destroyed ([`NoticeState::on_destroyed`]); WebView2 reports `ProcessFailed` or
+/// `BrowserProcessExited` ([`NoticeState::on_process_failed`]); or the browser process is found
+/// gone when the runner polls ([`NoticeState::check_browser`]), for when no WebView2 event comes
+/// (Task 11: `ProcessFailed` did not fire on the CI runner after the browser was killed). Each
+/// counts as a user close, once; the runner reports it, the dead window is closed, and the server
+/// shows the notice again in a new window.
+#[derive(Default)]
 pub struct NoticeState {
     closing: AtomicBool,
     closed_by_user: AtomicBool,
+    page_gone: AtomicBool,
+    browser: Mutex<Option<Box<dyn BrowserProcess>>>,
 }
 
 impl NoticeState {
@@ -132,11 +181,41 @@ impl NoticeState {
     }
 
     /// A WebView2 browser or renderer process died: the page is gone, so it counts as a user
-    /// close (the server shows the notice again a second later in a new window).
+    /// close (the server shows the notice again a second later in a new window). Counted once,
+    /// however many signals report it.
     pub fn on_process_failed(&self) {
-        if !self.closing.load(Ordering::SeqCst) {
+        if !self.closing.load(Ordering::SeqCst) && !self.page_gone.swap(true, Ordering::SeqCst) {
             self.closed_by_user.store(true, Ordering::SeqCst);
         }
+    }
+
+    /// The browser process to poll in [`NoticeState::check_browser`].
+    pub fn watch_browser(&self, process: Box<dyn BrowserProcess>) {
+        *self.browser.lock().unwrap_or_else(|e| e.into_inner()) = Some(process);
+    }
+
+    /// The fallback signal: true (once) when the watched browser process has exited while we were
+    /// not closing the window and no other signal said so yet; it then counts as
+    /// [`NoticeState::on_process_failed`].
+    pub fn check_browser(&self) -> bool {
+        if self.closing.load(Ordering::SeqCst) || self.page_gone.load(Ordering::SeqCst) {
+            return false;
+        }
+        let exited = self
+            .browser
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .is_some_and(|b| b.exited());
+        if exited {
+            self.on_process_failed();
+        }
+        exited
+    }
+
+    /// The page died (the window may still be there, blank): it must be replaced.
+    pub fn page_gone(&self) -> bool {
+        self.page_gone.load(Ordering::SeqCst)
     }
 
     /// True once after the window went away without us; reading it clears it.
@@ -148,6 +227,8 @@ impl NoticeState {
     pub fn reset(&self) {
         self.closing.store(false, Ordering::SeqCst);
         self.closed_by_user.store(false, Ordering::SeqCst);
+        self.page_gone.store(false, Ordering::SeqCst);
+        *self.browser.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 }
 
@@ -268,7 +349,10 @@ fn work_area(app: &AppHandle) -> (f64, f64) {
     }
 }
 
-/// The settings Tauri has no builder option for, and the process-failure handler.
+/// The crash signals first (review I3: a failing settings call must not leave the window without
+/// them), then the settings Tauri has no builder option for. The signals: `ProcessFailed`, the
+/// environment's `BrowserProcessExited`, and a handle on the browser process that the runner polls
+/// ([`NoticeState::check_browser`]). The last two are best effort: a failure is logged.
 ///
 /// # Safety
 /// Main thread only (the WebView2 COM objects are single-threaded).
@@ -279,37 +363,76 @@ unsafe fn configure_webview(
     log: Log,
 ) -> windows::core::Result<()> {
     use webview2_com::Microsoft::Web::WebView2::Win32::{
-        COREWEBVIEW2_PROCESS_FAILED_KIND, ICoreWebView2Settings3,
+        COREWEBVIEW2_BROWSER_PROCESS_EXIT_KIND, COREWEBVIEW2_PROCESS_FAILED_KIND, ICoreWebView2_2,
+        ICoreWebView2Environment5, ICoreWebView2Settings3,
     };
-    use webview2_com::ProcessFailedEventHandler;
+    use webview2_com::{BrowserProcessExitedEventHandler, ProcessFailedEventHandler};
     use windows::core::Interface;
     // SAFETY: COM calls on the main thread that owns the controller.
     unsafe {
         let webview = controller.CoreWebView2()?;
-        let settings = webview.Settings()?;
-        settings.SetAreDevToolsEnabled(spec.devtools)?;
-        settings.SetAreDefaultContextMenusEnabled(spec.context_menu)?;
-        settings
-            .cast::<ICoreWebView2Settings3>()?
-            .SetAreBrowserAcceleratorKeysEnabled(spec.accelerator_keys)?;
         let mut token = 0i64;
+        let (failed_state, failed_log) = (state.clone(), log.clone());
         webview.add_ProcessFailed(
             &ProcessFailedEventHandler::create(Box::new(move |_, args| {
                 let mut kind = COREWEBVIEW2_PROCESS_FAILED_KIND::default();
                 if let Some(args) = args {
                     args.ProcessFailedKind(&mut kind)?;
                 }
-                log(&format!(
+                failed_log(&format!(
                     "notice window: WebView2 process failed (kind {})",
                     kind.0
                 ));
                 if process_failure_closes(kind.0) {
-                    state.on_process_failed();
+                    failed_state.on_process_failed();
                 }
                 Ok(())
             })),
             &mut token,
         )?;
+        let mut pid = 0u32;
+        match webview
+            .BrowserProcessId(&mut pid)
+            .and_then(|()| BrowserHandle::open(pid))
+        {
+            Ok(handle) => state.watch_browser(Box::new(handle)),
+            Err(e) => log(&format!(
+                "notice window: the browser process cannot be watched: {e}"
+            )),
+        }
+        let (exited_state, exited_log) = (state.clone(), log.clone());
+        let exited = webview
+            .cast::<ICoreWebView2_2>()
+            .and_then(|w| w.Environment())
+            .and_then(|env| env.cast::<ICoreWebView2Environment5>())
+            .and_then(|env| {
+                env.add_BrowserProcessExited(
+                    &BrowserProcessExitedEventHandler::create(Box::new(move |_, args| {
+                        let mut kind = COREWEBVIEW2_BROWSER_PROCESS_EXIT_KIND::default();
+                        if let Some(args) = args {
+                            args.BrowserProcessExitKind(&mut kind)?;
+                        }
+                        exited_log(&format!(
+                            "notice window: WebView2 browser process exited (kind {})",
+                            kind.0
+                        ));
+                        exited_state.on_process_failed();
+                        Ok(())
+                    })),
+                    &mut token,
+                )
+            });
+        if let Err(e) = exited {
+            log(&format!(
+                "notice window: no BrowserProcessExited event: {e}"
+            ));
+        }
+        let settings = webview.Settings()?;
+        settings.SetAreDevToolsEnabled(spec.devtools)?;
+        settings.SetAreDefaultContextMenusEnabled(spec.context_menu)?;
+        settings
+            .cast::<ICoreWebView2Settings3>()?
+            .SetAreBrowserAcceleratorKeysEnabled(spec.accelerator_keys)?;
     }
     Ok(())
 }
@@ -500,10 +623,24 @@ impl NoticeWindow for WebViewNotice {
         let _ = shown.window.destroy();
     }
 
+    /// Polled by the runner at least every 2 s while a notice is shown. A window that went away, or
+    /// whose page died (a WebView2 event, or the browser process found gone here), is reported
+    /// once and closed for good: the server's next `show_notice` makes a fresh window.
     fn closed_by_user(&mut self) -> bool {
-        self.shown
-            .as_ref()
-            .is_some_and(|s| s.state.take_closed_by_user())
+        let Some(shown) = &self.shown else {
+            return false;
+        };
+        if shown.state.check_browser() {
+            (self.log)("notice window: the WebView2 browser process is gone");
+        }
+        if !shown.state.take_closed_by_user() {
+            return false;
+        }
+        if shown.state.page_gone() {
+            (self.log)("notice window: closing the window whose page is gone");
+        }
+        self.close();
+        true
     }
 }
 
@@ -603,6 +740,10 @@ pub fn run_webview_agent(cfg: AgentConfig) -> i32 {
 mod tests {
     use super::*;
 
+    /// The values `build_window` passes to the builder. That the window really has them (top-most,
+    /// no close, minimise, maximise or sizing, 640×600) is checked on a real window in
+    /// tests/agent_webview.rs (review item 12); `skip_taskbar` is not visible in the window's
+    /// styles (tao removes the taskbar button through ITaskbarList) and is checked at P8.
     #[test]
     fn notice_window_spec_is_a_topmost_modal() {
         let s = notice_spec(1920.0, 1040.0);
@@ -710,6 +851,60 @@ mod tests {
         s.begin_close();
         s.on_process_failed(); // while we close it: not the user
         assert!(!s.take_closed_by_user());
+    }
+
+    /// A browser process the test ends by hand.
+    #[derive(Clone, Default)]
+    struct FakeBrowser(Arc<AtomicBool>);
+
+    impl BrowserProcess for FakeBrowser {
+        fn exited(&self) -> bool {
+            self.0.load(Ordering::SeqCst)
+        }
+    }
+
+    /// Review I3: no WebView2 event at all (as on the CI runner in Task 11), only the browser
+    /// process gone: the runner's poll finds it, once, and the page counts as gone.
+    #[test]
+    fn a_gone_browser_process_closes_the_notice_once_without_any_webview2_event() {
+        let s = NoticeState::default();
+        assert!(!s.check_browser(), "nothing watched yet");
+        let browser = FakeBrowser::default();
+        s.watch_browser(Box::new(browser.clone()));
+        assert!(!s.check_browser() && !s.page_gone() && !s.take_closed_by_user());
+        browser.0.store(true, Ordering::SeqCst);
+        assert!(s.check_browser());
+        assert!(s.page_gone() && s.take_closed_by_user());
+        // Counted once: neither the next poll nor a late WebView2 event reports it again.
+        assert!(!s.check_browser());
+        s.on_process_failed();
+        assert!(!s.take_closed_by_user());
+    }
+
+    #[test]
+    fn a_webview2_event_and_the_poll_together_count_once() {
+        let s = NoticeState::default();
+        let browser = FakeBrowser::default();
+        s.watch_browser(Box::new(browser.clone()));
+        browser.0.store(true, Ordering::SeqCst);
+        s.on_process_failed(); // ProcessFailed or BrowserProcessExited came first
+        assert!(!s.check_browser());
+        assert!(s.page_gone() && s.take_closed_by_user() && !s.take_closed_by_user());
+    }
+
+    #[test]
+    fn the_browser_ending_because_we_close_the_window_is_not_a_user_close() {
+        let s = NoticeState::default();
+        let browser = FakeBrowser::default();
+        s.watch_browser(Box::new(browser.clone()));
+        s.begin_close();
+        browser.0.store(true, Ordering::SeqCst);
+        assert!(!s.check_browser());
+        s.on_process_failed();
+        assert!(!s.page_gone() && !s.take_closed_by_user());
+        // A new window starts clean and watches nothing until told.
+        s.reset();
+        assert!(!s.check_browser() && !s.page_gone() && s.should_prevent_close());
     }
 
     #[test]

@@ -855,9 +855,14 @@ mod tests {
             ],
         );
         let p = build_uninstall_plan(&base(&s), &FakeHost::new());
+        let seen = (
+            sddl(&root),
+            fs::read_dir(&root).map(|mut e| e.next().map(|x| x.map(|y| y.path()))),
+            crate::winutil::current_user_sid(),
+        );
         icacls(&root, &["/reset", "/T", "/C", "/Q"]);
         let p = p.unwrap();
-        assert_eq!(p.notes.len(), 1, "{:?}", p.notes);
+        assert_eq!(p.notes.len(), 1, "{:?} {seen:?}", p.notes);
         assert!(
             p.notes[0].contains("관리자 권한으로 다시 실행하면 확인합니다"),
             "{}",
