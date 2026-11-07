@@ -120,6 +120,7 @@ def last_days(days: int, **kw: object) -> LogFilter:
 
 S2_USERS = ("CORP\\user03", "CORP\\user11")
 ALL_USERS = (*WINDOWS_USERS, *WEB_USERS)  # all 25
+UNKNOWN_USERS = ("CORP\\nobody1", "CORP\\nobody2")  # no rows at all
 DAY15_NOON_MS = END_MS - 30 * DAY_MS + 14 * DAY_MS + 12 * 3_600_000  # 2026-10-20 12:00 KST
 _deep: dict[int, Cursor] = {}
 
@@ -148,6 +149,9 @@ SCENARIOS: dict[str, Callable[[PerfIndex], object]] = {
     "S11": lambda p: p.reader.page(last_days(30, users=ALL_USERS, q="zebra"), None),
     "S12": lambda p: p.reader.page(last_days(30, users=ALL_USERS, q="chrome"), None),
     "S13": lambda p: p.reader.histogram(last_days(30, users=ALL_USERS, q="zebra"), 60),
+    # re-review 5: a broad keyword with two users who hold no match ("did these two ever do X")
+    "S14": lambda p: p.reader.page(last_days(30, users=WEB_USERS[:2], q="chrome"), None),
+    "S15": lambda p: p.reader.page(last_days(30, users=UNKNOWN_USERS, q="t"), None),
 }
 
 # Broad keywords (W9: over 300 ms even alone) with every user: measured and bounded, not held to 300 ms.

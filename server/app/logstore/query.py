@@ -7,7 +7,8 @@ Pages are newest first with a ``(ts_ms, id)`` keyset cursor. A filter with sever
 categories is read value by value through that column's ``(value, ts_ms)`` index, already in order,
 and the results are merged (``heapq.merge``): no temporary B-tree for the ``ORDER BY`` (W7). With a
 keyword as well, one statement serves all of them (the MATCH runs once): driven by the keyword's
-matches when they are few, by the time index when they are many (``broad_keyword``).
+matches when they are few; when they are many (``broad_keyword``) by the time index over a bounded
+window first, then by the values' own index (``KeywordPlan``).
 Histograms and user counts come from the minute/hour rollups when the filter only has time,
 category and user conditions on minute boundaries, otherwise from counting rows (W8).
 """
@@ -255,21 +256,31 @@ def broad_keyword(conn: sqlite3.Connection, fts: str) -> bool:
     return int(conn.execute(sql, (fts, BROAD_KEYWORD_ROWS)).fetchone()[0]) >= BROAD_KEYWORD_ROWS
 
 
+# How a page reads when the keyword drives it (:func:`_keyword_drives`):
+#   "fts"    - through the keyword's matches, sorted (a narrow keyword: few matches);
+#   "time"   - ix_events_ts newest first, the matches a set built once (a broad keyword alone);
+#   "walk"   - "time" over the newest ``WALK_ROWS`` rows of the range only (a broad keyword with
+#              several users or categories: the bounded try, see :func:`page`);
+#   "values" - one statement through the users' (categories') own index, all values in one IN list,
+#              the matches a set built once, the few survivors sorted.
+KeywordPlan = Literal["fts", "time", "walk", "values"]
+WALK_ROWS = 25_000
+
+
 def page_queries(
-    f: LogFilter, cursor: Cursor | None, limit: int, *, broad: bool = False
+    f: LogFilter, cursor: Cursor | None, limit: int, *, plan: KeywordPlan = "fts"
 ) -> list[tuple[str, list[Any]]]:
     """The SQL of one page: a query per driving value, each ``LIMIT limit + 1``, newest first.
 
-    When the keyword drives (:func:`_keyword_drives`): a narrow keyword drives one statement through
-    its matches (sorting them is cheap); a ``broad`` one (:func:`broad_keyword`) walks the time index
-    newest first with the matches as a set built once, and stops at the page: sorting hundreds of
-    thousands of matches is what made a common word slow (W9, plan review I2)."""
+    When the keyword drives (:func:`_keyword_drives`) one statement serves every value, read as
+    ``plan`` says (W9, plan review I2, re-review 5)."""
     driver = _driver(f)
-    if _keyword_drives(f):
-        driver = _Driver("time") if broad else _Driver("fts")
+    keyword = _keyword_drives(f)
+    if keyword:
+        driver = _Driver("fts") if plan == "fts" else _Driver("time") if plan in ("time", "walk") else driver
     hi = f.to_ms if cursor is None else min(f.to_ms, cursor.ts_ms + 1)
     queries: list[tuple[str, list[Any]]] = []
-    for value in driver.values:
+    for value in (driver.values if not keyword or plan != "values" else (None,)):
         where = ["e.ts_ms >= ?", "e.ts_ms < ?"]
         params: list[Any] = [f.from_ms, hi]
         if cursor is not None:  # (ts_ms, id) < cursor, given ts_ms <= cursor.ts_ms
@@ -277,9 +288,19 @@ def page_queries(
         if driver.kind == "fts":
             source = _FTS_FROM
             where.insert(0, "events_fts MATCH ?"); params.insert(0, f.fts)
+        elif keyword and plan == "walk":
+            # The newest WALK_ROWS rows of the range (covering index, no row read), then the conditions.
+            window = [w.replace("e.", "") for w in where]
+            source = ("(SELECT id FROM events INDEXED BY ix_events_ts WHERE " + " AND ".join(window)
+                      + " ORDER BY ts_ms DESC, id DESC LIMIT ?) AS w CROSS JOIN events AS e ON e.id = w.id")
+            params.append(WALK_ROWS)
+            where = []
         else:
             source = f"events AS e INDEXED BY {driver.index}"
-            if driver.kind != "time":
+            if keyword and plan == "values":
+                where.insert(0, f"{driver.column} IN ({', '.join('?' * len(driver.values))})")
+                params[:0] = list(driver.values)
+            elif driver.kind != "time":
                 where.insert(0, f"{driver.column} = ?"); params.insert(0, value)
         rest, rest_params = _residual(f, driver)
         sql = (f"SELECT {_COLUMNS} FROM {source} WHERE {' AND '.join(where + rest)} "
@@ -288,23 +309,43 @@ def page_queries(
     return queries
 
 
-def _log_row(r: Sequence[Any]) -> LogRow:
-    return LogRow(id=r[0], ts_ms=r[1], cat=r[2], event=r[3], user=r[4], session_id=r[5], client_ip=r[6],
-                  outcome=r[7], data=json.loads(r[8]), raw=r[8])
+def _keyword_plans(conn: sqlite3.Connection, f: LogFilter) -> tuple[KeywordPlan | None, ...]:
+    """The plans :func:`page` tries in turn (``None``: the keyword does not drive)."""
+    if not _keyword_drives(f):
+        return (None,)
+    if not broad_keyword(conn, f.fts or ""):
+        return ("fts",)
+    if _driver(f).kind == "fts":
+        return ("time",)
+    # A broad keyword with several users or categories (re-review 5). The time walk is fastest when
+    # they hold a good share of the range's matching rows, but reads the whole range when they hold
+    # few or none ("did these two ever do X": 0.5-1 s at 1M rows). So it first runs as a bounded count:
+    # if the newest WALK_ROWS rows hold a page, those are the page; otherwise the values' own index
+    # reads only their rows (none for unknown users) with the matches built once.
+    return ("walk", "values")
 
 
 def page(conn: sqlite3.Connection, f: LogFilter, cursor: Cursor | None, limit: int) -> Page:
     """Up to ``limit`` rows older than ``cursor`` (newest first) and the cursor of the next page."""
-    broad = _keyword_drives(f) and broad_keyword(conn, f.fts or "")
-    results = [conn.execute(sql, params).fetchall() for sql, params in page_queries(f, cursor, limit, broad=broad)]
-    if len(results) == 1:
-        raw = results[0]
-    else:
-        merged = heapq.merge(*results, key=lambda r: (-r[1], -r[0]))
-        raw = list(itertools.islice(merged, limit + 1))
+    for plan in _keyword_plans(conn, f):
+        results = [conn.execute(sql, params).fetchall()
+                   for sql, params in page_queries(f, cursor, limit, plan=plan or "fts")]
+        if len(results) == 1:
+            raw = results[0]
+        else:
+            merged = heapq.merge(*results, key=lambda r: (-r[1], -r[0]))
+            raw = list(itertools.islice(merged, limit + 1))
+        # The window's matches are the newest overall only when they fill the page.
+        if plan != "walk" or len(raw) > limit:
+            break
     rows = [_log_row(r) for r in raw[:limit]]
     next_cursor = encode_cursor(Cursor(rows[-1].ts_ms, rows[-1].id)) if len(raw) > limit else None
     return Page(rows, next_cursor)
+
+
+def _log_row(r: Sequence[Any]) -> LogRow:
+    return LogRow(id=r[0], ts_ms=r[1], cat=r[2], event=r[3], user=r[4], session_id=r[5], client_ip=r[6],
+                  outcome=r[7], data=json.loads(r[8]), raw=r[8])
 
 
 # -- counts ----------------------------------------------------------------------------------------

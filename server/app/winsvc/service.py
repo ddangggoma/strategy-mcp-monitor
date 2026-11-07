@@ -63,7 +63,16 @@ class McpMonitorService(win32serviceutil.ServiceFramework):
 
     def _report(self, status: int, **kw: Any) -> None:
         with self._status_lock:
+            if status == win32service.SERVICE_STOP_PENDING and self._run_done.is_set():
+                # The run is over and STOPPED follows (or went already): a late heartbeat tick must not
+                # put the service back in STOP_PENDING, or the process ends there and the SCM sees a
+                # crash (re-review 6). _run_done is set under this lock, so no report is half-way.
+                return
             self.ReportServiceStatus(status, **kw)
+
+    def _end_run(self) -> None:
+        with self._status_lock:
+            self._run_done.set()
 
     def GetAcceptedControls(self) -> int:  # noqa: N802 - pywin32 API
         accepted: int = super().GetAcceptedControls()
@@ -115,7 +124,7 @@ class McpMonitorService(win32serviceutil.ServiceFramework):
         try:
             code = run_for_scm(self.host.run, self._stop_requested, _log_error)
         finally:
-            self._run_done.set()
+            self._end_run()
         if code is not None:
             _exit(code)  # ended on its own: no STOPPED, so the SCM's recovery restarts it (W22)
 

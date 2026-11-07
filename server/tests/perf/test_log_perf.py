@@ -61,6 +61,9 @@ def test_keyword_with_users_scenarios_hit_rows(perf_index):
     assert isinstance(s13, Histogram) and s13.total == SCENARIOS["S9"](p).total  # every user = no user filter
     (sql, _params), = page_queries(last_days(30, users=ALL_USERS, q="zebra"), None, 200)
     assert sql.count("MATCH") == 1  # one statement for all 25 users
+    for name in ("S14", "S15"):  # web users never open a chrome window; unknown users have no rows
+        page = SCENARIOS[name](p)
+        assert isinstance(page, Page) and page.rows == [] and page.next_cursor is None, name
 
 
 def test_ingest_rate(perf_index):

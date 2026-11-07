@@ -394,14 +394,54 @@ def test_a_broad_keyword_pages_through_the_time_index(reader, tmp_path, monkeypa
         assert not query_mod.broad_keyword(conn, F(q="cmd").fts)
         monkeypatch.setattr(query_mod, "BROAD_KEYWORD_ROWS", 5)
         assert query_mod.broad_keyword(conn, F(q="cmd").fts) and not query_mod.broad_keyword(conn, F(q="zebra").fts)
-        for f in filters:
-            (sql, params), = page_queries(f, None, 200, broad=True)
+        (sql, params), = page_queries(filters[0], None, 200, plan="time")
+        plan = " | ".join(r[3] for r in conn.execute("EXPLAIN QUERY PLAN " + sql, params))
+        assert "ix_events_ts" in plan and "TEMP B-TREE" not in plan, plan
+        for f in filters[1:]:
+            (sql, params), = page_queries(f, None, 200, plan="walk")
             plan = " | ".join(r[3] for r in conn.execute("EXPLAIN QUERY PLAN " + sql, params))
-            assert "ix_events_ts" in plan and "TEMP B-TREE" not in plan, plan
+            assert "ix_events_ts" in plan and sql.count("MATCH") == 1, plan
     assert [[r.id for r in reader.page(f, None, 7).rows] for f in filters] == narrow
     p1 = reader.page(filters[1], None, 5)
     rest = reader.page(filters[1], decode_cursor(p1.next_cursor), 100).rows
     assert len(p1.rows + rest) == 20
+
+
+def test_a_broad_keyword_with_few_matching_values_reads_their_index(reader, tmp_path, monkeypatch):
+    """Re-review 5: a broad keyword with users (categories) that hold few or no matches: the bounded walk
+    over the newest rows does not fill the page, so the values' own index serves it (one statement, the
+    MATCH once) instead of a walk through the whole range. Same rows as the narrow plan, on every page."""
+    from app.logstore import query as query_mod
+    filters = [F(users=("CORP\\kim", "a@x.com"), q="cmd"), F(users=("nobody", "CORP\\nobody"), q="cmd"),
+               F(cats=("auth", "activity.command"), q="cmd"), F(users=("CORP\\kim", "a@x.com"), q="zebra")]
+    expected = [[r.id for r in reader.page(f, None, 100).rows] for f in filters]
+    monkeypatch.setattr(query_mod, "BROAD_KEYWORD_ROWS", 5)
+    monkeypatch.setattr(query_mod, "WALK_ROWS", 3)  # the window holds less than a page
+    ran: list[str] = []
+    real = query_mod.page_queries
+
+    def spy(f, cursor, limit, *, plan="fts"):
+        ran.append(plan)
+        return real(f, cursor, limit, plan=plan)
+
+    monkeypatch.setattr(query_mod, "page_queries", spy)
+    assert [[r.id for r in reader.page(f, None, 100).rows] for f in filters] == expected
+    assert ran == ["walk", "values"] * 3 + ["fts"]  # zebra is narrow
+    (sql, params), = real(filters[0], None, 200, plan="values")
+    plan = " | ".join(r[3] for r in conn_plan(tmp_path, sql, params))
+    assert "ix_events_user" in plan and sql.count("MATCH") == 1, plan
+    # paging continues on the values plan, and a window that holds a page is the page
+    p1 = reader.page(filters[0], None, 5)
+    rest = reader.page(filters[0], decode_cursor(p1.next_cursor), 100).rows
+    assert [r.id for r in p1.rows + rest] == expected[0]
+    ran.clear()
+    monkeypatch.setattr(query_mod, "WALK_ROWS", 25_000)
+    assert [r.id for r in reader.page(filters[0], None, 3).rows] == expected[0][:3] and ran == ["walk"]
+
+
+def conn_plan(tmp_path, sql, params):
+    with closing(open_reader(tmp_path / "index.db")) as conn:
+        return conn.execute("EXPLAIN QUERY PLAN " + sql, params).fetchall()
 
 
 SPIN = "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) SELECT COUNT(*) FROM c"

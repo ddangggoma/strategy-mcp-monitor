@@ -414,6 +414,42 @@ def test_service_stop_error_reports_stopped_not_a_crash(monkeypatch):
     assert any("monitor kill failed" in e for e in svc.errors)
 
 
+def test_heartbeat_never_reports_stop_pending_after_the_run_ended(monkeypatch):
+    # re-review 6: the heartbeat's wait timed out just before the run ended; its late tick must not reach
+    # the SCM after the framework's STOPPED (the process would then leave in STOP_PENDING: a crash)
+    from app.winsvc import service
+    beats = []
+
+    class _Beat:
+        def __init__(self, report, done, give_up):
+            beats.append(report)
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(service, "StopHeartbeat", _Beat)
+
+    def run(host):
+        assert host.stopped.wait(10)
+        return 0
+
+    svc, ws = _service(monkeypatch, run)
+    locked = []
+
+    class _Done(threading.Event):
+        def set(self):
+            locked.append(svc._status_lock.locked())  # set while no report is half-way through
+            super().set()
+
+    svc._run_done = _Done()
+    threading.Timer(0.1, svc.SvcStop).start()
+    svc.SvcRun()  # returns: the framework's C side reports STOPPED now
+    reported = list(svc.statuses)
+    beats[0]()  # the heartbeat thread's late tick
+    assert svc.statuses == reported and reported[-1][0] == ws.SERVICE_STOP_PENDING
+    assert locked == [True]
+
+
 def test_service_that_ends_on_its_own_exits_for_recovery(monkeypatch):
     svc, _ws = _service(monkeypatch, lambda h: 3)
     with pytest.raises(SystemExit):
