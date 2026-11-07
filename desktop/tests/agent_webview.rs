@@ -90,6 +90,7 @@ impl Drop for Agent<'_> {
             );
             let paths: Vec<String> = self.srv.requests().into_iter().map(|r| r.path).collect();
             eprintln!("requests: {paths:?}");
+            describe_windows(self.child.id());
         }
         let _ = self.child.kill();
         let _ = self.child.wait();
@@ -129,6 +130,7 @@ fn webview_notice_is_topmost_ignores_wm_close_and_closes_on_command() {
     srv.queue(json!({"type": "show_notice", "display_id": 7, "attempt": 1, "url": notice}));
     let mut agent = spawn_agent(&srv, &scratch);
     let hwnd = wait_for(30, || notice_window(agent.id()));
+    describe_windows(agent.id());
     let ex = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32;
     assert!(ex & WS_EX_TOPMOST.0 != 0, "not top-most");
     // the close button is grey (re-applied with the top-most tick, so allow one tick)
@@ -198,4 +200,16 @@ fn a_killed_webview_is_reported_closed_and_the_notice_comes_back() {
     srv.queue(json!({"type": "exit"}));
     assert_eq!(agent.child.wait().unwrap().code(), Some(0));
     remove_profile(&scratch);
+}
+
+/// Diagnostics: the visible top-level windows of `pid` with their classes.
+fn describe_windows(pid: u32) {
+    for (hwnd, title) in windows_of(pid) {
+        let mut class = [0u16; 256];
+        let n = unsafe { GetClassNameW(hwnd, &mut class) } as usize;
+        eprintln!(
+            "window {hwnd:?} class {:?} title {title:?}",
+            String::from_utf16_lossy(&class[..n])
+        );
+    }
 }

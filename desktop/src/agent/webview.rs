@@ -457,7 +457,9 @@ fn build_window(
         let _ = app.run_on_main_thread(move || {
             use windows::Win32::Foundation::HWND;
             disable_close(HWND(hwnd as *mut _));
+            eprintln!("DEBUG front: start");
             bring_to_front(HWND(hwnd as *mut _));
+            eprintln!("DEBUG front: done");
         });
     }
     Ok(window)
@@ -609,6 +611,10 @@ pub fn run_webview_agent(cfg: AgentConfig) -> i32 {
     };
     let running = done.clone();
     app.run_return(move |_, event| {
+        match &event {
+            RunEvent::MainEventsCleared | RunEvent::Resumed => {}
+            other => eprintln!("DEBUG run event: {other:?}"),
+        }
         // The last window closing (a notice the user got rid of) must not end the agent.
         if let RunEvent::ExitRequested {
             api, code: None, ..
