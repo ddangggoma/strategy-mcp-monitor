@@ -260,9 +260,11 @@ fn open_installed(sys: &dyn crate::System, install_dir: Option<PathBuf>) -> i32 
 /// `app`: the window for the installed server (the Apps & features location, else this exe's own
 /// folder when it holds `install.json`), or `--server-url` in a development build. Not installed:
 /// an error box and 1. Elevated: [`ELEVATED_APP`] and 1 (the window, the tray and its sign-in
-/// item belong to the user's own token, review item 18).
+/// item belong to the user's own token, review item 18) — except a development build attached to
+/// a development server with `--server-url` (no installed copy; the CI runner is elevated).
 pub fn run_app_command(sys: &dyn crate::System, args: &AppArgs) -> i32 {
-    if sys.is_elevated() {
+    let dev_server = cfg!(feature = "dev") && args.server_url.is_some();
+    if sys.is_elevated() && !dev_server {
         sys.error_box(ELEVATED_APP);
         return 1;
     }

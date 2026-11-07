@@ -1146,6 +1146,20 @@ mod tests {
         }
     }
 
+    /// The one exception: a development build attached to a development server (`--server-url`
+    /// parses only with the `dev` feature), which the elevated CI runner uses for its window tests.
+    #[cfg(feature = "dev")]
+    #[test]
+    fn an_elevated_development_build_still_opens_a_development_server() {
+        let f = FakeElevator::new(true, Ok(0));
+        assert_eq!(
+            run_with(args(&["app", "--server-url", "http://127.0.0.1:9700"]), &f),
+            0
+        );
+        assert_eq!(f.windows.borrow().len(), 1);
+        assert!(f.boxes.borrow().is_empty());
+    }
+
     #[test]
     fn autostart_writes_the_run_value_of_the_installed_copy_only() {
         let f = FakeElevator::new(false, Ok(0));
