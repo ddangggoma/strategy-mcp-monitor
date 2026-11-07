@@ -266,11 +266,21 @@ jobs:
         run: uv run python -m pytest tests/test_desktop_build.py -v
 
       - name: Server tests against the release exe (marker desktop)
-        # The runner is elevated: the "install without admin" test skips with its reason (-rs).
+        # The runner is elevated: the "install without admin" test skips with its reason (-rs); the
+        # next step runs the same check as a standard user.
         working-directory: server
         env:
           MCPMON_DESKTOP_EXE: ${{ github.workspace }}\dist\mcp-monitor-${{ env.MCPMON_VERSION }}.exe
         run: uv run python -m pytest -m desktop -v -rs
+
+      - name: Release exe install without admin as a standard user (re-review nit 3)
+        # test_install_without_admin_changes_nothing, as a throw-away local account in Users only
+        # (.github/scripts/standard-user-tests.ps1 -ReleaseExe): `install` exits 1 with the "run as
+        # administrator" line and creates no folder. Windows PowerShell 5.1.
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          & ..\.github\scripts\standard-user-tests.ps1 -ReleaseExe "..\dist\mcp-monitor-$env:MCPMON_VERSION.exe"
 
       - name: Server agent integration with the release exe
         # The same bytes as dist\mcp-monitor-<version>.exe, under the name the desktop bundle runs

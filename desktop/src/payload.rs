@@ -513,6 +513,9 @@ mod tests {
             "lpt9",
             "COM¹",
             "LPT³.txt",
+            // Re-review nit 6: Microsoft's naming rules list COM0 and LPT0 as reserved too.
+            "COM0",
+            "lpt0.txt",
             "CONIN$",
             "conout$",
             "con .txt",

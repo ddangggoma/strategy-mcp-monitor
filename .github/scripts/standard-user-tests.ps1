@@ -22,19 +22,49 @@
      with --exact <names> --test-threads=1.
   5. Fails when: the account's token is elevated or in Administrators, a binary exits non-zero, a wanted
      test is not reported "ok", or any output line contains "SKIPPED". The account is deleted at the end.
+
+  With -ReleaseExe <path> (the release job, Plan 6 re-review nit 3) step 1 is replaced: instead of the test
+  binaries the account runs the release exe's `install --install-dir <scratch>\i --data-root <scratch>\d`
+  (the server test test_desktop_exe.py::test_install_without_admin_changes_nothing, which skips on the
+  elevated runner). It must exit 1 with the "run as administrator" line on stdout and create neither
+  folder nor <scratch>\i.staging; <scratch> is a folder in the account's own %LOCALAPPDATA%.
 #>
 [CmdletBinding()]
 param(
     # Test functions that need a standard token without calling skip_when_elevated.
     [string[]]$Extra = @(
         "elevation_agrees_with_the_mandatory_label",
-        "autostart_without_an_install_exits_1_and_writes_nothing"
-    )
+        "autostart_without_an_install_exits_1_and_writes_nothing",
+        "a_locked_data_root_is_unreadable_without_admin"
+    ),
+    # The release exe to check instead of the test binaries (see -ReleaseExe above).
+    [string]$ReleaseExe
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $Desktop = (Get-Location).Path
 if (-not (Test-Path -LiteralPath (Join-Path $Desktop "Cargo.toml"))) { throw "run from desktop\" }
+
+# One run per entry: Exe, Args (the inner script expands %VARIABLES% as the account), Gone (paths that
+# must not exist afterwards, '|'-separated, expanded the same way), Names (tests that must be reported
+# ok), ExitCode (the wanted exit code), Expect (a regex the output must match, or "").
+$plan = @()
+if ($ReleaseExe) {
+    $ReleaseExe = (Resolve-Path -LiteralPath $ReleaseExe).Path
+    $s = "%MCPMON_STD_SCRATCH%"
+    $plan += [pscustomobject]@{
+        Exe = $ReleaseExe
+        Args = "install --install-dir `"$s\i`" --data-root `"$s\d`""
+        Gone = "$s\i|$s\d|$s\i.staging"
+        Names = @()
+        ExitCode = "1"
+        # The ADMIN_MESSAGE line (desktop\src\install\plan.rs), escaped: Windows PowerShell 5.1 reads this
+        # file in the ANSI code page.
+        Expect = '(?m)^\uAD00\uB9AC\uC790 \uAD8C\uD55C\uC73C\uB85C \uB2E4\uC2DC \uC2E4\uD589\uD558\uC138\uC694'
+    }
+    $wanted = @("release exe: install without admin")
+    Write-Host "release exe as a standard user: $ReleaseExe $($plan[0].Args)"
+} else {
 
 # 1. The wanted test names.
 $wanted = New-Object System.Collections.Generic.SortedSet[string]
@@ -62,7 +92,6 @@ $binaries = @($messages | Where-Object { $_ -like '{*' } | ForEach-Object { $_ |
 if ($binaries.Count -eq 0) { throw "no test binaries" }
 
 # Which binary holds which wanted test (full paths, for --exact).
-$plan = @()
 $found = New-Object System.Collections.Generic.HashSet[string]
 foreach ($exe in $binaries) {
     $ErrorActionPreference = "Continue"
@@ -71,12 +100,16 @@ foreach ($exe in $binaries) {
     $mine = @($listed | Where-Object { $_ -match '^(\S+): test$' } | ForEach-Object { $_ -replace ': test$', '' } |
         Where-Object { $wanted.Contains(($_ -split '::')[-1]) })
     if ($mine.Count -gt 0) {
-        $plan += , @($exe, $mine)
+        $plan += [pscustomobject]@{
+            Exe = $exe; Args = "--exact --test-threads=1 $($mine -join ' ')"; Gone = ""; Names = $mine
+            ExitCode = "0"; Expect = ""
+        }
         foreach ($m in $mine) { [void]$found.Add(($m -split '::')[-1]) }
     }
 }
 $missing = @($wanted | Where-Object { -not $found.Contains($_) })
 if ($missing.Count -gt 0) { throw "not found in any test binary (renamed? update `$Extra): $($missing -join ', ')" }
+}
 
 # 2. The account.
 $user = "mcpmon-std-" + (Get-Random -Minimum 1000 -Maximum 9999)
@@ -98,15 +131,15 @@ try {
     # 3. Rights: the binaries, the exe they start, and one scratch folder for the logs.
     New-Item -ItemType Directory -Force -Path $work | Out-Null
     $grant = @{}
-    foreach ($p in $plan) { $grant[$p[0]] = "(RX)" }
-    $grant[(Join-Path $Desktop "target\debug\mcp-monitor.exe")] = "(RX)"
+    foreach ($p in $plan) { $grant[$p.Exe] = "(RX)" }
+    if (-not $ReleaseExe) { $grant[(Join-Path $Desktop "target\debug\mcp-monitor.exe")] = "(RX)" }
     $grant[$work] = "(OI)(CI)(M)"
     foreach ($path in $grant.Keys) {
         & icacls.exe $path /grant "${user}:$($grant[$path])" /Q | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "icacls $path exited $LASTEXITCODE" }
     }
     $listFile = Join-Path $work "binaries.txt"
-    $lines = foreach ($p in $plan) { "$($p[0])`t$($p[1] -join ' ')" }
+    $lines = foreach ($p in $plan) { "$($p.Exe)`t$($p.Args)`t$($p.Gone)" }
     [System.IO.File]::WriteAllLines($listFile, [string[]]$lines)
     $inner = Join-Path $work "inner-standard-user.ps1"
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot "inner-standard-user.ps1") -Destination $inner
@@ -131,16 +164,25 @@ try {
     elseif ($groups -match 'S-1-16-12288|S-1-16-16384' -or $groups -match '"S-1-5-32-544"') { $problems += "the account's token is elevated or in Administrators" }
     elseif ($groups -notmatch 'S-1-16-8192') { $problems += "the account's token is not Medium Mandatory Level" }
     for ($i = 0; $i -lt $plan.Count; $i++) {
-        $exe, $names = $plan[$i]
+        $entry = $plan[$i]
+        $leaf = Split-Path -Leaf $entry.Exe
         $log = Join-Path $work "test-$i.log"
         $text = if (Test-Path -LiteralPath $log) { [System.IO.File]::ReadAllText($log) } else { "" }
-        Write-Host "----- $(Split-Path -Leaf $exe) -----"
+        Write-Host "----- $leaf -----"
         Write-Host $text
         $codeFile = Join-Path $work "test-$i.code"
         $exit = if (Test-Path -LiteralPath $codeFile) { (Get-Content -LiteralPath $codeFile).Trim() } else { "none" }
-        if ($exit -ne "0") { $problems += "$(Split-Path -Leaf $exe) exited $exit" }
-        foreach ($n in $names) {
+        if ($exit -ne $entry.ExitCode) { $problems += "$leaf exited $exit (wanted $($entry.ExitCode))" }
+        foreach ($n in $entry.Names) {
             if ($text -notmatch "(?m)^test $([regex]::Escape($n)) \.\.\. ok\r?$") { $problems += "$n was not reported ok" }
+        }
+        if ($entry.Expect -and $text -notmatch $entry.Expect) { $problems += "$leaf did not print the expected line" }
+        $leftFile = Join-Path $work "test-$i.left"
+        if ($entry.Gone) {
+            if (-not (Test-Path -LiteralPath $leftFile)) { $problems += "$leaf`: no record of the folders it left" }
+            else {
+                foreach ($l in [System.IO.File]::ReadAllLines($leftFile)) { if ($l) { $problems += "$leaf left $l behind" } }
+            }
         }
         foreach ($l in ($text -split "`r?`n" | Where-Object { $_ -match 'SKIPPED' })) { $problems += "skipped: $l" }
     }
@@ -148,7 +190,7 @@ try {
         $problems | ForEach-Object { Write-Host "::error::standard-user tests: $_" }
         throw "standard-user tests failed ($($problems.Count) problem(s))"
     }
-    Write-Host "standard-user tests: $($wanted.Count) tests in $($plan.Count) binaries passed as $user (Medium Mandatory Level, not an administrator)"
+    Write-Host "standard-user tests: $(@($wanted).Count) checks in $($plan.Count) runs passed as $user (Medium Mandatory Level, not an administrator)"
 } finally {
     try { $computer.Delete("User", $user); Write-Host "deleted local account $user" } catch { Write-Host "::warning::could not delete $user`: $_" }
 }

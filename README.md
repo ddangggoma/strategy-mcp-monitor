@@ -344,7 +344,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File install\build-desktop.ps1
 - 매개변수: `-SkipAudit`(경고만 남기고 관문 생략), `-SkipPayload`(이미 만든 `-Payload` 폴더를 그대로), `-Payload <폴더>`, `-Out <폴더>`, `-SignThumbprint <SHA1> -TimestampUrl <url>`(인증서가 있을 때만 서명; 없으면 `NOTE: not signed`). `uv`가 PATH에 없으면 `UV_EXE`에 경로를 줍니다.
 - 🧱 **Smart App Control이 켜진 PC에서는** 새로 빌드한 서명 없는 exe가 그때그때 막힐 수 있습니다(SAC는 파일 해시마다 평판으로 판단). 그래서 Rust 테스트와 릴리스 빌드의 정본은 **GitHub Actions**(`.github/workflows/desktop.yml`)입니다:
   - `fmt · clippy · test` 잡과 `release build · audit` 잡. 릴리스 잡은 `install\build-desktop.ps1`을 실제 payload로 끝까지 돌리고, 산출물 `mcp-monitor-release-<커밋>`(`mcp-monitor-1.1.0.exe` + `.sha256`, **서명 없음**)을 올립니다.
-  - 러너의 사용자는 관리자라 "관리자 없이는 아무것도 바꾸지 않음"을 증명하는 테스트가 그대로는 `SKIPPED`로 건너뛰어집니다. 그래서 테스트 잡은 그 테스트들을 **임시 표준 사용자**(Users 그룹만, 무작위 비밀번호는 로그에서 가림, 끝나면 삭제)로 다시 돌리고, 하나라도 실패하거나 `SKIPPED`를 찍으면 실패합니다(`.github/scripts/standard-user-tests.ps1`).
+  - 러너의 사용자는 관리자라 "관리자 없이는 아무것도 바꾸지 않음"을 증명하는 테스트가 그대로는 `SKIPPED`로 건너뛰어집니다. 그래서 테스트 잡은 그 테스트들을 **임시 표준 사용자**(Users 그룹만, 무작위 비밀번호는 로그에서 가림, 끝나면 삭제)로 다시 돌리고, 하나라도 실패하거나 `SKIPPED`를 찍으면 실패합니다(`.github/scripts/standard-user-tests.ps1`). 릴리스 잡도 같은 스크립트(`-ReleaseExe`)로 릴리스 exe의 "관리자 없이 install → 종료 코드 1, 폴더 안 만듦"을 임시 표준 사용자로 확인합니다.
   - 워크플로는 데스크톱 테스트와 릴리스 payload가 읽는 모든 입력이 바뀐 push·PR에서 돕니다: `desktop/`, `server/app/`, 서버의 데스크톱·에이전트 테스트와 그 픽스처, `agent/`, `web/`, `install/`, `docs/ops/OPERATIONS.md`, 워크플로와 `.github/scripts/`. 그 밖의 것(다른 문서, `dummy-mcps/`)만 바뀐 커밋을 릴리스할 때는, 그 커밋의 `desktop` 실행이 없으므로 Actions 탭에서 손으로 실행(`workflow_dispatch`)해 그 커밋의 payload로 다시 만듭니다. 릴리스 파일 이름의 버전은 `desktop/Cargo.toml`에서 읽습니다.
 
 ### 2. 설치 (운영 PC)

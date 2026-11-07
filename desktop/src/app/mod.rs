@@ -31,6 +31,9 @@ pub const NOT_INSTALLED: &str =
     "MCP Monitor가 설치되어 있지 않습니다. mcp-monitor.exe를 다시 실행해 설치하세요.";
 /// The box when the window would run with an administrator's token (review item 18).
 pub const ELEVATED_APP: &str = "관리자 권한으로 실행 중이라 MCP Monitor 창을 열지 않습니다(창과 트레이는 사용자 권한으로만 엽니다). 시작 메뉴의 MCP Monitor로 여세요.";
+/// The information box after an install or upgrade that succeeded in an elevated run: the
+/// window is not opened ([`ELEVATED_APP`]), but nothing failed (Plan 6 re-review, minor 2).
+pub const INSTALLED_ELEVATED: &str = "설치를 마쳤습니다. 관리자 권한으로 실행 중이라 MCP Monitor 창은 열지 않습니다(창과 트레이는 사용자 권한으로만 엽니다). 시작 메뉴의 MCP Monitor로 여세요.";
 /// How often the "connecting" page asks the server, and when it says the service is not answering.
 pub const CONNECT_EVERY: Duration = Duration::from_secs(1);
 pub const STOPPED_AFTER: Duration = Duration::from_secs(30);
@@ -217,7 +220,9 @@ pub fn run_auto(sys: &dyn crate::System) -> i32 {
 }
 
 /// Runs the installer elevated; on 0 opens the window of the copy it installed (its Apps &
-/// features location). Its non-zero code is ours (it showed why); a cancelled UAC prompt is 0.
+/// features location), or, when this process is itself elevated, ends with an information box
+/// ([`INSTALLED_ELEVATED`]) and 0. Its non-zero code is ours (it showed why); a cancelled UAC
+/// prompt is 0.
 fn install_then_open(sys: &dyn crate::System, args: Vec<String>) -> i32 {
     let exe = match sys.current_exe() {
         Ok(exe) => exe,
@@ -227,6 +232,10 @@ fn install_then_open(sys: &dyn crate::System, args: Vec<String>) -> i32 {
         }
     };
     match sys.elevate_and_wait(&exe, &args) {
+        Ok(0) if sys.is_elevated() => {
+            sys.info_box(INSTALLED_ELEVATED);
+            0
+        }
         Ok(0) => open_installed(sys, sys.installed().map(|i| i.install_location)),
         Ok(code) => code,
         Err(e) if e == crate::winutil::ELEVATION_CANCELLED => 0,

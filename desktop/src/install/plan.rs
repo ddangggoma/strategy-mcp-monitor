@@ -91,7 +91,7 @@ pub fn run_plan(plan: &Plan, ex: &mut dyn Executor, out: &mut dyn Write) -> i32 
             continue;
         }
         let _ = writeln!(out, "[{i}/{n}] {}", s.id);
-        let result = if s.cmd.starts_with('(') {
+        let ran = if s.cmd.starts_with('(') {
             ex.internal(s)
         } else {
             ex.native(&s.cmd, &s.args)
@@ -102,8 +102,10 @@ pub fn run_plan(plan: &Plan, ex: &mut dyn Executor, out: &mut dyn Write) -> i32 
             } else {
                 Err(StepError::Failed(format!("종료 코드 {code}")))
             }
-        })
-        .and_then(|()| {
+        });
+        // The step's own command succeeded; only its follow-up can still fail.
+        let ran_ok = ran.is_ok();
+        let result = ran.and_then(|()| {
             if AFTER_STEPS.contains(&s.id.as_str()) {
                 ex.after(&s.id)
             } else {
@@ -119,7 +121,10 @@ pub fn run_plan(plan: &Plan, ex: &mut dyn Executor, out: &mut dyn Write) -> i32 
             }
             Err(StepError::Failed(why)) => {
                 let _ = writeln!(out, "[실패] {}: {why}", s.id);
-                recover_install(plan, &done, &s.id, ex, out);
+                // `sc stop` was sent but the wait for it failed (re-review nit 4): the service may
+                // still finish stopping, so it counts as stopped.
+                let stop_sent = ran_ok && s.id == "stop_existing";
+                recover_install(plan, &done, &s.id, stop_sent, ex, out);
                 let _ = out.flush();
                 return 1;
             }
@@ -135,17 +140,20 @@ pub fn run_plan(plan: &Plan, ex: &mut dyn Executor, out: &mut dyn Write) -> i32 
 /// earlier install is whole, so its service is started again (`sc.exe start mcp-monitor`); after
 /// it, the earlier binPath may name a file that moved to `<I>.old` (an upgrade from 1.0.0), so
 /// the line says how to recover instead. Each outcome is one `[복구] …` line after `[실패]`.
+/// `stop_sent`: `stop_existing` itself failed after `sc stop` was sent (its wait for the stop did
+/// not end in time), which counts as a stopped service too (re-review nit 4).
 fn recover_install(
     plan: &Plan,
     done: &[&str],
     failed: &str,
+    stop_sent: bool,
     ex: &mut dyn Executor,
     out: &mut dyn Write,
 ) {
     // A failed `service_start` / `wait_ready` is OPERATIONS ③ 5 (the new version may already have
     // migrated the database): the earlier version is not started again.
     if plan.script != "install"
-        || !done.contains(&"stop_existing")
+        || !(done.contains(&"stop_existing") || stop_sent)
         || failed == "service_start"
         || done.contains(&"service_start")
     {
@@ -397,10 +405,11 @@ mod tests {
             "[1/2] install_state\n[실패] install_state: 디스크가 가득 찼습니다\n"
         );
 
-        let p = plan(vec![
+        let mut p = plan(vec![
             st("stop_existing", "sc.exe", &[1062], None),
             st("z", "sc.exe", &[0], None),
         ]);
+        p.script = "uninstall".into();
         let mut ex = Scripted {
             log: vec![],
             fail_internal: None,
@@ -413,6 +422,48 @@ mod tests {
             String::from_utf8(out).unwrap(),
             "[1/2] stop_existing\n[실패] stop_existing: 서비스가 멈추지 않았습니다\n"
         );
+    }
+
+    /// Re-review nit 4: `sc stop` was sent but the wait for the stop ran out. The service may still
+    /// finish stopping, so the install tries to start it again and says how it went; a `sc stop`
+    /// that itself failed stopped nothing, so nothing is said.
+    #[test]
+    fn a_stop_whose_wait_runs_out_gets_a_recovery_line() {
+        let p = upgrade();
+        let mut ex = Scripted {
+            log: vec![],
+            fail_internal: None,
+            fail_after: true,
+        };
+        let mut out = Vec::new();
+        assert_eq!(run_plan(&p, &mut ex, &mut out), 1);
+        assert_eq!(
+            ex.log,
+            [
+                "internal require_admin",
+                "native sc.exe stop mcp-monitor",
+                "after stop_existing",
+                "native sc.exe start mcp-monitor"
+            ]
+        );
+        let text = String::from_utf8(out).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(
+            lines[2..],
+            [
+                "[실패] stop_existing: 서비스가 멈추지 않았습니다",
+                "[복구] 이전 버전의 서비스를 다시 시작하지 못했습니다(종료 코드 1062). 원인을 고친 뒤 sc.exe start mcp-monitor 로 시작하거나, 같은 mcp-monitor.exe를 관리자 권한으로 다시 실행하세요."
+            ]
+        );
+
+        let (code, lines, log) = run_failing(&upgrade(), "sc.exe stop mcp-monitor", 0);
+        assert_eq!(code, 1);
+        assert_eq!(
+            lines.last().unwrap(),
+            "[실패] stop_existing: 종료 코드 9",
+            "{lines:?}"
+        );
+        assert_eq!(log, ["require_admin", "sc.exe"]);
     }
 
     /// An upgrade-shaped install plan: the service is stopped at step 2, the folders are swapped at

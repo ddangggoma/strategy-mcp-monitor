@@ -352,7 +352,8 @@ fn work_area(app: &AppHandle) -> (f64, f64) {
 /// The crash signals first (review I3: a failing settings call must not leave the window without
 /// them), then the settings Tauri has no builder option for. The signals: `ProcessFailed`, the
 /// environment's `BrowserProcessExited`, and a handle on the browser process that the runner polls
-/// ([`NoticeState::check_browser`]). The last two are best effort: a failure is logged.
+/// ([`NoticeState::check_browser`]). Each is best effort and independent of the others: a failure
+/// is logged and the rest are still registered.
 ///
 /// # Safety
 /// Main thread only (the WebView2 COM objects are single-threaded).
@@ -371,9 +372,11 @@ unsafe fn configure_webview(
     // SAFETY: COM calls on the main thread that owns the controller.
     unsafe {
         let webview = controller.CoreWebView2()?;
-        let mut token = 0i64;
+        // Each signal on its own (re-review nit 5): one that cannot be registered is logged and
+        // the others are still set up.
+        let mut failed_token = 0i64;
         let (failed_state, failed_log) = (state.clone(), log.clone());
-        webview.add_ProcessFailed(
+        if let Err(e) = webview.add_ProcessFailed(
             &ProcessFailedEventHandler::create(Box::new(move |_, args| {
                 let mut kind = COREWEBVIEW2_PROCESS_FAILED_KIND::default();
                 if let Some(args) = args {
@@ -388,8 +391,10 @@ unsafe fn configure_webview(
                 }
                 Ok(())
             })),
-            &mut token,
-        )?;
+            &mut failed_token,
+        ) {
+            log(&format!("notice window: no ProcessFailed event: {e}"));
+        }
         let mut pid = 0u32;
         match webview
             .BrowserProcessId(&mut pid)
@@ -405,6 +410,7 @@ unsafe fn configure_webview(
                 "notice window: the browser process cannot be watched: {e}"
             )),
         }
+        let mut exited_token = 0i64;
         let (exited_state, exited_log) = (state.clone(), log.clone());
         let exited = webview
             .cast::<ICoreWebView2_2>()
@@ -424,7 +430,7 @@ unsafe fn configure_webview(
                         exited_state.on_process_failed();
                         Ok(())
                     })),
-                    &mut token,
+                    &mut exited_token,
                 )
             });
         if let Err(e) = exited {

@@ -1144,6 +1144,45 @@ mod tests {
             );
             assert_eq!(*f.boxes.borrow(), [app::ELEVATED_APP], "{a:?}");
         }
+        // Re-review minor 2: an elevated install or upgrade that succeeds opens nothing either,
+        // but ends with an information box and 0, never the error box and 1.
+        for before in [None, Some("1.0.0")] {
+            let mut f = FakeElevator::new(true, Ok(0));
+            *f.installed.borrow_mut() = before.map(|v| entry(v, dir.path()));
+            f.service = before.is_some();
+            f.yes = true;
+            f.installs_to = Some(entry("1.1.0", dir.path()));
+            assert_eq!(run_with(args(&[]), &f), 0, "{before:?}");
+            assert_eq!(f.launched.borrow().len(), 1, "{before:?}");
+            assert!(
+                f.windows.borrow().is_empty() && f.started.borrow().is_empty(),
+                "{before:?}"
+            );
+            assert_eq!(
+                *f.boxes.borrow(),
+                [format!("info: {}", app::INSTALLED_ELEVATED)],
+                "{before:?}"
+            );
+        }
+        // A failed one keeps the installer's code (it showed why) or the error box and 1.
+        for (answer, code, boxes) in [
+            (Ok(5), 5, vec![]),
+            (
+                Err("관리자 권한으로 다시 실행하지 못했습니다: x".to_string()),
+                1,
+                vec!["관리자 권한으로 다시 실행하지 못했습니다: x".to_string()],
+            ),
+        ] {
+            let mut f = FakeElevator::new(true, answer.clone());
+            f.yes = true;
+            f.installs_to = Some(entry("1.1.0", dir.path()));
+            assert_eq!(run_with(args(&[]), &f), code, "{answer:?}");
+            assert!(
+                f.windows.borrow().is_empty() && f.started.borrow().is_empty(),
+                "{answer:?}"
+            );
+            assert_eq!(*f.boxes.borrow(), boxes, "{answer:?}");
+        }
     }
 
     /// The one exception: a development build attached to a development server (`--server-url`

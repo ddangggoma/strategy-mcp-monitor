@@ -84,7 +84,7 @@
 | X8-7 | 업그레이드 중 설치 폴더를 탐색기로 열어 둠(`<I>\bin` 폴더) | `[실패] swap_install_dir: …` 다음 줄 `[복구] 이전 버전의 서비스를 다시 시작했습니다(sc.exe start mcp-monitor).`(더블클릭이면 결과 상자에 두 줄), `sc.exe query mcp-monitor` = `RUNNING`(이전 버전), 이전 폴더로 되돌려져 있음(`<I>`에 이전 버전, `<I>.staging` 남을 수 있음). 탐색기를 닫고 다시 실행하면 성공 | 대기 | Y15, 리뷰 4, OPERATIONS ③ 2·⑩. 결과를 운영 문서의 문구와 비교 |
 | X8-8 | (선택, 재현할 수 있을 때) 1.0.0 → 1.1.0 업그레이드에서 폴더 교체 **뒤**의 단계(`secure_data_root`, 감사 단계, `service_install` …)가 실패한 경우 | `[실패] <id>: …` 다음 줄 `[복구] 서비스가 멈춰 있습니다. … 이전 설치는 <I>.old 에 있습니다.`. 이때 `sc.exe start mcp-monitor`는 실패(1.0.0 binPath가 `<I>.old`로 옮겨진 파일을 가리킴). 원인을 지우고 같은 1.1.0 exe로 다시 설치하면 성공하고 binPath가 `mcp-monitor-server.exe` | 대기 | 리뷰 4 |
 | X8-9 | 실패한 업그레이드 뒤 `<I>.old`(이전 설치)와 `<I>.staging`이 남은 상태에서 `& "<I>\mcp-monitor.exe" uninstall \| Write-Output` | 단계 `remove_old_install`·`remove_staging`이 둘을 지움. 표시가 없는 폴더(손으로 만든 `<I>.old`)는 `건너뜀 (old_is_ours 아님)`으로 남김 | 대기 | 리뷰 8 |
-| X8-10 | 다운로드한 exe를 **관리자 권한으로 실행**(설치된 상태), 관리자 PowerShell에서 `& "<I>\mcp-monitor.exe" app` | 둘 다 앱 창·트레이가 뜨지 않고 "관리자 권한으로 실행 중이라 MCP Monitor 창을 열지 않습니다 …" 상자, 종료 코드 1. 관리자의 `HKCU\…\Run`에 아무것도 생기지 않음 | 대기 | 리뷰 18 |
+| X8-10 | 다운로드한 exe를 **관리자 권한으로 실행**(설치된 상태), 관리자 PowerShell에서 `& "<I>\mcp-monitor.exe" app` | 둘 다 앱 창·트레이가 뜨지 않고 "관리자 권한으로 실행 중이라 MCP Monitor 창을 열지 않습니다 …" 상자, 종료 코드 1. 관리자의 `HKCU\…\Run`에 아무것도 생기지 않음. 설치되지 않은 PC에서 다운로드한 exe를 **관리자 권한으로 실행**해 설치(예)하면 설치기의 결과 상자 다음에 "설치를 마쳤습니다. …" 안내 상자(오류 상자 아님), 종료 코드 0, 창·트레이 없음 | 대기 | 리뷰 18, 재리뷰 Minor 2 |
 | X8-11 | 서비스를 지운 뒤(`sc.exe delete mcp-monitor`, 앱 및 기능·`<I>`는 그대로) 시작 메뉴 **MCP Monitor** 실행 | 설치 안내·UAC 없이 "… 다운로드한 mcp-monitor-1.1.0.exe로 실행하세요" 상자. 받은 exe로 실행하면 복구 설치 | 대기 | 리뷰 17(F06) |
 
 ## 3. P4–P7 점검표를 데스크톱 설치 상태로 다시 수행 (P8-20)

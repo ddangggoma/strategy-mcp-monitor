@@ -64,7 +64,8 @@ def test_dry_run_plans_from_the_release_payload(tmp_path):
 
 def test_install_without_admin_changes_nothing(tmp_path):
     if ctypes.windll.shell32.IsUserAnAdmin():
-        pytest.skip("elevated shell (the GitHub runner): a real install would run; checked on a standard account (P8)")
+        pytest.skip("elevated shell (the GitHub runner): a real install would run; the release job checks it as a "
+                    "throw-away standard user (standard-user-tests.ps1 -ReleaseExe) and P8 on a standard account")
     p = run("install", "--install-dir", str(tmp_path / "i"), "--data-root", str(tmp_path / "d"))
     assert p.returncode == 1 and "관리자 권한으로 다시 실행하세요" in p.stdout, p.stdout + p.stderr
     assert not any((tmp_path / n).exists() for n in ("i", "d", "i.staging"))

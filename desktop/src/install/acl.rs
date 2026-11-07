@@ -1330,17 +1330,12 @@ mod tests {
         let root = s.path().join("MCP Monitor");
         fs::create_dir_all(root.join("data")).unwrap();
         assert!(data_root_readable(&root));
-        icacls(
-            &root,
-            &[
-                "/inheritance:r",
-                "/grant:r",
-                "*S-1-5-18:(OI)(CI)F",
-                "*S-1-5-32-544:(OI)(CI)F",
-            ],
-        );
-        // Only an administrator can list it: unreadable for a standard token, readable for the
-        // elevated CI runner (an administrator; that is what `--dry-run` notes are about).
+        // As the four dry-run tests (re-review minor 1): the raw lock left the throw-away CI
+        // standard user its own entry; `lock_to_admins` removes it.
+        lock_to_admins(&root);
+        // Only an administrator can list it: unreadable for a standard token (the standard-user
+        // CI step runs this test, `$Extra`), readable for the elevated CI runner (an
+        // administrator; that is what `--dry-run` notes are about).
         assert_eq!(data_root_readable(&root), crate::winutil::is_elevated());
         icacls(&root, &["/reset", "/T", "/C", "/Q"]);
     }

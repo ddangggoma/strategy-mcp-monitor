@@ -70,8 +70,9 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 ///
 /// A part must not be empty, `.` or `..`, must not hold `\ / : * ? " < > |` or a control
 /// character, must not end in `.` or a space (Windows would silently drop those), and must not be
-/// a device name (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`, also with `¹²³`,
-/// `CONIN$`, `CONOUT$`), with or without an extension, in any case (review item 6).
+/// a device name (`CON`, `PRN`, `AUX`, `NUL`, `COM0`–`COM9`, `LPT0`–`LPT9`, also with `¹²³`,
+/// `CONIN$`, `CONOUT$`), with or without an extension, in any case (review item 6; `0` per
+/// Microsoft's naming rules, re-review nit 6).
 pub fn name_problem(part: &str) -> Option<&'static str> {
     if part.is_empty() {
         Some("빈 이름")
@@ -103,9 +104,10 @@ fn is_device_name(part: &str) -> bool {
         "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$" => true,
         _ => ["COM", "LPT"].iter().any(|p| {
             stem.strip_prefix(p).is_some_and(|n| {
+                let mut chars = n.chars();
                 matches!(
-                    n,
-                    "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+                    (chars.next(), chars.next()),
+                    (Some('0'..='9' | '¹' | '²' | '³'), None)
                 )
             })
         }),
