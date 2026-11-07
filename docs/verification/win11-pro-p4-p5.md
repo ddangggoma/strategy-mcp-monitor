@@ -4,6 +4,7 @@
 - 작성: Plan 4 Task 20 (2026-11-06). 개발 PC는 **Windows 11 Home, 관리자 아님**이라 RDP 접속, Security 로그, `CreateProcessAsUser`, 감사 정책 변경을 실행할 수 없습니다. 그래서 **모든 결과 칸은 `대기`**입니다.
 - 자동 테스트가 이미 확인한 것: 가짜·녹화 픽스처로 같은 코드 경로 전체(트래커·표시·감독·실제 에이전트·실제 TCP 피어 검증), 이 PC에서 관리자 없이 부를 수 있는 Windows API(`winlive`), 실제 프로세스 통합(`integration`), 웹 E2E(`--session-source json:`). 이 점검표는 그 밖에 남은 것, 곧 **실제 RDP·관리자·SYSTEM이 있어야 하는 확인**입니다.
 - **Plan 5 이후(2026-11-07):** 이 점검표는 `install.ps1`로 설치한 서비스 상태에서 다시 수행합니다. 바꿔 읽을 것(감사 정책은 `install.ps1`/`install\audit-policy.ps1 -Enable`, 실행 방식 A·B 대신 서비스 `mcp-monitor`, 데이터 폴더 `C:\ProgramData\MCP Monitor`, 에이전트 `mcp-agent.exe`, P5-12 기준값 저장)은 `docs/verification/win11-pro-p6-p7.md` §3에 있습니다.
+- **Plan 6 이후(1.1.0, 2026-11-08):** 데스크톱 설치 상태(`docs/verification/win11-pro-p8.md` P8-3)로 다시 수행합니다. 감사 정책은 `mcp-monitor.exe install`이 켜고 따로 켜려면 `mcp-monitor.exe audit-policy --enable`(`install.ps1`·`audit-policy.ps1 -Enable` 대신), 에이전트는 `mcp-monitor.exe agent`(`mcp-agent.exe` 대신), 고지 창은 Edge `--app` 대신 WebView2 창입니다. 나머지 바꿔 읽기는 `win11-pro-p8.md` §3에 있습니다. 이미 적은 결과 칸은 그대로 둡니다.
 - 결과를 채우는 법: `결과` 칸에 `통과` / `실패` / `해당 없음`과 날짜를 적고, 실패면 `비고`에 서버 로그(`C:\mcpmon\logs\<날짜>.jsonl`의 해당 줄)와 화면을 남깁니다. 실패 항목은 `docs/superpowers/plans/carry-forward.md`에 새 항목으로 옮깁니다.
 
 ## 1. 준비

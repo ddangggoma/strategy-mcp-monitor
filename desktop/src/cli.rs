@@ -1152,6 +1152,43 @@ mod tests {
         }
     }
 
+    /// Every command and option in [`DOCUMENTED_OPTIONS`] appears in the operations guide as a word
+    /// of a code span or code block (`` `install --dry-run` ``), not just somewhere in the prose.
+    #[test]
+    fn operations_guide_documents_every_cli_option() {
+        let guide = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/ops/OPERATIONS.md"
+        ))
+        .unwrap();
+        let code_words: std::collections::HashSet<&str> = guide
+            .split('`')
+            .skip(1)
+            .step_by(2)
+            .flat_map(|code| code.split(|c: char| c.is_whitespace() || c == '|'))
+            .collect();
+        let missing: Vec<&&str> = DOCUMENTED_OPTIONS
+            .iter()
+            .filter(|o| !code_words.contains(**o))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "not in docs/ops/OPERATIONS.md: {missing:?}"
+        );
+        for word in [
+            "install",
+            "uninstall",
+            "audit-policy",
+            "agent",
+            "app",
+            "autostart",
+            "verify-payload",
+            "--version",
+        ] {
+            assert!(DOCUMENTED_OPTIONS.contains(&word), "{word}");
+        }
+    }
+
     #[test]
     fn tests_are_not_elevated() {
         if crate::winutil::skip_when_elevated(

@@ -1,7 +1,7 @@
 # Rust 단일 실행 파일(데스크톱 앱) 설계안
 
-- 상태: **확정** (2026-11-07) — 설치 모드 하나, D2–D5 결정 완료 (§8)
-- 대상: Plan 6 (예정). 기준 스펙: `docs/PLAN.md` v0.8, 현재 배포: `install/build.ps1` + `install/install.ps1` (PyInstaller 묶음)
+- 상태: **확정** (2026-11-07) — 설치 모드 하나, D2–D5 결정 완료 (§8) — Plan 6로 구현(2026-11-07, 부록 A Y1–Y34)
+- 대상: Plan 6. 기준 스펙: `docs/PLAN.md` v0.8, 현재 배포: `install/build.ps1` + `install/install.ps1` (PyInstaller 묶음)
 
 ## 1. 요구사항 정리
 
@@ -40,11 +40,11 @@
 ## 3. 구조
 
 ```
-mcp-monitor.exe  (Rust, Tauri 2, 서명됨, 약 40–60 MB)
+mcp-monitor.exe  (Rust, Tauri 2, 서명 선택(D5), 약 40–60 MB)
 ├─ [내장] payload.tar.zst ── 서버 묶음(bin\monitor\mcp-monitor-server.exe, web\, bundle.json)
 ├─ 모드: app        WebView2 창 + 트레이 아이콘 (관리 화면 = http://127.0.0.1:8700/admin)
 ├─ 모드: install    UAC 승격 → Program Files 배치·서비스 등록·ACL·감사 정책
-├─ 모드: uninstall  서비스 제거·파일 제거·감사 정책 원복 (데이터는 선택)
+├─ 모드: uninstall  서비스 제거·파일 제거 (감사 정책 원복·데이터 삭제는 선택)
 └─ 모드: agent      (D3=A) RDP 세션마다 실행되는 고지 창·창 이벤트 수집
 ```
 
@@ -66,13 +66,13 @@ mcp-monitor.exe  (Rust, Tauri 2, 서명됨, 약 40–60 MB)
   - "앱 및 기능" 제거 항목, 시작 메뉴 바로 가기
   - (선택) 로그인 시 트레이 앱 자동 실행 — HKCU `Run`
 - 설치 후 시작 메뉴의 **MCP Monitor** → app 모드 창. 창을 닫아도 **서비스는 계속 돕니다**(트레이: 창 열기 / 서비스 상태 / 트레이 종료).
-- **패키지 형태 (D2):** A. 자기 설치 exe만 / B. 같은 exe를 감싼 MSI(WiX, `cargo-wix`)도 제공 — GPO·Intune 배포가 필요할 때.
+- **패키지 형태 (D2):** 자기 설치 exe만(D2=A). MSI는 만들지 않습니다(GPO·Intune 배포가 필요해지면 carry-forward).
 
 ### 4.2 업그레이드
 새 버전 exe 실행 → 서비스 정지(`ShutdownSequence`) → 파일 교체 → DB 마이그레이션은 서버가 시작할 때 수행(Plan 5 DB 가드: 더 새 DB 거부) → 서비스 시작. 데이터는 그대로 둡니다.
 
 ### 4.3 제거
-`mcp-monitor.exe uninstall` 또는 "앱 및 기능" → 서비스 정지·제거 → 감사 정책 복원 → Program Files 제거. 데이터는 `--remove-data`를 줄 때만 지웁니다(지금 `uninstall.ps1 -RemoveData`와 같은 안전장치: 마커 확인, 드라이브 루트·시스템 폴더 거부). 각 사용자의 고지 창 프로필 폴더도 함께 지웁니다.
+`mcp-monitor.exe uninstall` 또는 "앱 및 기능" → 서비스 정지·제거 → (`--restore-audit-policy`일 때) 감사 정책 복원 → Program Files 제거. 데이터는 `--remove-data`를 줄 때만 지웁니다(지금 `uninstall.ps1 -RemoveData`와 같은 안전장치: 마커 확인, 드라이브 루트·시스템 폴더 거부). 각 사용자의 고지 창 프로필 폴더도 함께 지웁니다.
 
 ### 4.4 기능
 설치 모드 하나이므로 Plan 1–5의 모든 기능(MCP 감시·자동 복구, 관리 화면·상태 보드, 원격 모드, RDP 세션·Security 로그·명령 수집, 연결마다 고지, 우회 탐지, 로그 조회·보존)을 그대로 제공합니다. 관리 화면은 브라우저 대신 앱 창에서 열리며, 원격 모드(8701)는 지금처럼 다른 PC의 브라우저로 접속합니다.
