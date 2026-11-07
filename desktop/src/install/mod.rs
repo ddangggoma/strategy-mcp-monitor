@@ -11,7 +11,9 @@ pub mod paths;
 pub mod plan;
 pub mod procs;
 pub mod registry;
+pub mod remove;
 pub mod shortcut;
 pub mod stage;
 #[cfg(test)]
 pub mod testutil;
+pub mod uninstall_plan;

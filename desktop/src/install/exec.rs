@@ -1,7 +1,8 @@
 //! `RealExecutor`: runs a plan on this PC (Plan 5's `$Internal`, `$Conditions`, `$AfterStep` and
 //! `Invoke-Native`). System32 tools go through a [`Runner`] so tests never start one for real;
 //! administrator rights and the service come from the [`Host`], registry writes go through a
-//! [`Registry`]. Task 8 adds the uninstall actions that are still `아직 구현되지 않았습니다`.
+//! [`Registry`]; files the uninstaller cannot delete while it runs are handed to the reboot
+//! schedule.
 
 use crate::install::acl::{ADMINISTRATORS, SYSTEM, initialize_data_root, kst_now};
 use crate::install::audit::restore_registry;
@@ -10,6 +11,10 @@ use crate::install::paths::is_inside;
 use crate::install::plan::{Executor, Plan, Step, StepError};
 use crate::install::procs::stop_apps;
 use crate::install::registry::{Registry, parse_reg_value};
+use crate::install::remove::{
+    data_root_is_ours, install_dir_is_bundle, remove_glob, remove_install_dir, remove_path,
+    remove_run_values,
+};
 use crate::install::shortcut::create_shortcut;
 use crate::install::stage::{
     PayloadSource, StdFs, remove_old, running_inside_problem, stage, swap,
@@ -20,6 +25,29 @@ use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
+use windows::Win32::Storage::FileSystem::{MOVEFILE_DELAY_UNTIL_REBOOT, MoveFileExW};
+use windows::core::{HSTRING, PCWSTR};
+
+/// `MoveFileExW(path, NULL, MOVEFILE_DELAY_UNTIL_REBOOT)`: Windows deletes `path` at the next
+/// restart (a folder only once it is empty). Needs administrator rights (Y21).
+pub fn delete_at_reboot(path: &Path) -> Result<(), String> {
+    // SAFETY: the HSTRING is NUL-terminated and outlives the call; a null target means delete.
+    unsafe {
+        MoveFileExW(
+            &HSTRING::from(path),
+            PCWSTR::null(),
+            MOVEFILE_DELAY_UNTIL_REBOOT,
+        )
+    }
+    .map_err(|e| e.message())
+}
+
+#[cfg(not(test))]
+const REBOOT_DELETE: fn(&Path) -> Result<(), String> = delete_at_reboot;
+
+/// Unit tests never schedule anything for real (the CI runner is elevated).
+#[cfg(test)]
+const REBOOT_DELETE: fn(&Path) -> Result<(), String> = |_| Ok(());
 
 /// `CREATE_NO_WINDOW`: a tool started from the GUI-subsystem exe never opens a console window.
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -92,6 +120,13 @@ pub struct RealExecutor<'a, R: Runner, W: Write> {
     pub self_exe: Option<PathBuf>,
     /// What `(stage)` extracts (`None`: the payload embedded in this exe).
     pub payload: Option<PayloadSource>,
+    /// The `/file:` of the plan's `restore_audit_policy` step (`audit_backup_exists`).
+    audit_backup: Option<PathBuf>,
+    /// How `(remove-install)` hands a file or folder to the next restart ([`delete_at_reboot`],
+    /// a no-op in unit tests).
+    pub schedule_reboot_delete: fn(&Path) -> Result<(), String>,
+    /// What `(remove-install)` left for the next restart.
+    pub scheduled: Vec<PathBuf>,
 }
 
 #[cfg(not(test))]
@@ -139,6 +174,12 @@ impl<'a, R: Runner, W: Write> RealExecutor<'a, R, W> {
             .iter()
             .find(|s| s.id == "firewall")
             .and_then(|s| s.args.iter().find(|a| a.starts_with("name=")).cloned());
+        let audit_backup = plan
+            .steps
+            .iter()
+            .find(|s| s.id == "restore_audit_policy")
+            .and_then(|s| s.args.iter().find_map(|a| a.strip_prefix("/file:")))
+            .map(PathBuf::from);
         RealExecutor {
             host,
             runner,
@@ -153,7 +194,37 @@ impl<'a, R: Runner, W: Write> RealExecutor<'a, R, W> {
             registry: default_registry(),
             self_exe: std::env::current_exe().ok(),
             payload: None,
+            audit_backup,
+            schedule_reboot_delete: REBOOT_DELETE,
+            scheduled: Vec::new(),
         }
+    }
+
+    /// True when `(remove-install)` left this exe (and the install folder) for the next restart.
+    pub fn reboot_pending(&self) -> bool {
+        !self.scheduled.is_empty()
+    }
+
+    /// `(remove-install) <I>`: [`remove_install_dir`]; what is left is scheduled for the restart,
+    /// and a schedule that fails is a warning (the file stays until deleted by hand).
+    fn remove_install(&mut self, dir: &str) -> Result<i32, StepError> {
+        let exe = self.self_exe.clone().unwrap_or_default();
+        let mut left = Vec::new();
+        remove_install_dir(Path::new(dir), &exe, &mut |p| left.push(p.to_path_buf()))
+            .map_err(StepError::Failed)?;
+        for p in left {
+            match (self.schedule_reboot_delete)(&p) {
+                Ok(()) => self.scheduled.push(p),
+                Err(e) => {
+                    let _ = writeln!(
+                        self.out,
+                        "  경고: {} 을(를) 다시 시작할 때 지우도록 예약하지 못했습니다(직접 지우세요): {e}",
+                        p.display()
+                    );
+                }
+            }
+        }
+        Ok(0)
     }
 
     /// SYSTEM, Administrators and the installing account: who may own the data root and the
@@ -330,6 +401,16 @@ impl<R: Runner, W: Write> Executor for RealExecutor<'_, R, W> {
                 .as_ref()
                 .is_some_and(|i| Path::new(&format!("{}.old", i.display())).exists()),
             "firewall_rule_missing" => self.firewall_rule_missing(),
+            "audit_backup_exists" => self.audit_backup.as_ref().is_some_and(|b| b.is_file()),
+            // Checked again just before the folder goes (Plan 5 I3).
+            "install_dir_is_bundle" => self
+                .install_dir
+                .as_ref()
+                .is_some_and(|i| install_dir_is_bundle(i, self.host.env(), self.host.volumes())),
+            "data_root_is_ours" => self
+                .data_root
+                .as_ref()
+                .is_some_and(|d| data_root_is_ours(d, self.host.env(), self.host.volumes())),
             // A condition this executor does not know never runs its step.
             _ => false,
         }
@@ -399,6 +480,40 @@ impl<R: Runner, W: Write> Executor for RealExecutor<'_, R, W> {
                 )
             }
             "(wait)" => wait_ready(need(step, 0)?, need(step, 1)?),
+            "(registry-delete)" => {
+                need(step, 0)?;
+                for key in &step.args {
+                    self.registry.delete_key(key).map_err(StepError::Failed)?;
+                }
+                Ok(0)
+            }
+            "(remove)" => {
+                need(step, 0)?;
+                for p in &step.args {
+                    remove_path(Path::new(p)).map_err(StepError::Failed)?;
+                }
+                Ok(0)
+            }
+            "(remove-install)" => self.remove_install(need(step, 0)?),
+            "(remove-glob)" => {
+                let n = remove_glob(Path::new(need(step, 0)?)).map_err(StepError::Failed)?;
+                let _ = writeln!(self.out, "  사용자 프로필 폴더 {n}개를 지웠습니다.");
+                Ok(0)
+            }
+            "(run-values-remove)" => {
+                let dir = Path::new(need(step, 0)?);
+                let sids =
+                    remove_run_values(&mut *self.registry, dir).map_err(StepError::Failed)?;
+                if !sids.is_empty() {
+                    let _ = writeln!(
+                        self.out,
+                        "  자동 시작 값 {}개를 지웠습니다: {}",
+                        sids.len(),
+                        sids.join(", ")
+                    );
+                }
+                Ok(0)
+            }
             _ => Err(StepError::Failed("아직 구현되지 않았습니다".into())),
         }
     }
@@ -410,7 +525,7 @@ impl<R: Runner, W: Write> Executor for RealExecutor<'_, R, W> {
     }
 
     fn after(&mut self, id: &str) -> Result<(), StepError> {
-        if id != "stop_existing" {
+        if !crate::install::plan::AFTER_STEPS.contains(&id) {
             return Ok(());
         }
         let started = Instant::now();
@@ -433,7 +548,7 @@ impl<R: Runner, W: Write> Executor for RealExecutor<'_, R, W> {
 mod tests {
     use super::*;
     use crate::install::host::FakeHost;
-    use crate::install::plan::{Plan, Step};
+    use crate::install::plan::{Plan, Step, run_plan};
     use crate::install::registry::{FakeRegistry, RegValue};
     use crate::install::shortcut::read_shortcut;
     use crate::install::testutil::*;
@@ -1116,6 +1231,235 @@ mod tests {
     }
 
     #[test]
+    fn uninstall_conditions_look_at_the_backup_the_bundle_and_the_marker() {
+        let s = Scratch::new();
+        let (inst, data, backup) = (
+            s.path().join("i"),
+            s.path().join("d"),
+            s.path().join("b.csv"),
+        );
+        let restore = st(
+            "restore_audit_policy",
+            "auditpol",
+            &["/restore", &format!("/file:{}", backup.display())],
+        );
+        let p = plan("uninstall", Some(&inst), Some(&data), vec![restore]);
+        let h = FakeHost::new();
+        let mut ex = RealExecutor::new(&p, &h, FakeRunner::default(), Vec::new());
+        let conds = |ex: &mut RealExecutor<FakeRunner, Vec<u8>>| {
+            [
+                "audit_backup_exists",
+                "install_dir_is_bundle",
+                "data_root_is_ours",
+            ]
+            .map(|c| ex.condition(c))
+        };
+        assert_eq!(conds(&mut ex), [false; 3]);
+        fs::create_dir_all(inst.join("data")).unwrap();
+        fs::create_dir_all(data.join("data")).unwrap();
+        assert_eq!(conds(&mut ex), [false; 3], "bare folders are not ours");
+        fs::write(&backup, "x").unwrap();
+        fs::write(inst.join("bundle.json"), "{}").unwrap();
+        fs::write(data.join("data/mcp-monitor-data-root.json"), "{}").unwrap();
+        assert_eq!(conds(&mut ex), [true; 3]);
+        // A plan without the restore step has no backup to look for.
+        let p = plan("uninstall", Some(&inst), Some(&data), vec![]);
+        assert!(
+            !RealExecutor::new(&p, &h, FakeRunner::default(), Vec::new())
+                .condition("audit_backup_exists")
+        );
+    }
+
+    /// The uninstall plan run end to end on a scratch install with fakes for the tools, the
+    /// registry, the service and the reboot schedule: the running exe stays for the restart, the
+    /// marked data root, every profile, the uninstall entry, the shortcut and our Run values go.
+    #[test]
+    fn the_uninstall_plan_removes_a_scratch_install() {
+        let s = Scratch::new();
+        let (inst, data, users, pd) = (
+            s.path().join("MCP Monitor"),
+            s.path().join("data"),
+            s.path().join("Users"),
+            s.path().join("pd"),
+        );
+        fs::create_dir_all(inst.join("bin/monitor")).unwrap();
+        fs::write(inst.join("bin/monitor/mcp-monitor-server.exe"), b"MZ").unwrap();
+        fs::write(inst.join("mcp-monitor.exe"), b"MZ").unwrap();
+        fs::write(inst.join("bundle.json"), "{}").unwrap();
+        fs::create_dir_all(data.join("data")).unwrap();
+        for f in [
+            "mcp-monitor-data-root.json",
+            "tamper-baseline.json",
+            "auditpol-backup.csv",
+        ] {
+            fs::write(data.join("data").join(f), "{}").unwrap();
+        }
+        fs::write(
+            data.join("data/install-state.json"),
+            json!({"external_port": 9701, "registry_before": {crate::install::audit::AUDIT_VALUE: null}}).to_string(),
+        )
+        .unwrap();
+        fs::create_dir_all(users.join("alice/AppData/Local/mcp-monitor/webview")).unwrap();
+        fs::create_dir_all(users.join("Public")).unwrap();
+        let lnk = pd.join(r"Microsoft\Windows\Start Menu\Programs\MCP Monitor.lnk");
+        fs::create_dir_all(lnk.parent().unwrap()).unwrap();
+        fs::write(&lnk, "x").unwrap();
+        let mut h = FakeHost::new();
+        h.admin = true;
+        h.env
+            .0
+            .insert("PUBLIC".into(), users.join("Public").display().to_string());
+        h.env
+            .0
+            .insert("ProgramData".into(), pd.display().to_string());
+        let a = crate::cli::UninstallArgs {
+            install_dir: Some(inst.clone()),
+            data_root: Some(data.clone()),
+            remove_data: true,
+            restore_audit_policy: true,
+            ..Default::default()
+        };
+        let p = crate::install::uninstall_plan::build_uninstall_plan(&a, &h).unwrap();
+        let key = crate::install::host::UNINSTALL_KEY;
+        let run = |sid: &str| format!(r"HKU\{sid}\{}", crate::install::remove::RUN_KEY);
+        let ours = format!(r#""{}\mcp-monitor.exe" app --background"#, inst.display());
+        let mut fake = FakeRegistry::default();
+        fake.set_values(
+            key,
+            &[("DisplayName".into(), RegValue::Sz("MCP Monitor".into()))],
+        )
+        .unwrap();
+        fake.set_values(
+            &run("S-1-5-21-7-1001"),
+            &[("MCPMonitor".into(), RegValue::Sz(ours))],
+        )
+        .unwrap();
+        fake.set_values(
+            &run("S-1-5-21-7-1002"),
+            &[("MCPMonitor".into(), RegValue::Sz(r"D:\x.exe".into()))],
+        )
+        .unwrap();
+        let (code, out, calls, scheduled, reboot) = {
+            let mut ex = RealExecutor::new(&p, &h, FakeRunner::default(), Vec::new());
+            ex.registry = Box::new(&mut fake);
+            ex.self_exe = Some(inst.join("mcp-monitor.exe"));
+            let mut out = Vec::new();
+            let code = run_plan(&p, &mut ex, &mut out);
+            out.extend_from_slice(&ex.out);
+            (
+                code,
+                String::from_utf8(out).unwrap(),
+                ex.runner.calls.clone(),
+                ex.scheduled.clone(),
+                ex.reboot_pending(),
+            )
+        };
+        assert_eq!(code, 0, "{out}");
+        assert!(!out.contains("건너뜀"), "{out}");
+        let left: Vec<String> = fs::read_dir(&inst)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        assert_eq!(left, ["mcp-monitor.exe.uninstalled"]);
+        assert_eq!(
+            scheduled,
+            [inst.join("mcp-monitor.exe.uninstalled"), inst.clone()]
+        );
+        assert!(reboot);
+        assert!(
+            !data.exists()
+                && !lnk.exists()
+                && !users.join("alice/AppData/Local/mcp-monitor").exists()
+        );
+        assert!(users.join("Public").is_dir());
+        assert!(
+            fake.subkeys(r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall")
+                .is_empty()
+        );
+        assert_eq!(fake.string(&run("S-1-5-21-7-1001"), "MCPMonitor"), None);
+        assert!(fake.string(&run("S-1-5-21-7-1002"), "MCPMonitor").is_some());
+        let tools: Vec<String> = calls
+            .iter()
+            .map(|(c, a, _)| format!("{c} {}", a.join(" ")))
+            .collect();
+        assert_eq!(
+            tools[..4],
+            [
+                "sc.exe stop mcp-monitor".to_string(),
+                "sc.exe delete mcp-monitor".into(),
+                "netsh advfirewall firewall delete rule name=MCP Monitor (9701)".into(),
+                format!(
+                    r"auditpol /restore /file:{}\data\auditpol-backup.csv",
+                    data.display()
+                ),
+            ]
+        );
+        assert!(tools[4].starts_with("reg delete "), "{tools:?}");
+        assert!(
+            out.contains("S-1-5-21-7-1001") && out.contains("1개"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn uninstall_actions_need_their_arguments_and_a_failed_reboot_schedule_is_a_warning() {
+        let s = Scratch::new();
+        let inst = s.path().join("i");
+        fs::create_dir_all(&inst).unwrap();
+        fs::write(inst.join("mcp-monitor.exe"), b"MZ").unwrap();
+        let p = plan("uninstall", Some(&inst), None, vec![]);
+        let h = FakeHost::new();
+        let mut ex = RealExecutor::new(&p, &h, FakeRunner::default(), Vec::new());
+        for cmd in [
+            "(registry-delete)",
+            "(remove)",
+            "(remove-install)",
+            "(remove-glob)",
+            "(run-values-remove)",
+        ] {
+            assert_eq!(
+                ex.internal(&st("x", cmd, &[])),
+                Err(StepError::Failed(format!("{cmd} 의 인자가 부족합니다"))),
+                "{cmd}"
+            );
+        }
+        ex.self_exe = Some(inst.join("mcp-monitor.exe"));
+        ex.schedule_reboot_delete = |_| Err("액세스가 거부되었습니다".into());
+        assert_eq!(
+            ex.internal(&st(
+                "remove_install_dir",
+                "(remove-install)",
+                &[&inst.display().to_string()]
+            )),
+            Ok(0)
+        );
+        let text = String::from_utf8(ex.out.clone()).unwrap();
+        assert_eq!(text.matches("경고: ").count(), 2, "{text}");
+        assert!(!ex.reboot_pending() && ex.scheduled.is_empty());
+        let e = ex.internal(&st(
+            "x",
+            "(remove-glob)",
+            &[&s.path().join("Users").display().to_string()],
+        ));
+        assert!(matches!(e, Err(StepError::Failed(m)) if m.contains("형태가 아닙니다")));
+    }
+
+    #[test]
+    fn the_real_reboot_delete_needs_an_administrator() {
+        if crate::winutil::skip_when_elevated(
+            "the_real_reboot_delete_needs_an_administrator",
+            "an administrator would really schedule the delete",
+        ) {
+            return;
+        }
+        let s = Scratch::new();
+        fs::write(s.path().join("x"), "x").unwrap();
+        let e = delete_at_reboot(&s.path().join("x")).unwrap_err();
+        assert!(!e.is_empty());
+        assert!(s.path().join("x").is_file());
+    }
+
+    #[test]
     fn after_stop_existing_waits_for_the_service_to_stop() {
         let p = plan("install", None, None, vec![]);
         let mut h = FakeHost::new();
@@ -1134,5 +1478,13 @@ mod tests {
             ))
         );
         assert_eq!(ex.after("service_start"), Ok(()));
+        // uninstall's stop_service waits the same way.
+        assert_eq!(
+            ex.after("stop_service"),
+            Err(StepError::Failed(
+                "서비스 mcp-monitor 이(가) 0초 안에 멈추지 않았습니다".into()
+            ))
+        );
+        assert!(crate::install::plan::AFTER_STEPS.contains(&"stop_service"));
     }
 }

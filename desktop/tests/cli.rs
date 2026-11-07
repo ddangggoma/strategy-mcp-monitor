@@ -181,7 +181,7 @@ fn argument_errors_exit_2_in_korean() {
 
 #[test]
 fn modes_of_later_tasks_are_not_supported_yet() {
-    let o = run(&["uninstall", "--dry-run"]);
+    let o = run(&["autostart", "off"]);
     assert_eq!(o.status.code(), Some(2));
     assert_eq!(
         String::from_utf8(o.stderr).unwrap().trim_end(),

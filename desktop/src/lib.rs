@@ -100,7 +100,19 @@ pub fn run_with(args: Vec<OsString>, elevator: &dyn Elevator) -> i32 {
                 a.interactive,
                 &host,
                 elevator,
-                install_done_line,
+                |plan, _| install_done_line(plan),
+            )
+        }
+        Command::Uninstall(a) => {
+            let host = SystemHost::new();
+            let built = install::uninstall_plan::build_uninstall_plan(&a, &host);
+            run_installer(
+                built,
+                a.dry_run,
+                a.interactive,
+                &host,
+                elevator,
+                |plan, reboot| uninstall_done_line(plan, a.remove_data, reboot),
             )
         }
         Command::AuditPolicy(a) => {
@@ -111,7 +123,7 @@ pub fn run_with(args: Vec<OsString>, elevator: &dyn Elevator) -> i32 {
             } else {
                 "감사 정책을 되돌렸습니다."
             };
-            run_installer(built, a.dry_run, a.interactive, &host, elevator, |_| {
+            run_installer(built, a.dry_run, a.interactive, &host, elevator, |_, _| {
                 done.to_string()
             })
         }
@@ -155,6 +167,23 @@ fn install_done_line(plan: &Plan) -> String {
         .and_then(|v| v["local_port"].as_u64())
         .unwrap_or(u64::from(install::install_plan::DEFAULT_LOCAL_PORT));
     format!("설치 완료: http://127.0.0.1:{port}/admin/setup 에서 첫 Admin 계정을 만드세요.")
+}
+
+/// The last line of a successful uninstall, plus a second line when this exe (run from the
+/// install folder) is left for the next restart.
+fn uninstall_done_line(plan: &Plan, remove_data: bool, reboot_pending: bool) -> String {
+    let mut line = if remove_data {
+        "제거 완료(데이터 포함).".to_string()
+    } else {
+        format!(
+            "제거 완료. 데이터는 {} 에 남아 있습니다(지우려면 --remove-data).",
+            plan.data_root.as_deref().unwrap_or_default()
+        )
+    };
+    if reboot_pending {
+        line.push_str("\n설치 폴더의 남은 파일은 다시 시작할 때 지워집니다.");
+    }
+    line
 }
 
 /// Standard output (`Stderr`: standard error) that never fails and never panics: when the reader
@@ -236,16 +265,18 @@ fn failure_text(output: &[u8]) -> String {
         .map_or_else(|| "실패했습니다.".to_string(), |l| l.to_string())
 }
 
-/// `install` / `audit-policy` after the plan is built: argument errors are `오류: …` + 2,
-/// `--dry-run` prints the plan, otherwise the plan runs (0, or 1 at the first failure). With
-/// `--interactive` the result is also shown in a message box.
+/// `install` / `uninstall` / `audit-policy` after the plan is built: argument errors are
+/// `오류: …` + 2, `--dry-run` prints the plan, otherwise the plan runs (0, or 1 at the first
+/// failure) from System32 (a folder that is the current folder cannot be removed or moved). With
+/// `--interactive` the result is also shown in a message box. `done` makes the last line from the
+/// plan and whether files were left for the next restart.
 fn run_installer(
     built: Result<Plan, ArgError>,
     dry_run: bool,
     interactive: bool,
     host: &dyn Host,
     elevator: &dyn Elevator,
-    done: impl Fn(&Plan) -> String,
+    done: impl Fn(&Plan, bool) -> String,
 ) -> i32 {
     let plan = match built {
         Ok(plan) => plan,
@@ -260,6 +291,10 @@ fn run_installer(
     if dry_run {
         return print_dry_run(&plan, &mut Stdout, &mut Stderr);
     }
+    // Unit tests share one process (and its current folder) with every other test.
+    if !cfg!(test) {
+        let _ = std::env::set_current_dir(winutil::system_dir());
+    }
     let mut ex = RealExecutor::new(&plan, host, SystemRunner, Stdout);
     let mut out = Tee {
         inner: Stdout,
@@ -267,7 +302,7 @@ fn run_installer(
     };
     let code = run_plan(&plan, &mut ex, &mut out);
     if code == 0 {
-        let line = done(&plan);
+        let line = done(&plan, ex.reboot_pending());
         out_line(&line);
         if interactive {
             elevator.info_box(&line);
@@ -394,7 +429,7 @@ mod tests {
         let f = FakeElevator::new(false, Ok(0));
         assert_eq!(run_with(args(&["--version"]), &f), 0);
         assert_eq!(run_with(args(&[]), &f), 2);
-        assert_eq!(run_with(args(&["uninstall"]), &f), 2);
+        assert_eq!(run_with(args(&["uninstall", "--bogus"]), &f), 2);
         assert_eq!(run_with(args(&["--version", "extra"]), &f), 2);
         assert_eq!(run_with(args(&["install", "--bogus"]), &f), 2);
         assert!(f.launched.borrow().is_empty() && f.boxes.borrow().is_empty());
@@ -618,6 +653,69 @@ mod tests {
         );
         plan.steps.clear();
         assert!(install_done_line(&plan).contains("127.0.0.1:8700/"));
+    }
+
+    #[test]
+    fn the_uninstall_line_says_where_the_data_stays_and_what_waits_for_a_restart() {
+        let plan = Plan {
+            script: "uninstall".into(),
+            version: None,
+            layout: None,
+            install_dir: Some(r"C:\Program Files\MCP Monitor".into()),
+            data_root: Some(r"D:\MCP Data".into()),
+            service_mode: None,
+            steps: vec![],
+            notes: vec![],
+        };
+        assert_eq!(
+            uninstall_done_line(&plan, false, false),
+            r"제거 완료. 데이터는 D:\MCP Data 에 남아 있습니다(지우려면 --remove-data)."
+        );
+        assert_eq!(
+            uninstall_done_line(&plan, true, false),
+            "제거 완료(데이터 포함)."
+        );
+        assert_eq!(
+            uninstall_done_line(&plan, true, true),
+            "제거 완료(데이터 포함).\n설치 폴더의 남은 파일은 다시 시작할 때 지워집니다."
+        );
+    }
+
+    /// An argument error never runs anything: `오류: …`, 2, and with `--interactive` a box.
+    #[test]
+    fn an_uninstall_argument_error_exits_2_and_shows_a_box_when_interactive() {
+        let dir = crate::install::testutil::Scratch::new();
+        let inst = dir.path().join("i");
+        let data = inst.join("var");
+        let (inst, data) = (inst.to_str().unwrap(), data.to_str().unwrap());
+        // `elevated: true` = no relaunch.
+        let f = FakeElevator::new(true, Ok(0));
+        let a = [
+            "uninstall",
+            "--install-dir",
+            inst,
+            "--data-root",
+            data,
+            "--interactive",
+        ];
+        assert_eq!(run_with(args(&a), &f), 2);
+        let boxes = f.boxes.borrow();
+        assert!(
+            boxes.len() == 1 && boxes[0].contains("--remove-data로 함께 지우기"),
+            "{boxes:?}"
+        );
+        let f = FakeElevator::new(false, Ok(0));
+        let a = [
+            "uninstall",
+            "--dry-run",
+            "--install-dir",
+            inst,
+            "--data-root",
+            data,
+            "--remove-data",
+        ];
+        assert_eq!(run_with(args(&a), &f), 0);
+        assert!(f.boxes.borrow().is_empty() && f.launched.borrow().is_empty());
     }
 
     #[test]

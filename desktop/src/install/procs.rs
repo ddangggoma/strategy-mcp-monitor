@@ -32,11 +32,11 @@ const WAIT_MS: u32 = 5000;
 const APP_IMAGES: [&str; 2] = ["mcp-monitor.exe", "mcp-monitor-server.exe"];
 
 /// The pids of `procs` (pid, full image path) whose image lies inside `install_dir` (ignoring
-/// case), without `own_pid`.
-pub fn select_app_processes(procs: &[(u32, String)], install_dir: &Path, own_pid: u32) -> Vec<u32> {
+/// case), without the pids in `keep`.
+pub fn select_app_processes(procs: &[(u32, String)], install_dir: &Path, keep: &[u32]) -> Vec<u32> {
     procs
         .iter()
-        .filter(|(pid, image)| *pid != own_pid && is_inside(Path::new(image), install_dir))
+        .filter(|(pid, image)| !keep.contains(pid) && is_inside(Path::new(image), install_dir))
         .map(|(pid, _)| *pid)
         .collect()
 }
@@ -139,22 +139,25 @@ fn running_processes() -> Result<(Vec<(u32, String)>, Vec<(u32, String)>), Strin
 }
 
 /// Ends (`TerminateProcess`, exit code 1) every process whose image lies in `install_dir`, other
-/// than this one, and waits up to 5 s for each. A process named like ours that cannot be looked
-/// into is an error, not a skip (F07): it may hold the folder.
+/// than this one and the non-elevated copy of this exe that waits for it (an `--interactive`
+/// uninstall started from the installed `mcp-monitor.exe` by Apps & features), and waits up to
+/// 5 s for each. A process named like ours that cannot be looked into is an error, not a skip
+/// (F07): it may hold the folder.
 pub fn stop_apps(install_dir: &Path) -> Result<(), String> {
     enable_debug_privilege();
-    let own = std::process::id();
+    let keep: Vec<u32> = std::iter::once(std::process::id())
+        .chain(crate::winutil::same_exe_parent())
+        .collect();
     let (readable, unreadable) = running_processes()?;
-    if let Some((pid, name)) = unreadable
-        .iter()
-        .find(|(pid, name)| *pid != own && APP_IMAGES.iter().any(|a| a.eq_ignore_ascii_case(name)))
-    {
+    if let Some((pid, name)) = unreadable.iter().find(|(pid, name)| {
+        !keep.contains(pid) && APP_IMAGES.iter().any(|a| a.eq_ignore_ascii_case(name))
+    }) {
         return Err(format!(
             "{pid} {name} 을(를) 열 수 없어 설치 폴더의 프로그램인지 확인하지 못했습니다"
         ));
     }
     let mut ended = Vec::new();
-    for pid in select_app_processes(&readable, install_dir, own) {
+    for pid in select_app_processes(&readable, install_dir, &keep) {
         let image = readable
             .iter()
             .find(|(p, _)| *p == pid)
@@ -206,9 +209,21 @@ mod tests {
             ),
         ];
         assert_eq!(
-            select_app_processes(&procs, Path::new(r"C:\Program Files\MCP Monitor"), 14),
+            select_app_processes(&procs, Path::new(r"C:\Program Files\MCP Monitor"), &[14]),
             [10, 12]
         );
+        // An --interactive uninstall from the installed exe: the waiting non-elevated copy (10)
+        // is kept too.
+        assert_eq!(
+            select_app_processes(
+                &procs,
+                Path::new(r"C:\Program Files\MCP Monitor"),
+                &[14, 10]
+            ),
+            [12]
+        );
+        // The test exe was started by cargo, not by a copy of itself.
+        assert_eq!(crate::winutil::same_exe_parent(), None);
     }
 
     /// `cmd.exe /d /k` waiting for commands on a pipe that stays open: a process that runs until

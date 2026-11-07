@@ -72,8 +72,9 @@ pub trait Executor {
 
 pub const ADMIN_MESSAGE: &str = "관리자 권한으로 다시 실행하세요. (mcp-monitor.exe를 마우스 오른쪽 단추로 눌러 \"관리자 권한으로 실행\" 또는 관리자 PowerShell)";
 
-/// The steps with a follow-up: after `stop_existing` the service must have stopped.
-pub const AFTER_STEPS: &[&str] = &["stop_existing"];
+/// The steps with a follow-up: after `stop_existing` (install) and `stop_service` (uninstall) the
+/// service must have stopped within 60 s.
+pub const AFTER_STEPS: &[&str] = &["stop_existing", "stop_service"];
 
 /// `Invoke-Plan`: `[i/n] <id>` per step (`[i/n] <id>: 건너뜀 (<when> 아님)` when its condition is
 /// false); stops at the first failure with `[실패] <id>: <why>` and 1, or [`ADMIN_MESSAGE`] and 1.

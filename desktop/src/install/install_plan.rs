@@ -40,7 +40,7 @@ pub(crate) fn owners(h: &dyn Host) -> Vec<String> {
     vec![SYSTEM.to_string(), ADMINISTRATORS.to_string(), h.user_sid()]
 }
 
-fn env_folder(h: &dyn Host, option: &str, var: &str) -> Result<String, ArgError> {
+pub(crate) fn env_folder(h: &dyn Host, option: &str, var: &str) -> Result<String, ArgError> {
     h.env()
         .get(var)
         .map(|v| format!(r"{v}\MCP Monitor"))
@@ -168,7 +168,7 @@ pub fn service_folders(bin_path: &str) -> Option<ServiceFolders> {
 }
 
 /// A port recorded in an earlier install's JSON (`None`: missing or not a port).
-fn recorded_port(v: Option<&Value>, key: &str) -> Option<u16> {
+pub(crate) fn recorded_port(v: Option<&Value>, key: &str) -> Option<u16> {
     v?.get(key)?
         .as_u64()
         .and_then(|p| u16::try_from(p).ok())

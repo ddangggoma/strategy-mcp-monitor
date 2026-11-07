@@ -309,10 +309,16 @@ fn same_path(a: &Path, b: &Path) -> bool {
 /// [`elevate_and_wait`] started. That copy never relaunches itself again, even if "runas" did not
 /// elevate it (UAC turned off for a standard user): no endless chain of waiting processes.
 pub fn parent_is_same_exe() -> bool {
-    let (Some(parent), Ok(me)) = (parent_process_id(), std::env::current_exe()) else {
-        return false;
-    };
-    process_image(parent).is_some_and(|image| same_path(&image, &me))
+    same_exe_parent().is_some()
+}
+
+/// The pid of the process that started this one when it runs this same exe (the non-elevated copy
+/// waiting in [`elevate_and_wait`]); `None` otherwise.
+pub fn same_exe_parent() -> Option<u32> {
+    let (parent, me) = (parent_process_id()?, std::env::current_exe().ok()?);
+    process_image(parent)
+        .is_some_and(|image| same_path(&image, &me))
+        .then_some(parent)
 }
 
 /// Turns a `ShellExecuteExW` failure into the Korean message the user sees.

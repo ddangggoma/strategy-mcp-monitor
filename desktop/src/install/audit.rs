@@ -121,6 +121,26 @@ fn entry_value(v: &Value) -> String {
     }
 }
 
+/// The `(reg-restore)` entries (`<value>=<before>`) recorded below data root `d`: by install
+/// (`install-state.json`), else by an earlier `audit-policy --enable` (`audit-policy-state.json`)
+/// (F15). None recorded (or unreadable): empty.
+pub(crate) fn recorded_registry_entries(d: &Path) -> Vec<String> {
+    ["install-state.json", "audit-policy-state.json"]
+        .into_iter()
+        .find_map(|name| {
+            read_json(&d.join("data").join(name))?
+                .get("registry_before")?
+                .as_object()
+                .cloned()
+        })
+        .map(|m| {
+            m.iter()
+                .map(|(k, v)| format!("{k}={}", entry_value(v)))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// `audit-policy.ps1`'s plan. `--enable`: the data root as `install` makes it, the registry values
 /// recorded once before anything changes, then [`AUDIT_STEPS`]. `--restore <f>`: `auditpol /restore`
 /// and the registry values recorded by install (`install-state.json`) or by an earlier `--enable`
@@ -137,7 +157,6 @@ pub fn build_audit_plan(a: &AuditArgs, h: &dyn Host) -> Result<Plan, ArgError> {
     };
     let d = full_path(&raw).map_err(|e| argument("--data-root", &e))?;
     let data = d.display().to_string();
-    let install_state = d.join("data").join("install-state.json");
     let audit_state = d.join("data").join("audit-policy-state.json");
     let mut notes = Vec::new();
     let mut steps = vec![Step::new("require_admin", "(admin)", vec![])];
@@ -173,21 +192,7 @@ pub fn build_audit_plan(a: &AuditArgs, h: &dyn Host) -> Result<Plan, ArgError> {
                 &format!("백업 파일 {} 이(가) 없습니다.", file.display()),
             ));
         }
-        let recorded = [&install_state, &audit_state].into_iter().find_map(|p| {
-            read_json(p)?
-                .get("registry_before")
-                .cloned()
-                .filter(Value::is_object)
-        });
-        let entries = recorded
-            .as_ref()
-            .and_then(Value::as_object)
-            .map(|m| {
-                m.iter()
-                    .map(|(k, v)| format!("{k}={}", entry_value(v)))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let entries = recorded_registry_entries(&d);
         steps.push(Step::new(
             "restore_audit_policy",
             "auditpol",
