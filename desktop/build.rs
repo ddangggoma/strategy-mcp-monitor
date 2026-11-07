@@ -59,9 +59,24 @@ fn embed_payload() {
     fs::write(out.join("payload-kind.txt"), kind).unwrap();
 }
 
+/// The manifest goes in through the linker for every linked target, not through tauri-build's
+/// resource file (which reaches binaries only): the test executables link the Tauri runtime too
+/// (Task 11), and without the Common-Controls v6 dependency they exit 0xC0000139
+/// (`comctl32!TaskDialogIndirect`) before `main`. `/MANIFESTUAC:NO`: the trustInfo is ours.
+fn embed_manifest() {
+    let path = PathBuf::from(env::var("OUT_DIR").unwrap()).join("mcp-monitor.exe.manifest");
+    fs::write(&path, APP_MANIFEST).unwrap();
+    if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
+        println!("cargo:rustc-link-arg=/MANIFESTINPUT:{}", path.display());
+        println!("cargo:rustc-link-arg=/MANIFESTUAC:NO");
+    }
+}
+
 fn main() {
     embed_payload();
-    let windows = tauri_build::WindowsAttributes::new().app_manifest(APP_MANIFEST);
+    embed_manifest();
+    let windows = tauri_build::WindowsAttributes::new_without_app_manifest();
     tauri_build::try_build(tauri_build::Attributes::new().windows_attributes(windows))
         .expect("tauri-build failed");
 }
