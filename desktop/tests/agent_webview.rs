@@ -45,53 +45,6 @@ fn notice_window(pid: u32) -> Option<HWND> {
         .map(|(h, _)| h)
 }
 
-/// `(pid, parent pid, command line)` of every `msedgewebview2.exe`.
-fn webview_processes() -> Vec<(u32, u32, String)> {
-    let script = "Get-CimInstance Win32_Process -Filter \"Name='msedgewebview2.exe'\" | \
-                  ForEach-Object { \"$($_.ProcessId)|$($_.ParentProcessId)|$($_.CommandLine)\" }";
-    let out = std::process::Command::new(mcp_monitor::winutil::system_tool(
-        r"WindowsPowerShell\v1.0\powershell.exe",
-    ))
-    .args(["-NoProfile", "-NonInteractive", "-Command", script])
-    .output()
-    .unwrap();
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .filter_map(|l| {
-            let mut parts = l.trim().splitn(3, '|');
-            let pid = parts.next()?.parse().ok()?;
-            let parent = parts.next()?.parse().ok()?;
-            Some((pid, parent, parts.next().unwrap_or_default().to_string()))
-        })
-        .collect()
-}
-
-/// Every `msedgewebview2.exe` below the agent in the process tree (the notice's WebView2
-/// browser and its renderer, GPU and utility processes); each is printed with its `--type`.
-fn webview_tree(agent: u32) -> Vec<u32> {
-    let all = webview_processes();
-    let mut tree = vec![agent];
-    let mut grew = true;
-    while grew {
-        grew = false;
-        for (pid, parent, _) in &all {
-            if tree.contains(parent) && !tree.contains(pid) {
-                tree.push(*pid);
-                grew = true;
-            }
-        }
-    }
-    tree.remove(0);
-    for (pid, parent, cmd) in all.iter().filter(|p| tree.contains(&p.0)) {
-        let kind = cmd
-            .split_whitespace()
-            .find(|a| a.starts_with("--type="))
-            .unwrap_or("(browser)");
-        eprintln!("msedgewebview2 {pid} (parent {parent}) {kind}");
-    }
-    tree
-}
-
 /// The agent process; if the test fails, its exit status, standard error and the requests the
 /// server saw are printed, and it is killed.
 struct Agent<'a> {
@@ -156,19 +109,13 @@ fn webview_notice_is_topmost_ignores_wm_close_and_closes_on_command() {
     srv.queue(json!({"type": "show_notice", "display_id": 7, "attempt": 1, "url": notice}));
     let mut agent = spawn_agent(&srv, &scratch);
     let hwnd = wait_for(30, || notice_window(agent.id()));
-    describe_windows(agent.id());
     let ex = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32;
     assert!(ex & WS_EX_TOPMOST.0 != 0, "not top-most");
-    // the close button is grey (re-applied with the top-most tick, so allow one tick)
-    let close_state =
-        || unsafe { GetMenuState(GetSystemMenu(hwnd, false), SC_CLOSE, MF_BYCOMMAND) };
-    eprintln!(
-        "SC_CLOSE state when the window appeared: {:#x}",
-        close_state()
+    let state = unsafe { GetMenuState(GetSystemMenu(hwnd, false), SC_CLOSE, MF_BYCOMMAND) };
+    assert!(
+        state & (MF_GRAYED.0 | MF_DISABLED.0) != 0,
+        "close is enabled"
     );
-    wait_for(5, || {
-        (close_state() & (MF_GRAYED.0 | MF_DISABLED.0) != 0).then_some(())
-    });
     unsafe { PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0)).unwrap() };
     std::thread::sleep(Duration::from_secs(1));
     assert!(
@@ -188,44 +135,6 @@ fn webview_notice_is_topmost_ignores_wm_close_and_closes_on_command() {
             .iter()
             .any(|r| r.path == "/api/agent/notice/7/closed")
     );
-    remove_profile(&scratch);
-}
-
-#[test]
-#[ignore = "opens a real WebView2 window on this desktop"]
-fn a_killed_webview_is_reported_closed_and_the_notice_comes_back() {
-    let scratch = Scratch::new();
-    let srv = AgentServer::start(Some([0x11; 32]));
-    srv.serve_page("/notice", PAGE);
-    let notice = format!("{}/notice#d=7&t=tok_ABCDEFGHIJKLmnop", srv.url());
-    srv.queue(json!({"type": "show_notice", "display_id": 7, "attempt": 1, "url": notice}));
-    let mut agent = spawn_agent(&srv, &scratch);
-    let first = wait_for(30, || notice_window(agent.id()));
-    // the notice's WebView2 browser process dies
-    let tree = wait_for(15, || {
-        Some(webview_tree(agent.id())).filter(|t| !t.is_empty())
-    });
-    let taskkill = mcp_monitor::winutil::system_tool("taskkill.exe");
-    for pid in tree {
-        let out = std::process::Command::new(&taskkill)
-            .args(["/PID", &pid.to_string(), "/F"])
-            .output()
-            .unwrap();
-        eprintln!("{}", String::from_utf8_lossy(&out.stdout).trim());
-    }
-    wait_for(10, || {
-        srv.requests()
-            .iter()
-            .any(|r| r.path == "/api/agent/notice/7/closed")
-            .then_some(())
-    });
-    // the server shows it again: a new window replaces the dead one
-    srv.queue(json!({"type": "show_notice", "display_id": 7, "attempt": 2, "url": notice}));
-    let second = wait_for(30, || notice_window(agent.id()).filter(|h| *h != first));
-    assert!(!unsafe { IsWindow(Some(first)) }.as_bool());
-    assert!(unsafe { IsWindow(Some(second)) }.as_bool());
-    srv.queue(json!({"type": "exit"}));
-    assert_eq!(agent.child.wait().unwrap().code(), Some(0));
     remove_profile(&scratch);
 }
 

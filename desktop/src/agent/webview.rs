@@ -355,8 +355,8 @@ fn bring_to_front(hwnd: windows::Win32::Foundation::HWND) {
 }
 
 /// Greys the close item of the window menu (the title bar's close button). Tao does this once for
-/// `closable(false)`, but the item was found enabled again on the CI runner, so the notice
-/// re-applies it at creation and on every top-most tick.
+/// `closable(false)`, but it was once found enabled on the CI runner (two notices at once), so the
+/// notice re-applies it after creation and on every top-most tick.
 fn disable_close(hwnd: windows::Win32::Foundation::HWND) {
     use windows::Win32::UI::WindowsAndMessaging::{
         EnableMenuItem, GetSystemMenu, MF_BYCOMMAND, MF_GRAYED, SC_CLOSE,
