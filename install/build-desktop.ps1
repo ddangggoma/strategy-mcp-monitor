@@ -11,8 +11,11 @@
      Without it nothing is signed (D5: no certificate).
   3. cargo audit (-SkipAudit: a warning only).
   4. MCPMON_PAYLOAD_DIR=<Payload> cargo build --release --locked, with no features (dev stays off, Y24).
-  5. Checks: --version is "mcp-monitor <version> (payload <12 hex>, release)", DependentLoadFlags 0x800
-     (dumpbin /loadconfig), verify-payload extracts into a scratch folder under %LOCALAPPDATA% and the
+  0. A RUSTFLAGS, CARGO_ENCODED_RUSTFLAGS, CARGO_BUILD_RUSTFLAGS or CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS
+     variable is refused: it would replace desktop\.cargo\config.toml's rustflags.
+  5. Checks: --version is "mcp-monitor <version> (payload <12 hex>, release)", DependentLoadFlags is exactly 0x800
+     (dumpbin /loadconfig, read as a number), no C runtime DLL import (dumpbin /dependents: +crt-static),
+     verify-payload extracts into a scratch folder under %LOCALAPPDATA% and the
      embedded server answers --version (the scratch folder is removed).
   6. -SignThumbprint: signs mcp-monitor.exe; otherwise "NOTE: not signed".
   7. <Out>\mcp-monitor-<version>.exe and .sha256 ("<hash>  <name>`n", no BOM).
@@ -38,8 +41,30 @@ if (-not $Payload) { $Payload = Join-Path $Repo "dist\payload" }
 $Payload = [System.IO.Path]::GetFullPath($(if ([System.IO.Path]::IsPathRooted($Payload)) { $Payload } else { Join-Path (Get-Location).Path $Payload }))
 if (-not $Out) { $Out = Join-Path $Repo "dist" }
 if ($SignThumbprint -and -not $TimestampUrl) { throw "-SignThumbprint needs -TimestampUrl" }
+# Review item 10: any of these replaces the rustflags of desktop\.cargo\config.toml (+crt-static and
+# /DEPENDENTLOADFLAG:0x800, Y2/Y5) without a word, so a release build refuses them.
+foreach ($name in @("RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS", "CARGO_BUILD_RUSTFLAGS", "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS")) {
+    if ([Environment]::GetEnvironmentVariable($name)) {
+        throw "$name is set: it would replace the rustflags of desktop\.cargo\config.toml (+crt-static, /DEPENDENTLOADFLAG:0x800). Unset it and run again."
+    }
+}
 
 function Write-Step([string]$Message) { Write-Host "==> $Message" }
+
+# The DependentLoadFlags value of `dumpbin /loadconfig` output (a hex number before "Dependent Load Flag"), or
+# $null when there is none. Read as a number: 0x1800 or 0xA800 are not 0x800 (review item 10).
+function Get-DependentLoadFlag([string]$LoadConfig) {
+    $m = [regex]::Match($LoadConfig, '(?m)^\s*([0-9A-Fa-f]+)\s+Dependent Load Flag\s*$')
+    if (-not $m.Success) { return $null }
+    return [Convert]::ToInt32($m.Groups[1].Value, 16)
+}
+
+# The C runtime DLLs in `dumpbin /dependents` output (VCRUNTIME*.dll, MSVCP*.dll, ucrtbase.dll, api-ms-win-crt-*.dll):
+# none in a +crt-static build.
+function Get-CrtImports([string]$Dependents) {
+    return @([regex]::Matches($Dependents, '(?im)^\s*((?:vcruntime|msvcp)[0-9_a-z]*\.dll|ucrtbased?\.dll|api-ms-win-crt-[0-9a-z-]+\.dll)\s*$') |
+        ForEach-Object { $_.Groups[1].Value })
+}
 
 # Runs a native command; a non-zero exit code throws. Native stderr (cargo progress) is not an error by
 # itself, so the preference is relaxed for the call only.
@@ -121,8 +146,12 @@ $Exe = Join-Path $Desktop "target\release\mcp-monitor.exe"
 Write-Step "checks"
 $line = Get-NativeOutput "mcp-monitor --version" $Exe @("--version")
 if ($line -notmatch "^mcp-monitor $([regex]::Escape($Version)) \(payload [0-9a-f]{12}, release\)$") { throw "unexpected --version: $line" }
-$loadConfig = Get-NativeOutput "dumpbin /loadconfig" (Find-VsTool "dumpbin.exe") @("/loadconfig", $Exe)
-if ($loadConfig -notmatch "800 Dependent Load Flag") { throw "DependentLoadFlags is not 0x800 (System32 only)" }
+$dumpbin = Find-VsTool "dumpbin.exe"
+$loadConfig = Get-NativeOutput "dumpbin /loadconfig" $dumpbin @("/loadconfig", $Exe)
+$flag = Get-DependentLoadFlag $loadConfig
+if ($flag -ne 0x800) { throw "DependentLoadFlags is $(if ($null -eq $flag) { 'missing' } else { '0x{0:X}' -f $flag }), not 0x800 (System32 only)" }
+$crt = @(Get-CrtImports (Get-NativeOutput "dumpbin /dependents" $dumpbin @("/dependents", $Exe)))
+if ($crt.Count -gt 0) { throw "the exe imports the C runtime ($($crt -join ', ')): it must be built with +crt-static" }
 $checkRoot = Join-Path $env:LOCALAPPDATA "mcp-monitor-build"
 $check = Join-Path $checkRoot ([guid]::NewGuid().ToString("N").Substring(0, 12))
 try {

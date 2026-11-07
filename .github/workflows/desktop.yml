@@ -192,12 +192,26 @@ jobs:
           key: desktop-release-${{ runner.os }}-1.99.1-${{ hashFiles('desktop/Cargo.lock') }}
           restore-keys: desktop-release-${{ runner.os }}-1.99.1-
 
-      - name: Install cargo-audit 0.22.2
+      - name: Version of this build (desktop/Cargo.toml)
+        # Review item 21: the release file names come from Cargo.toml, not a literal.
+        working-directory: .
         run: |
-          if (-not (Get-Command cargo-audit -ErrorAction SilentlyContinue)) {
-            cargo install cargo-audit --version 0.22.2 --locked
+          $m = Select-String -Path desktop/Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1
+          if (-not $m) { throw "no version in desktop/Cargo.toml" }
+          $v = $m.Matches[0].Groups[1].Value
+          "MCPMON_VERSION=$v" >> $env:GITHUB_ENV
+          Write-Host "version $v"
+
+      - name: Install cargo-audit 0.22.2
+        # Review item 20: a cached cargo-audit.exe (restore-keys may bring an older entry) is used
+        # only when it is exactly 0.22.2.
+        run: |
+          $have = if (Get-Command cargo-audit -ErrorAction SilentlyContinue) { (cargo audit --version) } else { "" }
+          if ("$have".Trim() -ne "cargo-audit 0.22.2") {
+            cargo install cargo-audit --version 0.22.2 --locked --force
           }
-          cargo audit --version
+          $have = (cargo audit --version)
+          if ("$have".Trim() -ne "cargo-audit 0.22.2") { throw "cargo audit --version: $have" }
 
       - name: Install Node 26.13.0
         uses: actions/setup-node@v5.0.0
@@ -233,8 +247,8 @@ jobs:
         # file via Start-Process -RedirectStandardOutput.
         working-directory: .
         run: |
-          $exe = '.\dist\mcp-monitor-1.1.0.exe'
-          $pattern = '^mcp-monitor 1\.1\.0 \(payload [0-9a-f]{12}, release\)$'
+          $exe = ".\dist\mcp-monitor-$env:MCPMON_VERSION.exe"
+          $pattern = '^mcp-monitor ' + [regex]::Escape($env:MCPMON_VERSION) + ' \(payload [0-9a-f]{12}, release\)$'
           $out = & $exe --version | Write-Output
           if ($LASTEXITCODE -ne 0) { throw "mcp-monitor --version (pipe) exited $LASTEXITCODE" }
           Write-Host "pipe: $out"
@@ -254,18 +268,18 @@ jobs:
         # The runner is elevated: the "install without admin" test skips with its reason (-rs).
         working-directory: server
         env:
-          MCPMON_DESKTOP_EXE: ${{ github.workspace }}\dist\mcp-monitor-1.1.0.exe
+          MCPMON_DESKTOP_EXE: ${{ github.workspace }}\dist\mcp-monitor-${{ env.MCPMON_VERSION }}.exe
         run: uv run python -m pytest -m desktop -v -rs
 
       - name: Server agent integration with the release exe
-        # The same bytes as dist\mcp-monitor-1.1.0.exe, under the name the desktop bundle runs
+        # The same bytes as dist\mcp-monitor-<version>.exe, under the name the desktop bundle runs
         # (tests.desktop_bundle_main needs mcp-monitor.exe).
         working-directory: server
         env:
           MCPMON_DESKTOP_EXE: ${{ github.workspace }}\desktop\target\release\mcp-monitor.exe
         run: |
           $a = (Get-FileHash $env:MCPMON_DESKTOP_EXE).Hash
-          $b = (Get-FileHash ..\dist\mcp-monitor-1.1.0.exe).Hash
+          $b = (Get-FileHash "..\dist\mcp-monitor-$env:MCPMON_VERSION.exe").Hash
           if ($a -ne $b) { throw "target\release\mcp-monitor.exe is not the built release exe" }
           uv run python -m pytest -m integration tests/test_integration_agent.py -v -rs
 
@@ -274,7 +288,7 @@ jobs:
         with:
           name: mcp-monitor-release-${{ github.sha }}
           path: |
-            dist/mcp-monitor-1.1.0.exe
-            dist/mcp-monitor-1.1.0.exe.sha256
+            dist/mcp-monitor-${{ env.MCPMON_VERSION }}.exe
+            dist/mcp-monitor-${{ env.MCPMON_VERSION }}.exe.sha256
           if-no-files-found: error
           retention-days: 7

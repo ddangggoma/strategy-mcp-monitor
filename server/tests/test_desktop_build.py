@@ -20,9 +20,32 @@ def ps_command(script: str) -> subprocess.CompletedProcess:
     return subprocess.run([*PS, "-Command", script], capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL)
 
 
-def build_desktop(*args: str) -> subprocess.CompletedProcess:
+def build_desktop(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     return subprocess.run([*PS, "-File", str(INSTALL / "build-desktop.ps1"), *args], capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", timeout=120, stdin=subprocess.DEVNULL)
+                          encoding="utf-8", errors="replace", timeout=120, stdin=subprocess.DEVNULL,
+                          env=None if env is None else {**os.environ, **env})
+
+
+def call_script_function(name: str, argument: str) -> str:
+    """Runs one function of build-desktop.ps1 (taken from the parsed script, without running the script) on
+    `argument`; the result is printed one value per line, or `<null>`."""
+    script = (
+        "$e = $null; $ast = [System.Management.Automation.Language.Parser]::ParseFile("
+        f"'{INSTALL / 'build-desktop.ps1'}', [ref]$null, [ref]$e); "
+        "$f = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and "
+        f"$n.Name -eq '{name}' }}, $true); "
+        ". ([scriptblock]::Create($f.Extent.Text)); "
+        f"$r = {name} ([System.IO.File]::ReadAllText($env:MCPMON_ARG)); "
+        "if ($null -eq $r) { '<null>' } else { $r | ForEach-Object { \"$_\" } }")
+    arg = Path(os.environ.get("TEMP", ".")) / f"mcpmon-build-arg-{os.getpid()}.txt"
+    arg.write_text(argument, encoding="utf-8")
+    try:
+        p = subprocess.run([*PS, "-Command", script], capture_output=True, text=True, timeout=120,
+                           stdin=subprocess.DEVNULL, env={**os.environ, "MCPMON_ARG": str(arg)})
+    finally:
+        arg.unlink()
+    assert p.returncode == 0, p.stdout + p.stderr
+    return p.stdout.strip()
 
 
 @pytest.mark.parametrize("name", ["build.ps1", "build-desktop.ps1"])
@@ -66,6 +89,47 @@ def test_a_release_build_refuses_the_fixture_payload(tmp_path):
     p = build_desktop("-SkipPayload", "-SkipAudit", "-Payload", str(payload))
     assert p.returncode != 0 and "is a development (fixture) payload" in p.stdout + p.stderr, p.stdout + p.stderr
     assert "==> cargo" not in p.stdout
+
+
+@pytest.mark.parametrize("name", ["RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS", "CARGO_BUILD_RUSTFLAGS",
+                                  "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS"])
+def test_a_rustflags_variable_is_refused_before_anything_is_built(name):
+    # Review item 10: it would replace .cargo/config.toml's +crt-static and /DEPENDENTLOADFLAG:0x800.
+    p = build_desktop("-SkipPayload", "-SkipAudit", env={name: "-C opt-level=1"})
+    out = p.stdout + p.stderr
+    assert p.returncode != 0 and f"{name} is set" in out, out
+    assert "==> " not in p.stdout
+
+
+LOAD_CONFIG = """
+            0000 Reserved
+             {flag} Dependent Load Flag
+        0000000000000000 Edit list
+"""
+
+
+@pytest.mark.parametrize(("flag", "value"), [("800", "2048"), ("1800", "6144"), ("A800", "43008"), ("0", "0")])
+def test_dependent_load_flag_is_read_as_a_number(flag, value):
+    # Review item 10: "1800" or "A800" contain "800" but add the application folder or the default dirs.
+    assert call_script_function("Get-DependentLoadFlag", LOAD_CONFIG.format(flag=flag)) == value
+    assert call_script_function("Get-DependentLoadFlag", "no load config here") == "<null>"
+    text = (INSTALL / "build-desktop.ps1").read_text("utf-8-sig")
+    assert "if ($flag -ne 0x800)" in text
+
+
+def test_c_runtime_imports_are_found():
+    dependents = """
+  Image has the following dependencies:
+
+    KERNEL32.dll
+    VCRUNTIME140.dll
+    api-ms-win-crt-runtime-l1-1-0.dll
+    ucrtbase.dll
+    WS2_32.dll
+"""
+    assert call_script_function("Get-CrtImports", dependents).splitlines() == [
+        "VCRUNTIME140.dll", "api-ms-win-crt-runtime-l1-1-0.dll", "ucrtbase.dll"]
+    assert call_script_function("Get-CrtImports", "    KERNEL32.dll\n    USER32.dll\n") == "<null>"
 
 
 def test_powershell_installer_is_retired():
