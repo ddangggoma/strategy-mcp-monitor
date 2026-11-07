@@ -211,6 +211,7 @@ pub fn on_notice_window_event(
     event: &tauri::WindowEvent,
     log: &Log,
 ) {
+    log(&format!("DEBUG window event {label}: {event:?}"));
     let state = registry
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -311,6 +312,7 @@ unsafe fn configure_webview(
         settings
             .cast::<ICoreWebView2Settings3>()?
             .SetAreBrowserAcceleratorKeysEnabled(spec.accelerator_keys)?;
+        log("DEBUG webview configured");
         let mut token = 0i64;
         webview.add_ProcessFailed(
             &ProcessFailedEventHandler::create(Box::new(move |_, args| {
@@ -783,7 +785,13 @@ mod tests {
             &log,
         );
         assert_eq!(
-            lines.lock().unwrap().as_slice(),
+            lines
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|l| !l.starts_with("DEBUG"))
+                .cloned()
+                .collect::<Vec<_>>(),
             ["notice window: gone without a close_notice"]
         );
         assert!(!ours.take_closed_by_user());
