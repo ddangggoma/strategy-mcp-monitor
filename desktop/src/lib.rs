@@ -307,12 +307,21 @@ impl<W: Write> Write for Tee<W> {
 fn failure_text(output: &[u8]) -> String {
     let text = String::from_utf8_lossy(output);
     let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
-    lines
-        .iter()
-        .rev()
-        .find(|l| l.starts_with("[실패]"))
-        .or(lines.last())
-        .map_or_else(|| "실패했습니다.".to_string(), |l| l.to_string())
+    match lines.iter().rposition(|l| l.starts_with("[실패]")) {
+        // The failure and the `[복구]` lines run_plan printed after it.
+        Some(i) => std::iter::once(lines[i])
+            .chain(
+                lines[i + 1..]
+                    .iter()
+                    .copied()
+                    .filter(|l| l.starts_with("[복구]")),
+            )
+            .collect::<Vec<_>>()
+            .join("\n"),
+        None => lines
+            .last()
+            .map_or_else(|| "실패했습니다.".to_string(), |l| l.to_string()),
+    }
 }
 
 /// `install` / `uninstall` / `audit-policy` after the plan is built: argument errors are
@@ -750,6 +759,11 @@ mod tests {
             "관리자 권한으로 다시 실행하세요."
         );
         assert_eq!(failure_text(b""), "실패했습니다.");
+        // Review item 4: the recovery line after the failure is shown too.
+        assert_eq!(
+            failure_text("[3/9] stop_apps\n[실패] stop_apps: x\n[복구] 이전 버전의 서비스를 다시 시작했습니다(sc.exe start mcp-monitor).\n".as_bytes()),
+            "[실패] stop_apps: x\n[복구] 이전 버전의 서비스를 다시 시작했습니다(sc.exe start mcp-monitor)."
+        );
         let mut plan = Plan {
             script: "install".into(),
             version: None,

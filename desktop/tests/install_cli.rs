@@ -190,6 +190,15 @@ fn dry_run_over_an_admin_only_data_root_exits_0_with_a_note() {
         .output()
         .unwrap();
     assert!(lock.status.success());
+    // As a throw-away standard user (CI, review I1) the lock above left an explicit entry for the
+    // account itself: remove it by name, so only SYSTEM and Administrators may read the folder.
+    let me = mcp_monitor::winutil::current_user_sid();
+    let unlock_me = std::process::Command::new(&icacls)
+        .arg(&root)
+        .args(["/remove:g", &format!("*{me}")])
+        .output()
+        .unwrap();
+    assert!(unlock_me.status.success());
     let dry = exe()
         .args(["install", "--dry-run", "--install-dir"])
         .arg(s.join("i"))

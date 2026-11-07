@@ -443,9 +443,13 @@ impl<R: Runner, W: Write> Executor for RealExecutor<'_, R, W> {
             }
             "(check-os)" => self.check_os(need(step, 0)?),
             "(stage)" => self.stage_payload(need(step, 0)?, need(step, 1)?),
-            "(stop-apps)" => stop_apps(Path::new(need(step, 0)?))
-                .map(|()| 0)
-                .map_err(StepError::Failed),
+            "(stop-apps)" => {
+                let ended = stop_apps(Path::new(need(step, 0)?)).map_err(StepError::Failed)?;
+                for (pid, image) in ended {
+                    let _ = writeln!(self.out, "  끝냄: {pid} {image}");
+                }
+                Ok(0)
+            }
             "(swap)" => swap(
                 Path::new(need(step, 0)?),
                 Path::new(need(step, 1)?),

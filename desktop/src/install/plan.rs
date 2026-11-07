@@ -81,6 +81,7 @@ pub const AFTER_STEPS: &[&str] = &["stop_existing", "stop_service"];
 /// Returns 0 when every step succeeded.
 pub fn run_plan(plan: &Plan, ex: &mut dyn Executor, out: &mut dyn Write) -> i32 {
     let n = plan.steps.len();
+    let mut done: Vec<&str> = Vec::new();
     for (i, s) in plan.steps.iter().enumerate() {
         let i = i + 1;
         if let Some(when) = &s.when
@@ -118,13 +119,66 @@ pub fn run_plan(plan: &Plan, ex: &mut dyn Executor, out: &mut dyn Write) -> i32 
             }
             Err(StepError::Failed(why)) => {
                 let _ = writeln!(out, "[실패] {}: {why}", s.id);
+                recover_install(plan, &done, &s.id, ex, out);
                 let _ = out.flush();
                 return 1;
             }
         }
+        done.push(&s.id);
         let _ = out.flush();
     }
     0
+}
+
+/// Review item 4: an install that stopped the running service (`stop_existing`) and then failed
+/// before `service_start` must not leave it down without a word. Before `swap_install_dir` the
+/// earlier install is whole, so its service is started again (`sc.exe start mcp-monitor`); after
+/// it, the earlier binPath may name a file that moved to `<I>.old` (an upgrade from 1.0.0), so
+/// the line says how to recover instead. Each outcome is one `[복구] …` line after `[실패]`.
+fn recover_install(
+    plan: &Plan,
+    done: &[&str],
+    failed: &str,
+    ex: &mut dyn Executor,
+    out: &mut dyn Write,
+) {
+    // A failed `service_start` / `wait_ready` is OPERATIONS ③ 5 (the new version may already have
+    // migrated the database): the earlier version is not started again.
+    if plan.script != "install"
+        || !done.contains(&"stop_existing")
+        || failed == "service_start"
+        || done.contains(&"service_start")
+    {
+        return;
+    }
+    let service = crate::install::host::SERVICE_NAME;
+    if !done.contains(&"swap_install_dir") {
+        let start = ex.native("sc.exe", &["start".to_string(), service.to_string()]);
+        let _ = match start {
+            Ok(0 | 1056) => writeln!(
+                out,
+                "[복구] 이전 버전의 서비스를 다시 시작했습니다(sc.exe start {service})."
+            ),
+            Ok(code) => writeln!(
+                out,
+                "[복구] 이전 버전의 서비스를 다시 시작하지 못했습니다(종료 코드 {code}). 원인을 고친 뒤 sc.exe start {service} 로 시작하거나, 같은 mcp-monitor.exe를 관리자 권한으로 다시 실행하세요."
+            ),
+            Err(StepError::Failed(why)) => writeln!(
+                out,
+                "[복구] 이전 버전의 서비스를 다시 시작하지 못했습니다({why}). 원인을 고친 뒤 sc.exe start {service} 로 시작하거나, 같은 mcp-monitor.exe를 관리자 권한으로 다시 실행하세요."
+            ),
+            Err(StepError::NotAdmin) => Ok(()),
+        };
+        return;
+    }
+    let old = plan
+        .install_dir
+        .as_deref()
+        .map_or_else(|| "<설치 폴더>.old".to_string(), |i| format!("{i}.old"));
+    let _ = writeln!(
+        out,
+        "[복구] 서비스가 멈춰 있습니다. 원인을 고친 뒤 같은 mcp-monitor.exe를 관리자 권한으로 다시 실행하세요(복구 설치). 이전 설치는 {old} 에 있습니다."
+    );
 }
 
 /// `-DryRun`: each note as `참고: <note>` on `err`, the plan as one compact JSON line on `out`, 0.
@@ -183,9 +237,14 @@ mod tests {
             }
             Ok(*self.codes.get(&s.id).unwrap_or(&0))
         }
-        fn native(&mut self, cmd: &str, _args: &[String]) -> Result<i32, StepError> {
+        fn native(&mut self, cmd: &str, args: &[String]) -> Result<i32, StepError> {
             self.log.push(cmd.into());
-            Ok(*self.codes.get(cmd).unwrap_or(&0))
+            let full = format!("{cmd} {}", args.join(" "));
+            Ok(*self
+                .codes
+                .get(&full)
+                .or_else(|| self.codes.get(cmd))
+                .unwrap_or(&0))
         }
         fn after(&mut self, id: &str) -> Result<(), StepError> {
             self.log.push(format!("after {id}"));
@@ -354,6 +413,128 @@ mod tests {
             String::from_utf8(out).unwrap(),
             "[1/2] stop_existing\n[실패] stop_existing: 서비스가 멈추지 않았습니다\n"
         );
+    }
+
+    /// An upgrade-shaped install plan: the service is stopped at step 2, the folders are swapped at
+    /// step 4, the service starts again at step 6.
+    fn upgrade() -> Plan {
+        let mut p = plan(vec![
+            st("require_admin", "(admin)", &[0], None),
+            Step {
+                args: vec!["stop".into(), "mcp-monitor".into()],
+                ..st(
+                    "stop_existing",
+                    "sc.exe",
+                    &[0, 1062],
+                    Some("service_exists"),
+                )
+            },
+            st("stop_apps", "(stop-apps)", &[0], None),
+            st("swap_install_dir", "(swap)", &[0], None),
+            st("secure_data_root", "(secure-data-root)", &[0], None),
+            Step {
+                args: vec!["start".into(), "mcp-monitor".into()],
+                ..st("service_start", "sc.exe", &[0, 1056], None)
+            },
+            st("wait_ready", "(wait)", &[0], None),
+        ]);
+        p.install_dir = Some(r"C:\Program Files\MCP Monitor".into());
+        p
+    }
+
+    fn run_failing(p: &Plan, failing: &str, sc_code: i32) -> (i32, Vec<String>, Vec<String>) {
+        let mut ex = FakeExec {
+            admin: true,
+            ..Default::default()
+        };
+        if failing == "service_start" {
+            ex.codes.insert("sc.exe start mcp-monitor".into(), 9);
+        } else {
+            ex.codes.insert(failing.into(), 9);
+            ex.codes.insert("sc.exe start mcp-monitor".into(), sc_code);
+        }
+        let mut out = Vec::new();
+        let code = run_plan(p, &mut ex, &mut out);
+        let lines = String::from_utf8(out)
+            .unwrap()
+            .lines()
+            .map(String::from)
+            .collect();
+        (code, lines, ex.log)
+    }
+
+    /// Review item 4: a failure after the service was stopped and before the folders were swapped
+    /// leaves the earlier install whole: its service is started again.
+    #[test]
+    fn a_failed_upgrade_before_the_swap_restarts_the_earlier_service() {
+        let (code, lines, log) = run_failing(&upgrade(), "stop_apps", 0);
+        assert_eq!(code, 1);
+        assert_eq!(
+            lines[3..],
+            [
+                "[실패] stop_apps: 종료 코드 9",
+                "[복구] 이전 버전의 서비스를 다시 시작했습니다(sc.exe start mcp-monitor)."
+            ]
+        );
+        assert_eq!(
+            log,
+            [
+                "require_admin",
+                "sc.exe",
+                "after stop_existing",
+                "stop_apps",
+                "sc.exe"
+            ]
+        );
+        // The restart itself fails: the exact commands to run by hand.
+        let (_, lines, _) = run_failing(&upgrade(), "stop_apps", 1053);
+        assert_eq!(
+            lines[4],
+            "[복구] 이전 버전의 서비스를 다시 시작하지 못했습니다(종료 코드 1053). 원인을 고친 뒤 sc.exe start mcp-monitor 로 시작하거나, 같은 mcp-monitor.exe를 관리자 권한으로 다시 실행하세요."
+        );
+    }
+
+    /// After the swap the earlier binPath may name a file that moved to `<I>.old` (a 1.0.0
+    /// upgrade): no restart, but the way back.
+    #[test]
+    fn a_failed_upgrade_after_the_swap_says_how_to_recover() {
+        let (code, lines, log) = run_failing(&upgrade(), "secure_data_root", 0);
+        assert_eq!(code, 1);
+        assert_eq!(
+            lines[5..],
+            [
+                "[실패] secure_data_root: 종료 코드 9",
+                r"[복구] 서비스가 멈춰 있습니다. 원인을 고친 뒤 같은 mcp-monitor.exe를 관리자 권한으로 다시 실행하세요(복구 설치). 이전 설치는 C:\Program Files\MCP Monitor.old 에 있습니다."
+            ]
+        );
+        assert_eq!(
+            log.iter().filter(|c| *c == "sc.exe").count(),
+            1,
+            "no start: {log:?}"
+        );
+    }
+
+    /// No recovery line when the service was never stopped (it did not exist, or the failure came
+    /// first), when the service start itself failed (OPERATIONS ③ 5), and for other plans.
+    #[test]
+    fn nothing_to_recover_otherwise() {
+        let (_, lines, _) = run_failing(&upgrade(), "require_admin", 0);
+        assert!(!lines.iter().any(|l| l.starts_with("[복구]")), "{lines:?}");
+        let mut ex = FakeExec {
+            admin: true,
+            ..Default::default()
+        };
+        ex.conds.insert("service_exists".into(), false);
+        ex.codes.insert("stop_apps".into(), 9);
+        let mut out = Vec::new();
+        assert_eq!(run_plan(&upgrade(), &mut ex, &mut out), 1);
+        assert!(!String::from_utf8(out).unwrap().contains("[복구]"));
+        let (_, lines, _) = run_failing(&upgrade(), "service_start", 0);
+        assert_eq!(lines.last().unwrap(), "[실패] service_start: 종료 코드 9");
+        let mut p = upgrade();
+        p.script = "uninstall".into();
+        let (_, lines, _) = run_failing(&p, "stop_apps", 0);
+        assert_eq!(lines.last().unwrap(), "[실패] stop_apps: 종료 코드 9");
     }
 
     #[test]

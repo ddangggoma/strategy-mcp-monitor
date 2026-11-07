@@ -142,8 +142,9 @@ fn running_processes() -> Result<(Vec<(u32, String)>, Vec<(u32, String)>), Strin
 /// than this one and the non-elevated copy of this exe that waits for it (an `--interactive`
 /// uninstall started from the installed `mcp-monitor.exe` by Apps & features), and waits up to
 /// 5 s for each. A process named like ours that cannot be looked into is an error, not a skip
-/// (F07): it may hold the folder.
-pub fn stop_apps(install_dir: &Path) -> Result<(), String> {
+/// (F07): it may hold the folder. Returns the (pid, image) of each process it ended (review item 5:
+/// the step prints them, and a test can tell "not selected" from "ended").
+pub fn stop_apps(install_dir: &Path) -> Result<Vec<(u32, String)>, String> {
     enable_debug_privilege();
     let keep: Vec<u32> = std::iter::once(std::process::id())
         .chain(crate::winutil::same_exe_parent())
@@ -175,13 +176,15 @@ pub fn stop_apps(install_dir: &Path) -> Result<(), String> {
         let _ = unsafe { TerminateProcess(process.0, 1) };
         ended.push((pid, image, process));
     }
+    let mut done = Vec::with_capacity(ended.len());
     for (pid, image, process) in ended {
         // SAFETY: a handle opened with PROCESS_SYNCHRONIZE.
         if unsafe { WaitForSingleObject(process.0, WAIT_MS) } != WAIT_OBJECT_0 {
             return Err(format!("{pid} {image} 이(가) 끝나지 않았습니다"));
         }
+        done.push((pid, image));
     }
-    Ok(())
+    Ok(done)
 }
 
 #[cfg(test)]
@@ -247,7 +250,27 @@ mod tests {
         std::fs::copy(crate::winutil::system_tool("cmd.exe"), &copy).unwrap();
         let mut inside = waiting_cmd(&copy);
         let mut outside = waiting_cmd(&crate::winutil::system_tool("cmd.exe"));
-        stop_apps(&inst).unwrap();
+        // Review item 5: both are running before stop_apps, and the copy's image is seen inside
+        // the install folder; otherwise a failure below would not say which part went wrong.
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(
+            inside.try_wait().unwrap().is_none(),
+            "the copy exited by itself: {:?}",
+            inside.try_wait()
+        );
+        let image = image_of(inside.id()).unwrap();
+        assert!(
+            is_inside(&image, &inst),
+            "image {} is not inside {}",
+            image.display(),
+            inst.display()
+        );
+        let ended = stop_apps(&inst).unwrap();
+        assert_eq!(
+            ended.iter().map(|(pid, _)| *pid).collect::<Vec<_>>(),
+            [inside.id()],
+            "{ended:?}"
+        );
         assert_eq!(
             inside.wait().unwrap().code(),
             Some(1),
@@ -260,6 +283,6 @@ mod tests {
         outside.kill().unwrap();
         outside.wait().unwrap();
         // Nothing left to end: still fine.
-        stop_apps(&inst).unwrap();
+        assert!(stop_apps(&inst).unwrap().is_empty());
     }
 }

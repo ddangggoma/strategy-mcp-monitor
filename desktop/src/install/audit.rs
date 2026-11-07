@@ -725,15 +725,7 @@ mod tests {
         let root = s.path().join("MCP Monitor");
         fs::create_dir_all(root.join("data")).unwrap();
         fs::write(root.join("data/mcp-monitor-data-root.json"), "{}").unwrap();
-        icacls(
-            &root,
-            &[
-                "/inheritance:r",
-                "/grant:r",
-                "*S-1-5-18:(OI)(CI)F",
-                "*S-1-5-32-544:(OI)(CI)F",
-            ],
-        );
+        lock_to_admins(&root);
         let p = build_audit_plan(
             &AuditArgs {
                 enable: true,

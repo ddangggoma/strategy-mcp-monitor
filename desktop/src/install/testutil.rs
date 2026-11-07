@@ -58,6 +58,27 @@ pub fn icacls(path: &Path, args: &[&str]) {
     );
 }
 
+/// An installed data root as a standard user sees it: only SYSTEM and Administrators on `path`
+/// (protected, no inherited entries). This account's own entry is removed by name too: as a
+/// throw-away standard user on the CI runner, `/inheritance:r /grant:r` alone left an explicit
+/// full-access entry for the account (review I1), and the folder stayed readable.
+pub fn lock_to_admins(path: &Path) {
+    icacls(
+        path,
+        &[
+            "/inheritance:r",
+            "/grant:r",
+            &format!("*{SYSTEM}:(OI)(CI)F"),
+            &format!("*{ADMINISTRATORS}:(OI)(CI)F"),
+        ],
+    );
+    icacls(path, &["/remove:g", &format!("*{}", me())]);
+    // The owner stays this account (O:…); the DACL must not name it.
+    let sddl = sddl(path);
+    let dacl = sddl.split_once("D:").map_or("", |(_, d)| d);
+    assert!(!dacl.contains(&me()), "{sddl}");
+}
+
 /// `icacls <path> /grant *S-1-5-11:<rights>` (Authenticated Users).
 pub fn grant(path: &Path, rights: &str) {
     icacls(
