@@ -91,7 +91,7 @@ $LASTEXITCODE
    - SAC는 파일마다 평판으로 판단합니다. 개발 PC(SAC 켜짐)에서는 릴리스 exe와 서버 exe가 막히지 않았지만, 다른 PC에서는 다를 수 있습니다. 설치 전에 `& .\mcp-monitor-1.1.0.exe --version | Write-Output`이 `mcp-monitor 1.1.0 (payload <12자리>, release)`를 출력하는지 봅니다.
    - 막히면: "이 앱의 일부가 차단되었습니다" 알림, 아무 반응 없음, 또는 설치 중 `[실패] service_start`. 이벤트 뷰어 `응용 프로그램 및 서비스 로그 → Microsoft → Windows → CodeIntegrity → Operational`에 차단 기록(3076/3077)이 남습니다.
    - 막혔을 때: SAC를 끄지 말고 개발팀에 알립니다. 정해 둔 대안은 (a) 코드 서명 인증서로 서명한 빌드(`install\build-desktop.ps1 -SignThumbprint …`), (b) 1.0.0 방식(PowerShell 설치 묶음, 커밋 c9938d1)입니다. SAC를 끄는 것은 기기 소유자의 보안 결정입니다.
-3. **WebView2 런타임.** Windows 11에는 기본으로 있습니다(Evergreen, 업데이트는 Windows가 함). 확인: `Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' -Name pv`. 없으면 설치의 `check_os`가 경고하고 설치는 계속합니다. 그 상태에서는 앱 창이 열리지 않고(오류 상자), 고지는 기본 브라우저로 엽니다(⑨).
+3. **WebView2 런타임.** Windows 11에는 기본으로 있습니다(Evergreen, 업데이트는 Windows가 함). 확인: `Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' -Name pv`(없으면 `WOW6432Node` 없는 같은 키). 두 키 모두에 버전이 없으면 설치의 `check_os`가 `경고: 이 PC에 설치된 WebView2 런타임을 확인하지 못했습니다 …`를 내고 설치는 계속합니다. 사용자별로만 설치된 런타임은 이 검사가 보지 못하므로, 그때는 경고가 나와도 창이 열립니다. 런타임이 정말 없으면 앱 창이 열리지 않고(오류 상자), 고지는 기본 브라우저로 엽니다(⑨).
 
 **방법 A — 더블클릭(보통은 이것)**
 
@@ -120,12 +120,12 @@ $LASTEXITCODE
 
 | 명령 | 옵션 | 동작 | 관리자 | 종료 코드 |
 |---|---|---|---|---|
-| (인자 없음) | — | 모드 판별 → 설치·업그레이드 안내 → 앱 창 | 안내에서 예일 때 UAC | 0, 1 |
-| `app` | `--background` | 앱 창과 트레이. `--background`면 창 없이 트레이만(로그인할 때 시작). 사용자당 하나만 뜨고, 두 번째 실행은 기존 창을 앞으로 가져옵니다 | 아니요 | 0, 1 |
+| (인자 없음) | — | 모드 판별 → 설치·업그레이드 안내 → 앱 창. 설치 폴더 안의 exe로는 설치·업그레이드를 안내하지 않고 "다운로드한 mcp-monitor-<버전>.exe로 실행하세요" 상자를 띄웁니다 | 안내에서 예일 때 UAC | 0, 1 |
+| `app` | `--background` | 앱 창과 트레이. `--background`면 창 없이 트레이만(로그인할 때 시작). 로그인 세션마다 하나만 뜨고, 두 번째 실행은 기존 창을 앞으로 가져옵니다. **관리자 권한으로 실행 중이면 창을 열지 않고**(인자 없는 실행 포함) `관리자 권한으로 실행 중이라 MCP Monitor 창을 열지 않습니다 …` 상자와 1로 끝납니다: 창·트레이·로그인 시작 항목은 사용자 권한으로만 돕니다 | 아니요 | 0, 1 |
 | `install` | `--install-dir`, `--data-root`, `--open-firewall`, `--skip-audit-policy`, `--local-port`, `--external-port`, `--dry-run`, `--interactive` | 설치·업그레이드·복구 설치 | 예(`--dry-run` 제외) | 0, 1, 2 |
 | `uninstall` | `--install-dir`, `--data-root`, `--remove-data`, `--restore-audit-policy`, `--dry-run`, `--interactive` | 제거(④) | 예(`--dry-run` 제외) | 0, 1, 2 |
 | `audit-policy` | `--enable` 또는 `--restore <백업 csv>`, `--data-root`, `--dry-run`, `--interactive` | 감사 정책만 켜기·되돌리기 | 예(`--dry-run` 제외) | 0, 1, 2 |
-| `agent` | `--server <url>`, `--dialog webview\|print`, `--url-file <파일>`, `--unreachable-exit-sec <초>` | 세션 에이전트. 서비스가 띄우며, 손으로 쓸 일은 없습니다 | 아니요 | 0, 2, 3, 4, 5 |
+| `agent` | `--server <url>`, `--dialog webview\|print`, `--url-file <파일>`, `--unreachable-exit-sec <초>` | 세션 에이전트. 서비스가 띄우며, 손으로 쓸 일은 없습니다. `--server`는 `http://` 주소만 받고(서비스는 늘 `http://127.0.0.1:<Local 포트>`를 줌), 호스트는 따로 막지 않습니다 | 아니요 | 0, 1(자기 세션 번호를 알 수 없음, `--dialog webview`), 2, 3, 4, 5 |
 | `autostart` | `on` 또는 `off` | `HKCU\…\Run\MCPMonitor`(이 사용자) 켜기·끄기. 설치돼 있어야 합니다 | 아니요 | 0, 1, 2 |
 | `verify-payload` | `<빈 폴더>` | 내장 묶음의 해시를 검사하고 그 폴더에 풉니다(설치 없이 서버 exe를 시험할 때). 비어 있지 않은 폴더는 거부 | 아니요 | 0, 1, 2 |
 | `--version` | — | `mcp-monitor <버전> (payload <해시 12자리>, release)` | 아니요 | 0 |
@@ -150,7 +150,7 @@ $LASTEXITCODE
 | 확인. `check_os`는 Home 에디션(RDP 호스트 아님), Program Files 밖의 설치 폴더, WebView2 런타임 없음을 **경고만** 하고 계속합니다 | `require_admin`, `check_os` |
 | 내장 묶음 풀기. 전체 해시 → 파일마다 크기·SHA-256, 매니페스트 밖 이름·`..`·절대 경로·링크 거부, 새 폴더 `<I>.staging`에만. 서비스는 아직 동작 중입니다 | `stage_payload` |
 | 기존 서비스 정지(멈출 때까지 최대 60초) | `stop_existing`(서비스가 있을 때) |
-| 설치 폴더 안의 exe로 도는 프로세스 종료(모든 세션의 앱·트레이, 남은 에이전트) | `stop_apps` |
+| 설치 폴더 안의 exe로 도는 프로세스 종료(모든 세션의 앱·트레이, 남은 에이전트). 끝낸 프로세스마다 `  끝냄: <pid> <경로>` 줄 | `stop_apps` |
 | 폴더 교체. `<I>` → `<I>.old`, `<I>.staging` → `<I>`. 새 폴더 트리를 관리자가 아닌 계정이 쓰거나 지우거나 권한을 바꿀 수 있으면 되돌리고 실패합니다 | `swap_install_dir` |
 | 데이터 폴더와 ACL. 루트의 ACL을 처음부터 새로 만들고(소유자 Administrators, 상속 끊음, SYSTEM·Administrators 모든 권한만), 그 아래는 모두 자기 ACE를 지우고 루트에서 상속만 받게 한 뒤, 다시 읽어 다른 ACE·소유자·정션이 하나라도 있으면 설치를 멈춥니다. SID로 지정하므로 한국어 Windows에서도 같습니다 | `secure_data_root` |
 | 감사 정책. 처음 한 번 백업한 뒤 하위 범주 GUID로 켭니다 | `audit_backup`(백업이 없을 때), `audit_policy_success`, `audit_policy_failure` |
@@ -190,8 +190,11 @@ $LASTEXITCODE
    1. 새 묶음을 `<I>.staging`에 풀고 검사합니다. 이때까지 서비스는 그대로 동작합니다.
    2. 서비스를 멈춥니다(최대 60초). 정지 순서는 ⑤와 같습니다(에이전트는 `exit`를 받고 고지 창을 닫음).
    3. 설치 폴더의 exe로 도는 프로세스를 끝냅니다: 모든 세션의 앱 창·트레이, 남은 에이전트. 실행 중인 exe는 폴더 이름 바꾸기를 막기 때문입니다.
-   4. `<I>`를 `<I>.old`로, `<I>.staging`을 `<I>`로 바꿉니다. 실패하면 이전 폴더를 되돌리고 `[실패] swap_install_dir`로 끝납니다(서비스는 이전 버전으로 다시 시작하지 않으므로 `sc.exe start mcp-monitor`로 켭니다).
+   4. `<I>`를 `<I>.old`로, `<I>.staging`을 `<I>`로 바꿉니다. 실패하면 이전 폴더를 되돌리고 `[실패] swap_install_dir`로 끝납니다.
    5. 데이터 루트·감사 정책·서비스 설정을 다시 맞추고, 서비스를 시작해 `/api/channel` 응답을 확인한 뒤 `<I>.old`를 지웁니다.
+   - **서비스를 멈춘 뒤, 다시 시작하기 전에 실패하면** 설치기가 `[실패]` 줄 다음에 `[복구] …` 한 줄을 냅니다(더블클릭이면 결과 상자에도 보임).
+     - 폴더를 바꾸기 전(`stop_apps`, `swap_install_dir`)이면 이전 설치가 그대로이므로 이전 버전의 서비스를 다시 시작합니다: `[복구] 이전 버전의 서비스를 다시 시작했습니다(sc.exe start mcp-monitor).` 다시 시작하지 못하면 `[복구] 이전 버전의 서비스를 다시 시작하지 못했습니다(종료 코드 N). …`이 나오고, 원인을 고친 뒤 `sc.exe start mcp-monitor` 또는 같은 exe로 다시 설치합니다.
+     - 폴더를 바꾼 뒤(`secure_data_root`, 감사 단계, `service_install` … `start_menu_shortcut`)면 `[복구] 서비스가 멈춰 있습니다. 원인을 고친 뒤 같은 mcp-monitor.exe를 관리자 권한으로 다시 실행하세요(복구 설치). 이전 설치는 <I>.old 에 있습니다.` 이때는 `sc.exe start mcp-monitor`로 켜지 않습니다: **1.0.0에서 올라오는 중이면 서비스 binPath가 아직 `<I>\bin\monitor\mcp-monitor.exe`(이제 `<I>.old` 안)를 가리켜 시작이 실패합니다**(1053/2). 같은 새 exe로 다시 설치하면 binPath를 고치고 서비스를 시작합니다. 1.0.0으로 돌아가야 하면 5의 3을 따릅니다.
 3. 그대로 남는 것: 데이터 루트(로그, 설정, 사용자, 스크립트), 감사 정책 백업(`auditpol-backup.csv`)과 바꾸기 전 레지스트리 값(`registry_before`)은 **첫 설치 때 것**, 포트와 방화벽 규칙.
 4. **낮은 버전으로는 설치하지 않습니다**(다운그레이드 거부). `install`은 `오류: --install-dir: 설치된 버전 …이 이 실행 파일(…)보다 새롭습니다 …`와 종료 코드 2. 더블클릭하면 "설치된 MCP Monitor(…)가 이 실행 파일(…)보다 새롭습니다" 안내 뒤 설치된 쪽의 앱 창을 엽니다. 같은 버전의 `install`은 **복구 설치**입니다(파일을 다시 풀고 설정을 다시 맞춤).
 5. **서비스 시작 뒤에 실패하면**(`[실패] service_start` 또는 `wait_ready`) `<I>.old`가 남고, 설치기는 자동으로 되돌리지 않습니다. 새 버전이 이미 `config.db`를 마이그레이션했을 수 있어서, 옛 버전으로 바꿔 끼우면 그 버전이 DB를 열지 못하기 때문입니다(종료 코드 5). 복구:
@@ -228,7 +231,10 @@ $LASTEXITCODE
 | `--dry-run` | 꺼짐 | 단계만 출력합니다(관리자 불필요) |
 | `--interactive` | 꺼짐 | 관리자가 아니면 UAC로 승격하고, 결과를 상자로 보여 줍니다 |
 
-**제거 단계**(기본 9단계, `--restore-audit-policy` +2, `--remove-data` +2): `require_admin`, `stop_service`, `delete_service`, `stop_apps`, `firewall_delete`, (`restore_audit_policy`, `restore_registry`), `remove_uninstall_entry`, `remove_shortcut`, `remove_run_values`, `remove_install_dir`, (`remove_data`, `remove_webview_profiles`).
+**제거 단계**(기본 11단계, `--restore-audit-policy` +2, `--remove-data` +2): `require_admin`, `stop_service`, `delete_service`, `stop_apps`, `firewall_delete`, (`restore_audit_policy`, `restore_registry`), `remove_uninstall_entry`, `remove_shortcut`, `remove_run_values`, `remove_install_dir`, `remove_old_install`, `remove_staging`, (`remove_data`, `remove_webview_profiles`).
+
+- `remove_old_install`과 `remove_staging`은 실패한 업그레이드가 남긴 `<I>.old`(이전 설치, `bundle.json`이 있을 때만)와 `<I>.staging`(설치기의 표시 파일이 있을 때만)을 지웁니다. 링크이거나 표시가 없으면 `건너뜀`으로 남겨 둡니다.
+- `remove_webview_profiles`는 사용자마다 `<사용자>`, `AppData`, `Local` 폴더를 지우는 동안 열어 두어(삭제 공유 없음), 그 사이에 사용자가 그 폴더를 다른 이름으로 바꾸고 정션을 놓을 수 없게 합니다.
 
 - **기본 동작은 데이터를 남깁니다**(W31). 서비스, 방화벽 규칙(설치 때의 포트), 앱 및 기능 항목, 시작 메뉴, 설치 폴더만 지웁니다. 감사 기록은 쉽게 지우지 않는다는 원칙입니다. 끝나면 `제거 완료. 데이터는 <D> 에 남아 있습니다(지우려면 --remove-data).`
 - 감사 정책을 되돌릴지는 기기 소유자가 정합니다. 되돌리면 그 뒤로 RDP 로그온 실패와 명령줄이 Windows에 남지 않습니다.
@@ -348,12 +354,12 @@ $LASTEXITCODE
   - MCP Monitor는 그것을 **막지 못하고 우회 탐지로만 남깁니다**. 남는 곳은 `tamper` 줄, 대시보드의 **우회 탐지 이벤트** 카드, 로그인한 화면의 실시간 알림입니다.
   - 외부 알림(메일, 웹훅)은 추후입니다.
 - **앱 창과 고지 창(WebView2):**
-  - 앱 창은 `http://127.0.0.1:<Local 포트>`와 자기 연결 중 페이지만 엽니다. 그 밖의 `http(s)` 주소는 **기본 브라우저**로 넘기고, 사용자 정보가 든 주소(`http://a@…`)와 다른 스킴(`file:` 등)은 막습니다. 새 창은 만들지 않습니다.
-  - 고지 창은 서비스가 보낸 `<서버>/notice#…` 주소만 엽니다.
+  - 앱 창은 `http://127.0.0.1:<Local 포트>`와 자기 연결 중 페이지만 엽니다. 그 밖의 `http(s)` 주소는 **기본 브라우저**로 넘기고, 사용자 정보가 든 주소(`http://a@…`)와 다른 스킴(`file:` 등)은 막습니다. 새 창은 만들지 않습니다. 이 규칙은 창 전체의 이동(최상위 탐색)에 적용되고, 페이지 안의 프레임(iframe) 이동과 다운로드는 따로 분류하지 않습니다. 관리 화면은 우리 페이지이고 CSP로 다른 출처의 프레임을 넣지 않으므로 그 경로는 쓰이지 않습니다.
+  - 고지 창은 서비스가 보낸 `<서버>/notice#…` 주소만 엽니다. 페이지가 다른 곳으로 이동하려 하면 막고 고지 페이지가 그대로 남습니다(WebView2가 막기 전에 그 주소로 요청을 이미 보냈을 수는 있지만, 그 페이지는 보이지 않습니다). 새 창(`window.open`)은 열지 않습니다.
   - 개발자 도구(F12, Ctrl+Shift+I), 오른쪽 클릭 메뉴의 "검사", 브라우저 단축키가 없습니다.
   - `WEBVIEW2_*` 환경 변수(원격 디버깅, 다른 런타임 지정)는 시작할 때 지워 무시합니다.
   - 고지 토큰은 명령줄에 없습니다: 에이전트가 WebView2 API로 탐색하고, 창 제목은 `MCP Monitor 고지`로 고정이며, 에이전트 로그와 창 제목 이벤트에서도 토큰을 가립니다. 에이전트의 토큰·서버 키는 환경 변수로 받아 곧바로 지우므로 자식 프로세스(WebView2)에 넘어가지 않습니다.
-- **승격은 설치·업그레이드·제거·감사 정책 때만입니다.** exe의 매니페스트는 `asInvoker`이고, `--interactive`일 때만 UAC로 **같은 exe**를 다시 실행합니다. 다시 실행할 인자는 해석한 옵션에서 새로 만들고, 승격된 프로세스는 호출자가 고른 파일에 결과를 쓰지 않습니다(결과는 메시지 상자).
+- **승격은 설치·업그레이드·제거·감사 정책 때만입니다.** exe의 매니페스트는 `asInvoker`이고, `--interactive`일 때만 UAC로 **같은 exe**를 다시 실행합니다. 다시 실행할 인자는 해석한 옵션에서 새로 만들고, 승격된 프로세스는 호출자가 고른 파일에 결과를 쓰지 않습니다(결과는 메시지 상자). 반대로 앱 창·트레이는 관리자 권한으로 실행하면 열지 않습니다(②의 `app`): 관리자 토큰의 WebView2 창과 관리자의 `HKCU`에 쓰는 로그인 시작 항목을 만들지 않기 위해서입니다.
 - **DLL은 System32에서만 찾습니다.** 다운로드 폴더에서 승격 실행할 때 그 폴더에 심어 둔 DLL을 읽지 않도록, 정적 import는 System32에서만(`DependentLoadFlags 0x800`), 시작 직후 `SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32)`입니다.
 - **내장 묶음:** 설치는 exe에 든 해시로 묶음 전체와 파일 하나하나를 검사하고, 관리자만 쓸 수 있는 `<I>.staging`에만 풉니다. 공유 `%TEMP%`에 실행 파일을 두지 않습니다. 개발용 묶음으로 만든 exe는 설치를 거부합니다.
 - **데이터 루트 ACL:**
@@ -370,13 +376,14 @@ $LASTEXITCODE
 
 - **고지 창**은 화면 가운데의 WebView2 창입니다: 640×600(작업 영역에 맞춰 줄임), 항상 위, 닫기 단추 비활성, 최소화·최대화·크기 조절 없음, 작업 표시줄에 없음, Alt+F4·닫기 요청 무시, '확인'에만 반응합니다. 확인하면 닫히고 `notice_acknowledged`가 남습니다.
   - **다른 앱의 입력을 막지는 않습니다.** Windows는 다른 프로세스의 입력을 막는 모달 창을 허용하지 않으므로, 여기서 "모달"은 "확인 전에는 닫히지 않고 항상 위에 보이는 창"을 뜻합니다(Y10). 2초마다 다시 맨 위로 올리지만 초점을 빼앗지는 않고, 처음 한 번 앞으로 가져오기를 시도합니다(Windows가 허락하지 않으면 창을 깜빡여 알림).
-  - 고지 창의 WebView2 프로세스가 죽으면 "사용자가 닫음"으로 보고하고, 서버가 곧 다시 보냅니다(`notice_unacknowledged`).
+  - 고지 창의 WebView2 프로세스가 죽으면(사용자가 작업 관리자에서 `msedgewebview2.exe`를 끝낸 경우 포함) "사용자가 닫음"으로 한 번 보고하고, 빈 창이 된 고지 창을 닫습니다. 서버가 곧 다시 보내면 새 창이 뜹니다(`notice_unacknowledged`). 알아차리는 길은 셋입니다: WebView2의 `ProcessFailed`, `BrowserProcessExited`, 그리고 에이전트가 2초 안팎마다 브라우저 프로세스가 살아 있는지 직접 보는 것(앞의 둘이 오지 않을 때). 에이전트 로그(표준 오류)에 `notice window: …` 줄로 어느 쪽이 알렸는지 남습니다.
   - **고지 창 자체의 창 이벤트는 `activity.window`에 남지 않습니다.** 에이전트는 자기 프로세스의 창 이벤트를 받지 않는데(`WINEVENT_SKIPOWNPROCESS`), 1.1.0부터 고지 창이 에이전트 프로세스 안에 있기 때문입니다(1.0.0에서는 `msedge.exe`의 창으로 남았음). 고지가 보이고 확인된 사실은 `notice` `notice_shown`·`notice_acknowledged`가 대신 남깁니다.
-  - **WebView2 런타임이 없으면** 고지를 기본 브라우저 탭으로 엽니다(최상위가 아님). 이때 고지 주소(토큰 포함)가 브라우저 명령줄에 남고, 서버 로그의 `<redacted>` 가림으로만 보호됩니다. WebView2 런타임을 다시 설치하는 것이 조치입니다.
+  - **WebView2 런타임이 없으면** 고지를 기본 브라우저 탭으로 엽니다(최상위가 아님). 이때 고지 주소(토큰 포함)가 브라우저 명령줄에 남고, 서버 로그의 `<redacted>` 가림으로만 보호됩니다. 이 방식에서는 **탭을 닫아도 알 수 없어 다시 보여 주지 않습니다**: 고지는 확인될 때까지 "보임, 미확인"으로 남습니다. WebView2 런타임을 다시 설치하는 것이 조치입니다.
+  - 에이전트(`agent --dialog webview`)가 자기 세션 번호를 알 수 없으면 창을 열지 않고 종료 코드 1로 끝납니다(서비스가 다시 띄움). 다른 종료 코드는 0(`exit` 받음), 2(인자·비밀 값 오류), 3(토큰 거부), 4(서버 응답 없음), 5(서버 증명 실패)입니다.
 - **세션 에이전트의 유휴 상태:** 5초마다 마지막 입력 시각(`GetLastInputInfo`)을 읽어 300초(서버가 정함) 넘게 입력이 없으면 `activity.idle` `idle`, 입력이 돌아오면 `active`를 보냅니다. 창 이벤트는 0.3초/1초 단위로 합쳐 묶음(최대 200개)으로 보내고, 서비스가 응답하지 않는 동안 최대 2,000개를 버퍼에 두며 넘친 수를 `dropped`로 알립니다. 창 제목은 서비스의 증명(HMAC)을 확인한 연결로만 보냅니다.
 - **앱 창과 트레이:**
   - 창을 닫으면 트레이로 숨습니다. 서비스와 감시는 그대로 돕니다. 트레이 메뉴: 서비스 상태 줄, `창 열기`, `로그인할 때 트레이 시작`(체크), `트레이 종료`. `트레이 종료`는 이 사용자의 앱만 끝내고 서비스는 끄지 않습니다.
-  - 앱은 사용자마다 하나만 뜹니다. 다시 실행하면(시작 메뉴 등) 새 창 없이 기존 창이 앞으로 옵니다.
+  - 앱은 로그인 세션마다 하나만 뜹니다(같은 사용자가 두 세션에 로그인하면 세션마다 하나). 다시 실행하면(시작 메뉴 등) 새 창 없이 기존 창이 앞으로 옵니다.
   - 창의 최소 크기는 640×600입니다. 열 때 서비스가 응답하지 않으면 연결 중 페이지를 보여 주고, 30초 넘게 응답이 없으면 서비스 시작 안내로 바꿉니다(⑤).
   - 업그레이드·제거는 모든 세션의 앱을 끝냅니다. 다시 띄우는 것은 사용자 몫입니다(③ 7).
 - **WebView2 런타임 업데이트**는 Windows(Edge 업데이트)가 관리합니다. MCP Monitor는 런타임을 받거나 고정하지 않습니다.
@@ -409,11 +416,15 @@ $LASTEXITCODE
 | `[실패] stage_payload: 개발용(fixture) payload로는 설치할 수 없습니다 …` | `--version`의 `fixture` | 개발 빌드입니다. `install\build-desktop.ps1`로 만든 릴리스 exe를 씁니다 |
 | `[실패] stage_payload: …`(해시가 다름, 매니페스트에 없음 등) | `Get-FileHash`와 `.sha256` | exe가 손상되었습니다(받다가 잘림 등). 다시 받아 해시를 확인합니다 |
 | `[실패] stop_apps: …` | 작업 관리자 세부 정보의 `mcp-monitor.exe`, `msedgewebview2.exe` | 설치 폴더의 exe로 도는 프로세스를 끝내지 못했습니다. 그 프로세스를 끝내거나 사용자를 로그아웃시킨 뒤 다시 실행합니다 |
-| `[실패] swap_install_dir: …` | 설치 폴더를 연 탐색기 창, 명령 프롬프트의 현재 폴더, 바이러스 검사 | 파일 잠금으로 폴더를 바꾸지 못했습니다. 이전 설치로 되돌렸으니 잠근 것을 닫고 다시 실행합니다. 서비스가 멈춰 있으면 `sc.exe start mcp-monitor`. 트리 권한 오류면 메시지의 항목 권한을 Program Files 기본으로 되돌립니다 |
+| `[실패] swap_install_dir: …` | 설치 폴더를 연 탐색기 창, 명령 프롬프트의 현재 폴더, 바이러스 검사 | 파일 잠금으로 폴더를 바꾸지 못했습니다. 이전 설치로 되돌렸고, 다음 줄 `[복구] …`가 이전 버전의 서비스를 다시 시작했는지 알려 줍니다. 잠근 것을 닫고 다시 실행합니다. 트리 권한 오류면 메시지의 항목 권한을 Program Files 기본으로 되돌립니다 |
+| `[복구] 서비스가 멈춰 있습니다 …` | 바로 위의 `[실패]` 줄 | 폴더를 바꾼 뒤의 단계가 실패했습니다. 원인을 고친 뒤 같은 exe로 다시 설치합니다. `sc.exe start`는 1.0.0에서 올라오는 중이면 실패합니다(③ 2) |
+| "관리자 권한으로 실행 중이라 MCP Monitor 창을 열지 않습니다 …" | 실행 방법 | "관리자 권한으로 실행"이나 관리자 셸로 연 것입니다. 시작 메뉴의 **MCP Monitor**로 엽니다 |
+| 설치 폴더의 `mcp-monitor.exe`가 "… 다운로드한 mcp-monitor-<버전>.exe로 실행하세요" | 서비스 상태(`sc.exe query mcp-monitor`) | 서비스가 없어 설치가 필요한데, 설치된 exe로는 설치 폴더를 바꿀 수 없습니다. 받은 exe로 실행합니다(복구 설치) |
 | `[실패] service_start`, 또는 `wait_ready` 30초 초과 | `sc.exe query mcp-monitor`, ⑤ 오류를 보는 곳, CodeIntegrity 로그 | 종료 코드 3/4/5는 ⑤ 표를 봅니다. SAC 차단은 ②를 봅니다. 업그레이드였다면 `<I>.old`가 남아 있습니다(③ 5) |
 | 업그레이드 뒤 서비스가 종료 코드 5로 끝남 | 응용 프로그램 로그 `mcp-monitor exited with code 5` | `config.db`가 이 서버보다 새 버전입니다. 더 새 버전을 다시 설치하거나 ⑦ 백업을 복원합니다(③ 5) |
 | 더블클릭해도 아무것도 뜨지 않음, 또는 "이 앱의 일부가 차단되었습니다" | `CodeIntegrity/Operational` 3076/3077, `(Get-MpComputerStatus).SmartAppControlState` | SAC 차단입니다. ② 준비 2를 봅니다 |
 | "MCP Monitor 창을 열 수 없습니다. Microsoft Edge WebView2 런타임이 …" | ② 준비 3의 레지스트리 값 | WebView2 런타임을 설치합니다. 서비스와 다른 PC의 브라우저는 그대로 씁니다 |
+| 설치 중 `경고: 이 PC에 설치된 WebView2 런타임을 확인하지 못했습니다 …` | ② 준비 3의 두 레지스트리 키 | 런타임이 사용자별로만 설치된 PC면 창은 열리므로 무시해도 됩니다. 창이 열리지 않으면 런타임을 설치합니다 |
 | 트레이 아이콘이 안 보임 | 작업 표시줄 모서리의 숨겨진 아이콘(^) | 설정 → 개인 설정 → 작업 표시줄 → 기타 시스템 트레이 아이콘에서 **MCP Monitor**를 켭니다. 앱이 끝났으면 시작 메뉴로 다시 엽니다 |
 | 같은 폴더로 다시 설치가 `비어 있지 않고 … 설치 폴더(bundle.json)도 아닙니다`로 거부됨 | `<I>\mcp-monitor.exe.uninstalled` | 제거 뒤 다시 시작하지 않았습니다. PC를 다시 시작한 뒤 설치합니다(④) |
 | `autostart`가 `오류: MCP Monitor가 설치되어 있지 않습니다 …` | 앱 및 기능 | 먼저 설치합니다 |
