@@ -2,7 +2,10 @@
 
 use std::ffi::OsString;
 
+pub mod payload;
+pub mod payload_pack;
 pub mod version;
+pub mod winutil;
 
 /// Entry point for `mcp-monitor.exe`; returns the process exit code. Task 4 fills in the modes.
 pub fn run(args: Vec<OsString>) -> i32 {
