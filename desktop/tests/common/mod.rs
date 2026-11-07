@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+pub mod agent_server;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 

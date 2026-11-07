@@ -3,6 +3,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+pub mod agent;
 pub mod cli;
 pub mod install;
 pub mod payload;
@@ -127,8 +128,34 @@ pub fn run_with(args: Vec<OsString>, elevator: &dyn Elevator) -> i32 {
                 done.to_string()
             })
         }
+        Command::Agent(a) => run_agent(&a),
         _ => {
             err_line("오류: 아직 지원하지 않는 명령입니다");
+            2
+        }
+    }
+}
+
+/// `agent`: the token and the server key come out of the environment before anything else, so no
+/// child (WebView2) inherits them, then every `WEBVIEW2_*` variable (not in `dev` builds, Y24). A
+/// missing or bad secret is an argument error: `오류: …` + 2. The exit code is the runner's.
+fn run_agent(args: &cli::AgentArgs) -> i32 {
+    let mut env = agent::config::ProcessEnv;
+    let (token, key) = agent::config::take_secrets(&mut env);
+    if !cfg!(feature = "dev") {
+        agent::config::strip_webview2_env(&mut env);
+    }
+    let cfg = match agent::config::config_from(args, token, key) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            err_line(format_args!("오류: {}", e.0));
+            return 2;
+        }
+    };
+    match cfg.dialog {
+        cli::Dialog::Print => agent::run_print(&cfg),
+        cli::Dialog::Webview => {
+            err_line("오류: --dialog webview는 아직 지원하지 않습니다");
             2
         }
     }
