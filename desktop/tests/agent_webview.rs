@@ -275,10 +275,24 @@ fn a_killed_webview2_browser_is_reported_closed_and_a_fresh_window_replaces_it()
     srv.queue(show(7));
     let mut agent = spawn_agent(&srv, &scratch);
     let first = wait_for(30, || notice_window(agent.id()));
+    // The browser process WebView2 reports (BrowserProcessId), as the agent logs it: it is not
+    // always a direct child of the agent (on the runner an msedgewebview2.exe child of the agent
+    // had no children, and ending it changed nothing).
     let browsers = wait_for(30, || {
-        let b = browsers_of(agent.id());
-        (!b.is_empty()).then_some(b)
+        let log = std::fs::read_to_string(&agent.stderr).unwrap_or_default();
+        log.lines()
+            .find_map(|l| l.split("watching the WebView2 browser process ").nth(1))
+            .and_then(|pid| pid.trim().parse::<u32>().ok())
+            .map(|pid| vec![pid])
     });
+    {
+        use std::io::Write;
+        let _ = writeln!(
+            std::io::stderr(),
+            "msedgewebview2.exe children of the agent: {:?}",
+            browsers_of(agent.id())
+        );
+    }
     let mut killed = Vec::new();
     for browser in &browsers {
         for pid in tree_of(*browser) {
@@ -313,7 +327,11 @@ fn a_killed_webview2_browser_is_reported_closed_and_a_fresh_window_replaces_it()
     let second = wait_for(30, || notice_window(agent.id()));
     assert!(unsafe { IsWindow(Some(second)) }.as_bool());
     wait_for(30, || (pages() > before).then_some(()));
-    wait_for(30, || (!browsers_of(agent.id()).is_empty()).then_some(()));
+    // The fresh window has a browser process of its own (a second "watching" line).
+    wait_for(30, || {
+        let log = std::fs::read_to_string(&agent.stderr).unwrap_or_default();
+        (log.matches("watching the WebView2 browser process").count() >= 2).then_some(())
+    });
     std::thread::sleep(Duration::from_secs(3));
     assert!(
         unsafe { IsWindow(Some(second)) }.as_bool(),

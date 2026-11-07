@@ -100,6 +100,8 @@ fn a_data_root_inside_the_install_folder_needs_remove_data() {
     assert_eq!(ids.first(), Some(&"require_admin"));
     assert!(ids.ends_with(&[
         "remove_install_dir",
+        "remove_old_install",
+        "remove_staging",
         "remove_data",
         "remove_webview_profiles"
     ]));

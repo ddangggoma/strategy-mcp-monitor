@@ -169,6 +169,24 @@ pub fn build_uninstall_plan(a: &UninstallArgs, h: &dyn Host) -> Result<Plan, Arg
         Step::new("remove_install_dir", "(remove-install)", vec![inst.clone()])
             .when("install_dir_is_bundle"),
     );
+    // Review item 8: a failed upgrade (Y15) can leave the earlier install (`<I>.old`) and a
+    // staging folder (`<I>.staging`) next to it; each goes only when it is ours.
+    steps.push(
+        Step::new(
+            "remove_old_install",
+            "(remove-old)",
+            vec![format!("{inst}.old")],
+        )
+        .when("old_is_ours"),
+    );
+    steps.push(
+        Step::new(
+            "remove_staging",
+            "(remove-staging)",
+            vec![format!("{inst}.staging")],
+        )
+        .when("staging_is_ours"),
+    );
     if a.remove_data {
         let users = h
             .env()
@@ -240,7 +258,9 @@ mod tests {
                 "remove_uninstall_entry",
                 "remove_shortcut",
                 "remove_run_values",
-                "remove_install_dir"
+                "remove_install_dir",
+                "remove_old_install",
+                "remove_staging"
             ]
         );
         let full = UninstallArgs {
@@ -262,6 +282,8 @@ mod tests {
                 "remove_shortcut",
                 "remove_run_values",
                 "remove_install_dir",
+                "remove_old_install",
+                "remove_staging",
                 "remove_data",
                 "remove_webview_profiles"
             ]
@@ -334,6 +356,30 @@ mod tests {
                 step(&p, "remove_install_dir").when.as_deref()
             ),
             ("(remove-install)", Some("install_dir_is_bundle"))
+        );
+        // Review item 8: what a failed upgrade left next to the install folder goes too, each only
+        // when it is ours (checked again just before).
+        let old = step(&p, "remove_old_install");
+        assert_eq!(
+            (old.cmd.as_str(), old.args.clone(), old.when.as_deref()),
+            (
+                "(remove-old)",
+                vec![format!("{inst}.old")],
+                Some("old_is_ours")
+            )
+        );
+        let staging = step(&p, "remove_staging");
+        assert_eq!(
+            (
+                staging.cmd.as_str(),
+                staging.args.clone(),
+                staging.when.as_deref()
+            ),
+            (
+                "(remove-staging)",
+                vec![format!("{inst}.staging")],
+                Some("staging_is_ours")
+            )
         );
         assert_eq!(step(&p, "remove_data").args, std::slice::from_ref(&data));
         assert_eq!(

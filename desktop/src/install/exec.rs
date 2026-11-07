@@ -17,7 +17,8 @@ use crate::install::remove::{
 };
 use crate::install::shortcut::create_shortcut;
 use crate::install::stage::{
-    PayloadSource, StdFs, remove_old, running_inside_problem, stage, swap,
+    PayloadSource, StdFs, is_our_staging, remove_old, remove_staging, running_inside_problem,
+    stage, swap,
 };
 use serde_json::Value;
 use std::io::{self, Write};
@@ -401,6 +402,21 @@ impl<R: Runner, W: Write> Executor for RealExecutor<'_, R, W> {
                 .as_ref()
                 .is_some_and(|i| Path::new(&format!("{}.old", i.display())).exists()),
             "firewall_rule_missing" => self.firewall_rule_missing(),
+            // Review item 8: what a failed upgrade left next to the install folder, if ours.
+            "old_is_ours" => self.install_dir.as_ref().is_some_and(|i| {
+                let old = PathBuf::from(format!("{}.old", i.display()));
+                install_dir_is_bundle(&old, self.host.env(), self.host.volumes())
+            }),
+            "staging_is_ours" => self.install_dir.as_ref().is_some_and(|i| {
+                let staging = PathBuf::from(format!("{}.staging", i.display()));
+                crate::install::paths::unsafe_root_reason(
+                    &staging.display().to_string(),
+                    self.host.env(),
+                    self.host.volumes(),
+                )
+                .is_none()
+                    && is_our_staging(&staging)
+            }),
             "audit_backup_exists" => self.audit_backup.as_ref().is_some_and(|b| b.is_file()),
             // Checked again just before the folder goes (Plan 5 I3).
             "install_dir_is_bundle" => self
@@ -449,6 +465,9 @@ impl<R: Runner, W: Write> Executor for RealExecutor<'_, R, W> {
             .map(|()| 0)
             .map_err(StepError::Failed),
             "(remove-old)" => remove_old(Path::new(need(step, 0)?))
+                .map(|()| 0)
+                .map_err(StepError::Failed),
+            "(remove-staging)" => remove_staging(Path::new(need(step, 0)?))
                 .map(|()| 0)
                 .map_err(StepError::Failed),
             "(secure-data-root)" => {
@@ -1270,6 +1289,61 @@ mod tests {
         );
     }
 
+    /// Review item 8: `<I>.old` goes only with its `bundle.json`, `<I>.staging` only with the
+    /// installer's marker; a link in their place is never followed (only checked, not removed).
+    #[test]
+    fn leftover_old_and_staging_folders_are_removed_only_when_ours() {
+        let s = Scratch::new();
+        let inst = s.path().join("i");
+        let (old, staging) = (s.path().join("i.old"), s.path().join("i.staging"));
+        let p = plan("uninstall", Some(&inst), None, vec![]);
+        let h = FakeHost::new();
+        let mut ex = RealExecutor::new(&p, &h, FakeRunner::default(), Vec::new());
+        let conds = |ex: &mut RealExecutor<FakeRunner, Vec<u8>>| {
+            ["old_is_ours", "staging_is_ours"].map(|c| ex.condition(c))
+        };
+        assert_eq!(conds(&mut ex), [false; 2], "missing");
+        fs::create_dir_all(&old).unwrap();
+        fs::create_dir_all(&staging).unwrap();
+        fs::write(old.join("keep.txt"), "x").unwrap();
+        fs::write(staging.join("keep.txt"), "x").unwrap();
+        assert_eq!(conds(&mut ex), [false; 2], "bare folders are not ours");
+        // Each action checks again: someone else's folder is refused even if the step runs.
+        let o = old.display().to_string();
+        let st_ = staging.display().to_string();
+        assert!(matches!(
+            ex.internal(&st("remove_old_install", "(remove-old)", &[&o])),
+            Err(StepError::Failed(_))
+        ));
+        assert!(matches!(
+            ex.internal(&st("remove_staging", "(remove-staging)", &[&st_])),
+            Err(StepError::Failed(_))
+        ));
+        assert!(old.join("keep.txt").is_file() && staging.join("keep.txt").is_file());
+        // A link in place of the staging folder, pointing at a marked folder: not ours.
+        let target = s.path().join("elsewhere");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join(crate::payload::STAGING_MARKER), "{}").unwrap();
+        fs::remove_dir_all(&staging).unwrap();
+        junction(&staging, &target);
+        assert_eq!(conds(&mut ex), [false; 2], "a linked staging folder");
+        fs::remove_dir(&staging).unwrap();
+        fs::create_dir_all(&staging).unwrap();
+        fs::write(old.join("bundle.json"), "{}").unwrap();
+        fs::write(staging.join(crate::payload::STAGING_MARKER), "{}").unwrap();
+        assert_eq!(conds(&mut ex), [true; 2]);
+        assert_eq!(
+            ex.internal(&st("remove_old_install", "(remove-old)", &[&o])),
+            Ok(0)
+        );
+        assert_eq!(
+            ex.internal(&st("remove_staging", "(remove-staging)", &[&st_])),
+            Ok(0)
+        );
+        assert!(!old.exists() && !staging.exists());
+        assert!(target.join(crate::payload::STAGING_MARKER).is_file());
+    }
+
     /// The uninstall plan run end to end on a scratch install with fakes for the tools, the
     /// registry, the service and the reboot schedule: the running exe stays for the restart, the
     /// marked data root, every profile, the uninstall entry, the shortcut and our Run values go.
@@ -1299,6 +1373,15 @@ mod tests {
             json!({"external_port": 9701, "registry_before": {crate::install::audit::AUDIT_VALUE: null}}).to_string(),
         )
         .unwrap();
+        // What a failed upgrade left behind (review item 8).
+        let (old, staging) = (
+            s.path().join("MCP Monitor.old"),
+            s.path().join("MCP Monitor.staging"),
+        );
+        fs::create_dir_all(old.join("bin")).unwrap();
+        fs::write(old.join("bundle.json"), "{}").unwrap();
+        fs::create_dir_all(staging.join("web")).unwrap();
+        fs::write(staging.join(crate::payload::STAGING_MARKER), "{}").unwrap();
         fs::create_dir_all(users.join("alice/AppData/Local/mcp-monitor/webview")).unwrap();
         fs::create_dir_all(users.join("Public")).unwrap();
         let lnk = pd.join(r"Microsoft\Windows\Start Menu\Programs\MCP Monitor.lnk");
@@ -1371,6 +1454,7 @@ mod tests {
                 && !lnk.exists()
                 && !users.join("alice/AppData/Local/mcp-monitor").exists()
         );
+        assert!(!old.exists() && !staging.exists(), "{out}");
         assert!(users.join("Public").is_dir());
         assert!(
             fake.subkeys(r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall")

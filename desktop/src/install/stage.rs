@@ -221,12 +221,35 @@ pub fn swap(
 /// Removes the earlier install moved aside by [`swap`] (only a folder with `bundle.json`).
 pub fn remove_old(old: &Path) -> Result<(), String> {
     let o = old.display();
-    if !has_bundle(old) {
+    let real = crate::install::paths::attributes(old).is_ok_and(|a| {
+        crate::install::paths::is_directory(a) && !crate::install::paths::is_reparse(a)
+    });
+    if !real || !has_bundle(old) {
         return Err(format!(
             "{o} 은(는) MCP Monitor 설치 폴더(bundle.json)가 아니어서 지우지 않습니다"
         ));
     }
     fs::remove_dir_all(old).map_err(|e| format!("{o} 을(를) 지우지 못했습니다: {e}"))
+}
+
+/// A staging folder this installer made: a real folder (not a link) holding [`STAGING_MARKER`].
+pub fn is_our_staging(staging: &Path) -> bool {
+    let real = crate::install::paths::attributes(staging).is_ok_and(|a| {
+        crate::install::paths::is_directory(a) && !crate::install::paths::is_reparse(a)
+    });
+    real && staging.join(STAGING_MARKER).is_file()
+}
+
+/// Uninstall's `(remove-staging)` (review item 8): removes a staging folder an interrupted
+/// install or a rolled-back swap left behind, only when it is ours ([`is_our_staging`]).
+pub fn remove_staging(staging: &Path) -> Result<(), String> {
+    let s = staging.display();
+    if !is_our_staging(staging) {
+        return Err(format!(
+            "{s} 에 설치기의 표시({STAGING_MARKER})가 없어 지우지 않습니다"
+        ));
+    }
+    fs::remove_dir_all(staging).map_err(|e| format!("{s} 을(를) 지우지 못했습니다: {e}"))
 }
 
 #[cfg(test)]
