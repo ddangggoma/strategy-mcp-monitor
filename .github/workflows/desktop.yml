@@ -90,7 +90,7 @@ jobs:
       - name: WebView2 notice window (real windows on the runner desktop)
         env:
           MCPMON_TESTS_ALLOW_ELEVATED: "1"
-        run: cargo test --locked --test agent_webview -- --ignored
+        run: cargo test --locked --test agent_webview -- --ignored --test-threads=1
 
       - name: cargo build (the agent exe for the server integration tests)
         run: cargo build --locked

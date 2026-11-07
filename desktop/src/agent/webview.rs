@@ -303,8 +303,24 @@ fn bring_to_front(hwnd: windows::Win32::Foundation::HWND) {
     }
 }
 
-/// Puts the window back on top every [`TOPMOST_EVERY`] without activating it, until `stop` is
-/// dropped or the window is gone.
+/// Greys the close item of the window menu (the title bar's close button). Tao does this once for
+/// `closable(false)`, but the item was found enabled again on the CI runner, so the notice
+/// re-applies it at creation and on every top-most tick.
+fn disable_close(hwnd: windows::Win32::Foundation::HWND) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnableMenuItem, GetSystemMenu, MF_BYCOMMAND, MF_GRAYED, SC_CLOSE,
+    };
+    // SAFETY: plain calls on our own window; a stale handle only makes them fail.
+    unsafe {
+        let menu = GetSystemMenu(hwnd, false);
+        if !menu.is_invalid() {
+            let _ = EnableMenuItem(menu, SC_CLOSE, MF_BYCOMMAND | MF_GRAYED);
+        }
+    }
+}
+
+/// Puts the window back on top every [`TOPMOST_EVERY`] without activating it (and keeps its close
+/// button grey), until `stop` is dropped or the window is gone.
 fn start_topmost_ticker(app: AppHandle, hwnd: isize, stop: mpsc::Receiver<()>) {
     let _ = std::thread::Builder::new()
         .name("agent-notice-topmost".into())
@@ -331,6 +347,7 @@ fn start_topmost_ticker(app: AppHandle, hwnd: isize, stop: mpsc::Receiver<()>) {
                             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
                         )
                     };
+                    disable_close(HWND(hwnd as *mut _));
                 });
                 if posted.is_err() {
                     return;
@@ -391,6 +408,7 @@ fn build_window(
         return Err(e.to_string());
     }
     if let Ok(hwnd) = window.hwnd() {
+        disable_close(hwnd);
         bring_to_front(hwnd);
     }
     Ok(window)

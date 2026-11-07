@@ -45,29 +45,25 @@ fn notice_window(pid: u32) -> Option<HWND> {
         .map(|(h, _)| h)
 }
 
-/// Process ids whose parent is `parent` and whose image is `name` (Toolhelp snapshot).
-fn children_named(parent: u32, name: &str) -> Vec<u32> {
-    use windows::Win32::Foundation::CloseHandle;
-    use windows::Win32::System::Diagnostics::ToolHelp::*;
-    let mut found = Vec::new();
-    unsafe {
-        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).unwrap();
-        let mut e = PROCESSENTRY32W {
-            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
-            ..Default::default()
-        };
-        let mut more = Process32FirstW(snap, &mut e).is_ok();
-        while more {
-            let n = e.szExeFile.iter().position(|&c| c == 0).unwrap_or(260);
-            let exe = String::from_utf16_lossy(&e.szExeFile[..n]);
-            if e.th32ParentProcessID == parent && exe.eq_ignore_ascii_case(name) {
-                found.push(e.th32ProcessID);
-            }
-            more = Process32NextW(snap, &mut e).is_ok();
-        }
-        let _ = CloseHandle(snap);
-    }
-    found
+/// The WebView2 browser process (`msedgewebview2.exe` without `--type=`) whose user data folder is
+/// under `profile` (its command line names it).
+fn webview_browsers(profile: &std::path::Path) -> Vec<u32> {
+    let script = format!(
+        "Get-CimInstance Win32_Process -Filter \"Name='msedgewebview2.exe'\" | Where-Object {{ \
+         $_.CommandLine -like '*{}*' -and $_.CommandLine -notlike '*--type=*' }} | \
+         ForEach-Object {{ $_.ProcessId }}",
+        profile.display()
+    );
+    let out = std::process::Command::new(mcp_monitor::winutil::system_tool(
+        r"WindowsPowerShell\v1.0\powershell.exe",
+    ))
+    .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+    .output()
+    .unwrap();
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| l.trim().parse().ok())
+        .collect()
 }
 
 /// The agent with its own `%LOCALAPPDATA%` (F23: the notice profile goes to the scratch folder).
@@ -101,11 +97,16 @@ fn webview_notice_is_topmost_ignores_wm_close_and_closes_on_command() {
     let hwnd = wait_for(30, || notice_window(child.id()));
     let ex = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32;
     assert!(ex & WS_EX_TOPMOST.0 != 0, "not top-most");
-    let state = unsafe { GetMenuState(GetSystemMenu(hwnd, false), SC_CLOSE, MF_BYCOMMAND) };
-    assert!(
-        state & (MF_GRAYED.0 | MF_DISABLED.0) != 0,
-        "close is enabled"
+    // the close button is grey (re-applied with the top-most tick, so allow one tick)
+    let close_state =
+        || unsafe { GetMenuState(GetSystemMenu(hwnd, false), SC_CLOSE, MF_BYCOMMAND) };
+    eprintln!(
+        "SC_CLOSE state when the window appeared: {:#x}",
+        close_state()
     );
+    wait_for(5, || {
+        (close_state() & (MF_GRAYED.0 | MF_DISABLED.0) != 0).then_some(())
+    });
     unsafe { PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0)).unwrap() };
     std::thread::sleep(Duration::from_secs(1));
     assert!(
@@ -138,9 +139,10 @@ fn a_killed_webview_is_reported_closed_and_the_notice_comes_back() {
     srv.queue(json!({"type": "show_notice", "display_id": 7, "attempt": 1, "url": notice}));
     let mut child = spawn_agent(&srv, &scratch);
     let first = wait_for(30, || notice_window(child.id()));
-    // the WebView2 browser process (a child of the agent) dies
+    // the notice's WebView2 browser process dies
+    let profile = scratch.join(r"mcp-monitor\notice-webview");
     let browsers = wait_for(15, || {
-        Some(children_named(child.id(), "msedgewebview2.exe")).filter(|v| !v.is_empty())
+        Some(webview_browsers(&profile)).filter(|v| !v.is_empty())
     });
     let taskkill = mcp_monitor::winutil::system_tool("taskkill.exe");
     for pid in browsers {
