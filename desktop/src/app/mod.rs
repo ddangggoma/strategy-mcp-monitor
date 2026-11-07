@@ -279,12 +279,16 @@ pub fn connect_step(answered: bool, since_start: Duration, stopped_shown: bool) 
     }
 }
 
-/// `GET http://127.0.0.1:<port>/api/channel` answered 200 (no proxy, no redirects, 2 s).
-fn channel_answers(agent: &ureq::Agent, port: u16) -> bool {
-    agent
+/// `GET http://127.0.0.1:<port>/api/channel` answered 200 (no proxy, no redirects, 2 s); else why not.
+fn channel_answers(agent: &ureq::Agent, port: u16) -> Result<(), String> {
+    match agent
         .get(format!("http://127.0.0.1:{port}/api/channel"))
         .call()
-        .is_ok_and(|r| r.status() == 200)
+    {
+        Ok(r) if r.status() == 200 => Ok(()),
+        Ok(r) => Err(format!("status {}", r.status())),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 /// The thread behind the "connecting" page: asks the server until it answers, then shows the
@@ -303,20 +307,26 @@ fn start_connecting(window: WebviewWindow, port: u16, admin: Url) {
             );
             let start = Instant::now();
             let mut stopped_shown = false;
+            let mut told = false;
             loop {
-                match connect_step(
-                    channel_answers(&agent, port),
-                    start.elapsed(),
-                    stopped_shown,
-                ) {
+                let answer = channel_answers(&agent, port);
+                if let Err(e) = &answer
+                    && !std::mem::replace(&mut told, true)
+                {
+                    eprintln!("app window: waiting for the server ({e})");
+                }
+                match connect_step(answer.is_ok(), start.elapsed(), stopped_shown) {
                     Connect::Open => {
-                        let _ = window.navigate(admin);
+                        let opened = window.navigate(admin);
+                        eprintln!("app window: the server answered; admin page ({opened:?})");
                         return;
                     }
                     Connect::ShowStopped => {
                         stopped_shown = true;
                         let stopped = Url::parse(STOPPED_PAGE).expect("a valid address");
-                        if window.navigate(stopped).is_err() {
+                        let shown = window.navigate(stopped);
+                        eprintln!("app window: no answer for 30 s; #stopped ({shown:?})");
+                        if shown.is_err() {
                             return;
                         }
                         std::thread::sleep(STOPPED_EVERY);
@@ -368,7 +378,15 @@ fn build_main_window(
         .visible(!background)
         .devtools(false)
         .data_directory(data_dir)
-        .on_navigation(move |url| leave(url, port) == NavDecision::Allow)
+        .on_navigation(move |url| {
+            let decision = leave(url, port);
+            eprintln!(
+                "app window: navigation to {}://{} {decision:?}",
+                url.scheme(),
+                url.host_str().unwrap_or_default()
+            );
+            decision == NavDecision::Allow
+        })
         .on_new_window(move |url, _features| {
             if leave(&url, port) == NavDecision::Allow
                 && let Some(main) = same_window.get_webview_window(MAIN_LABEL)
@@ -422,6 +440,7 @@ pub fn run_window(target: AppTarget, background: bool) -> i32 {
             let handle = app.handle().clone();
             match build_main_window(&handle, port, data_dir, background) {
                 Ok(window) => {
+                    eprintln!("app window: created");
                     if let Err(e) = tray::create(&handle, install_dir) {
                         eprintln!("tray icon: {e}");
                         // Without a tray a hidden window could never be opened.
@@ -430,6 +449,7 @@ pub fn run_window(target: AppTarget, background: bool) -> i32 {
                     start_connecting(window, port, admin);
                 }
                 Err(e) => {
+                    eprintln!("app window: not created: {e}");
                     crate::winutil::message_box(&window_error(&e), crate::winutil::MsgKind::Error);
                     handle.exit(1);
                 }
@@ -440,6 +460,7 @@ pub fn run_window(target: AppTarget, background: bool) -> i32 {
     let app = match built {
         Ok(app) => app,
         Err(e) => {
+            eprintln!("app: the window system did not start: {e}");
             crate::winutil::message_box(
                 &window_error(&e.to_string()),
                 crate::winutil::MsgKind::Error,

@@ -179,6 +179,8 @@ fn visible(hwnd: HWND) -> bool {
 struct App {
     child: std::process::Child,
     stderr: std::path::PathBuf,
+    scratch: std::path::PathBuf,
+    cdp: u16,
 }
 
 impl App {
@@ -195,7 +197,12 @@ impl App {
             .stderr(std::fs::File::create(&stderr).unwrap())
             .spawn()
             .unwrap();
-        App { child, stderr }
+        App {
+            child,
+            stderr,
+            scratch: s.path().to_path_buf(),
+            cdp,
+        }
     }
 
     fn id(&self) -> u32 {
@@ -217,6 +224,10 @@ impl Drop for App {
                 std::fs::read_to_string(&self.stderr).unwrap_or_default()
             );
             eprintln!("app windows: {:?}", windows_titled(self.child.id()));
+            let listening = std::net::TcpStream::connect(("127.0.0.1", self.cdp)).is_ok();
+            eprintln!("DevTools port {} listening: {listening}", self.cdp);
+            eprintln!("DevTools pages: {:?}", cdp_pages(self.cdp));
+            describe_webview_processes(&self.scratch);
         }
         self.stop();
     }
@@ -228,4 +239,23 @@ fn remove_profile(s: &Scratch) {
     wait_for(15, || {
         (!profile.exists() || std::fs::remove_dir_all(&profile).is_ok()).then_some(())
     });
+}
+
+/// Diagnostics: the WebView2 processes that use this test's profile, with their command lines.
+fn describe_webview_processes(scratch: &std::path::Path) {
+    let filter = scratch.display().to_string().replace('\'', "''");
+    let script = format!(
+        "Get-CimInstance Win32_Process -Filter \"Name='msedgewebview2.exe'\" | Where-Object {{ $_.CommandLine -like '*{filter}*' }} | ForEach-Object {{ \"$($_.ProcessId) $($_.ParentProcessId) $($_.CommandLine)\" }}"
+    );
+    let out = std::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .output();
+    match out {
+        Ok(o) => eprintln!(
+            "WebView2 processes:\n{}{}",
+            String::from_utf8_lossy(&o.stdout),
+            String::from_utf8_lossy(&o.stderr)
+        ),
+        Err(e) => eprintln!("WebView2 processes: {e}"),
+    }
 }
