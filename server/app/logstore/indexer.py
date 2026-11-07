@@ -17,7 +17,7 @@ from collections import Counter
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import BinaryIO
 
@@ -75,6 +75,7 @@ def _summary(conn: sqlite3.Connection) -> IndexSummary:
 
 
 QUERY_SLOTS = 4
+_TAIL_MAX_BYTES = 4 << 20  # a torn last line longer than this is left alone (finish_tail)
 QUERY_TIME_LIMIT_SEC = 5.0  # one API read (a page, a histogram, an export pull): then interrupted
 _PROGRESS_STEPS = 1000  # SQLite VM steps between two deadline checks
 
@@ -423,6 +424,9 @@ class LogIndex:
         self._lock = asyncio.Lock()  # run_exclusive: one writer at a time
         self.query_slots = asyncio.Semaphore(QUERY_SLOTS)  # API reads running at once (see query())
         self.query_time_limit = QUERY_TIME_LIMIT_SEC
+        # Days before this (the last retention cutoff) are expired: a file of such a day that could
+        # not be deleted is not indexed again, so its rows do not come back (plan review minor 14).
+        self.expired_before: date | None = None
         self._cycle_lock = asyncio.Lock()  # index_once: one cycle at a time
         self._inflight: asyncio.Future[object] | None = None
         self._wake = asyncio.Event()
@@ -559,6 +563,34 @@ class LogIndex:
                     conn.execute("ROLLBACK")
                 raise
 
+    async def finish_tail(self, f: LogFile) -> FileState | None:
+        """For a plain file nobody writes any more (retention gzips only days before yesterday):
+        when all that is left after its indexed offset is a fragment without a newline (a write cut
+        short), index that fragment as the file's last line, so the file counts as fully indexed
+        and can be compressed (plan review minor 9). Complete lines still waiting are left to the
+        indexer. Returns the file's state afterwards (None when never indexed)."""
+
+        def run(conn: sqlite3.Connection) -> tuple[FileState | None, int]:
+            state = self._states_of(conn, f.name).get(f.name)
+            if state is None or state.offset >= f.size or f.size - state.offset > _TAIL_MAX_BYTES:
+                return state, 0
+            with f.path.open("rb") as fh:
+                fh.seek(state.offset)
+                rest = fh.read(f.size - state.offset)
+            if b"\n" in rest:
+                return state, 0
+            cursor = _FileCursor(f.path, state.offset, final=True)
+            try:
+                batch = self._index_batch(conn, cursor=cursor, f=f, reset=False)
+            finally:
+                cursor.close()
+            return self._states_of(conn, f.name).get(f.name), batch.bad
+
+        state, bad = await self.run_exclusive(run)
+        if bad:
+            self._log.emit("system", event="logindex.bad_lines", file=f.name, count=bad)
+        return state
+
     async def file_state(self, name: str) -> FileState | None:
         """The ``files`` row of the log file ``name``, or None when it was never indexed."""
         return (await self._exclusive(functools.partial(self._states_of, name=name))).get(name)
@@ -621,6 +653,8 @@ class LogIndex:
             return await self._cycle()
 
     def _needs_work(self, f: LogFile, state: FileState | None) -> bool:
+        if self.expired_before is not None and f.day < self.expired_before:
+            return False
         if f.compressed:
             return state is None or not state.done
         if self._eof_sizes.get(f.name) == f.size:

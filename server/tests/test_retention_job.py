@@ -1,5 +1,6 @@
 import asyncio
 import gzip
+import json
 import sqlite3
 from contextlib import closing
 from dataclasses import replace
@@ -59,6 +60,36 @@ async def test_compress_skips_files_not_fully_indexed(services):
     services.settings.update({"log_compress_after_days": 3})
     res = await services.retention.run_once("manual")
     assert res.skipped_compress == ["2026-10-20.jsonl"] and (services.paths.logs_dir / "2026-10-20.jsonl").exists()
+
+
+async def test_an_old_file_with_a_torn_last_line_is_still_compressed(services):
+    # plan review minor 9: the fragment after the last newline of a file nobody writes any more is
+    # indexed as its (bad) last line, so the file counts as fully indexed and is gzipped
+    logs = services.paths.logs_dir
+    write_lines(logs, "2026-10-29", [ev("2026-10-29T10:00:00.000+09:00", "system", event="ok")])
+    with open(logs / "2026-10-29.jsonl", "ab") as fh:
+        fh.write(b'{"ts": "2026-10-29T10:00:01.000+09:00", "cat": "sys')  # a crash mid-write
+    await index_all(services)
+    state = await services.log_index.file_state("2026-10-29.jsonl")
+    assert state.offset < (logs / "2026-10-29.jsonl").stat().st_size  # the fragment waits forever
+    services.settings.update({"log_compress_after_days": 3})
+    res = await services.retention.run_once("manual")
+    assert res.compressed == ["2026-10-29.jsonl"] and res.skipped_compress == []
+    assert gzip.decompress((logs / "2026-10-29.jsonl.gz").read_bytes()).endswith(b'"cat": "sys')
+    await services.log_index.index_once()
+    assert services.log_index.reader().days()["2026-10-29"] == 1
+    bad = [e for e in await audit_events(services, "system") if e.get("event") == "logindex.bad_lines"]
+    assert [(e["file"], e["count"]) for e in bad] == [("2026-10-29.jsonl", 1)]
+
+
+async def test_an_old_file_with_unindexed_complete_lines_is_left_to_the_indexer(services):
+    logs = services.paths.logs_dir
+    write_lines(logs, "2026-10-29", [ev("2026-10-29T10:00:00.000+09:00", "system", event="ok")])
+    await index_all(services)
+    write_lines(logs, "2026-10-29", [ev("2026-10-29T11:00:00.000+09:00", "system", event="late")])  # not indexed yet
+    services.settings.update({"log_compress_after_days": 3})
+    res = await services.retention.run_once("manual")
+    assert res.skipped_compress == ["2026-10-29.jsonl"] and (logs / "2026-10-29.jsonl").exists()
 
 
 async def test_late_plain_file_is_merged_into_the_existing_gz(services):
@@ -253,6 +284,23 @@ async def test_a_file_that_cannot_be_deleted_is_reported_and_not_hidden_from_the
     assert purge[-1]["result"] == "error"
 
 
+async def test_an_undeletable_expired_file_is_not_indexed_again(services):
+    # plan review minor 14: rows of an expired day must not come back through a file that could not
+    # be deleted and was not fully indexed yet
+    await seed_days(services)
+    write_lines(services.paths.logs_dir, "2026-10-25", [ev("2026-10-25T11:00:00.000+09:00", "system", event="late")])
+    services.settings.update({"log_retention_days": 7, "log_compress_after_days": 7})
+    held = (services.paths.logs_dir / "2026-10-25.jsonl").open("rb")
+    try:
+        res = await services.retention.run_once("manual")
+    finally:
+        held.close()
+    assert "2026-10-25.jsonl" not in res.deleted_files and (services.paths.logs_dir / "2026-10-25.jsonl").exists()
+    await services.log_index.index_once()
+    assert "2026-10-25" not in services.log_index.reader().days()
+    assert services.log_index.status().pending_files == 0  # not counted as work either
+
+
 async def test_nothing_to_purge_is_logged_but_not_audited(services):
     res = await services.retention.run_once("schedule")
     assert (res.deleted_files, res.index_rows, res.compressed, res.errors) == ([], 0, [], [])
@@ -302,6 +350,25 @@ async def test_request_run_is_coalesced_and_stop_cancels_the_delay(services):
     assert job._tasks == set() and (services.paths.logs_dir / "2026-10-25.jsonl").exists()
     job.request_run()  # stopped: ignored
     assert job._tasks == set()
+
+
+async def test_a_requested_run_keeps_the_day_it_was_confirmed_on(services):
+    # plan review minor 8: a retention change confirmed at 23:59:59 KST runs ~5 s later, after
+    # midnight; it must delete what the confirmed preview showed, not one more day
+    await seed_days(services); services.settings.update({"log_retention_days": 7, "log_compress_after_days": 7})
+    job = _job(services, request_delay_sec=0.2)
+    job.request_run("settings")  # 2026-11-04 14:00 KST: cutoff 2026-10-29
+    services.clock.advance(10 * 3600 + 5)  # 2026-11-05 00:00:05 KST before the run starts
+    await eventually(lambda: not (services.paths.logs_dir / "2026-10-28.jsonl").exists())
+    await eventually(lambda: not job._tasks)
+    assert (services.paths.logs_dir / "2026-10-29.jsonl").exists()  # the 11-05 cutoff would delete it
+    await services.log.flush()  # the run logged after midnight: the 11-05 file
+    runs = [json.loads(x) for x in (services.paths.logs_dir / "2026-11-05.jsonl").read_text("utf-8").splitlines()]
+    assert [(r["reason"], r["cutoff"]) for r in runs if r.get("event") == "retention.run"] == [("settings", "2026-10-29")]
+    # a scheduled run (no confirmed preview) uses its own day
+    res = await job.run_once("schedule")
+    assert res.cutoff == date(2026, 10, 30) and not (services.paths.logs_dir / "2026-10-29.jsonl").exists()
+    await job.stop()
 
 
 async def test_stop_waits_for_a_run_in_progress(services, monkeypatch):

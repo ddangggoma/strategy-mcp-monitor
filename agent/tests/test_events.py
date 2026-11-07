@@ -154,8 +154,12 @@ def test_sender_drops_a_batch_the_server_refuses_instead_of_retrying_it_forever(
     for n in range(3):
         s.add({"type": "idle", "at": "2026-11-04T14:00:00.000+09:00", "idle_sec": n})
     s.flush()
-    assert len(client.posts) == 2 and (s.pending, s.dropped) == (0, 3)
+    # two refused batches, then one try to report the count alone (refused too: not resent)
+    assert len(client.posts) == 3 and (s.pending, s.dropped) == (0, 3)
+    assert client.posts[2][1] == {"events": [], "dropped": 3}
     assert "422" in capsys.readouterr().err
+    s.flush()
+    assert len(client.posts) == 3
 
 
 def test_sender_lets_a_rejected_token_through_and_keeps_the_events():
@@ -377,3 +381,22 @@ def test_payload_has_no_dropped_key_when_nothing_was_dropped():
     assert to_payload([idle(1)]) == {"events": [idle(1)]}
     assert to_payload([idle(1)], dropped=0) == {"events": [idle(1)]}
     assert to_payload([idle(1)], dropped=4) == {"events": [idle(1)], "dropped": 4}
+
+def test_an_unreported_drop_with_an_empty_buffer_is_sent_alone():
+    # plan review minor 15: the last batch refused, nothing left to carry the count (e.g. at exit)
+    client = CountingClient(RuntimeError("POST /api/agent/events: unexpected status 422"))
+    s = EventSender(client, events_max=5)
+    s.add(idle(0)); s.flush()
+    assert client.bodies == [{"events": [idle(0)]}, {"events": [], "dropped": 1}]
+    s.flush()  # reported once
+    assert len(client.bodies) == 2
+
+def test_an_empty_report_waits_while_the_server_is_unavailable():
+    client = CountingClient(RuntimeError("422"), ServerUnavailable("down"))
+    s = EventSender(client, events_max=5)
+    s.add(idle(0)); s.flush()
+    assert client.bodies[-1] == {"events": [], "dropped": 1}
+    s.flush()
+    assert client.bodies[-1] == {"events": [], "dropped": 1} and len(client.bodies) == 3
+    s.flush()
+    assert len(client.bodies) == 3

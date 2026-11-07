@@ -91,3 +91,13 @@ class EventSender:
                     print(f"mcp_agent: dropped {len(batch)} events: {e}", file=sys.stderr)
                 for _ in batch:
                     self._buffer.popleft()
+            unreported = self.dropped - self._reported
+            if unreported:  # no event left to carry the count (the last batch refused; at exit): alone
+                try:
+                    self._client.post(EVENTS_PATH, to_payload([], unreported), verified_only=True)
+                    self._reported += unreported
+                except ServerUnavailable:
+                    return
+                except RuntimeError as e:
+                    print(f"mcp_agent: dropped count not delivered: {e}", file=sys.stderr)
+                    self._reported += unreported  # refused: do not resend forever

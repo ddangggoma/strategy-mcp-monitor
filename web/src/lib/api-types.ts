@@ -151,7 +151,7 @@ export interface CollectorStatus {
 export type TamperEventName =
   | "agent_exited" | "agent_unresponsive" | "agent_restart_storm" | "agent_impersonation" | "notice_token_misuse"
   | "script_hash_mismatch" | "script_file_changed" | "script_file_missing" | "log_file_removed" | "log_file_truncated"
-  | "audit_policy_changed" | "log_cleared" | "audit_config_changed";
+  | "audit_policy_changed" | "log_cleared" | "audit_config_changed" | "baseline_reset";
 /** GET /api/tamper/recent row and SSE `tamper` (authenticated streams only); other fields depend on the event. */
 export interface TamperEvent {
   at: string;

@@ -395,6 +395,7 @@ async def audit_export(
     request: Request,
     format: ExportFormat,
     user: User | None = Depends(require(Action.EXPORT_LOGS)),
+    _viewer: User | None = Depends(require(Action.VIEW_AUDIT)),  # an audit export is also a view (minor 6)
     a: AuditFilter = Depends(audit_filter),
     limit: ExportLimit = MAX_EXPORT,
     services: Services = Depends(get_services),

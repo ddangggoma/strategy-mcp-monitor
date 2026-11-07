@@ -290,6 +290,7 @@ export const copy = {
       audit_policy_changed: "감사 정책 변경",
       log_cleared: "Windows 이벤트 로그 지움",
       audit_config_changed: "감사 설정 레지스트리 변경",
+      baseline_reset: "우회 탐지 기준값 없음·손상(정지 중 변경 비교 불가)",
     },
   },
 

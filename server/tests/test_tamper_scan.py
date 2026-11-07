@@ -236,11 +236,12 @@ def persisted(services, values, path):
 
 async def test_changes_made_while_stopped_are_reported_at_the_next_start(services, tmp_path):
     d = services.paths.logs_dir; path = tmp_path / "data" / "tamper-baseline.json"
-    for name in ("2026-11-01.jsonl", "2026-11-02.jsonl", "2026-11-03.jsonl"):
-        (d / name).write_bytes(b"x" * 100)
     m = seed_mcp(services, make_user(services, "o@x.com")); info = services.scripts.get(m.id, "start")
     values = {"cmd": 1, "ps": None}
-    persisted(services, values, path).scan()
+    first = persisted(services, values, path)  # a first start: no logs, no baseline yet
+    for name in ("2026-11-01.jsonl", "2026-11-02.jsonl", "2026-11-03.jsonl"):
+        (d / name).write_bytes(b"x" * 100)
+    first.scan()
     assert path.exists() and services.tamper.recent() == []
     # --- the service is stopped; someone edits things; the service starts again ---
     values["cmd"] = 0
@@ -274,9 +275,10 @@ async def test_an_unfixed_script_change_is_not_reported_again_after_a_restart(se
 
 async def test_announced_removals_survive_a_restart_even_without_a_scan(services, tmp_path):
     d = services.paths.logs_dir; path = tmp_path / "data" / "tamper-baseline.json"
+    s = persisted(services, {"cmd": None, "ps": None}, path)
     for name in ("2026-11-01.jsonl", "2026-11-02.jsonl", "2026-11-03.jsonl"):
         (d / name).write_bytes(b"x")
-    s = persisted(services, {"cmd": None, "ps": None}, path); s.scan()
+    s.scan()
     s.expect_log_removed("2026-11-01.jsonl"); (d / "2026-11-01.jsonl").unlink()  # retention, then a stop
     quiet = persisted(services, {"cmd": None, "ps": None}, path)  # a run without scanning (no collection)
     quiet.expect_log_removed("2026-11-02.jsonl"); (d / "2026-11-02.jsonl").unlink()
@@ -285,16 +287,28 @@ async def test_announced_removals_survive_a_restart_even_without_a_scan(services
     persisted(services, {"cmd": None, "ps": None}, path).scan()
     assert [(r["event"], r["file"]) for r in services.tamper.recent()] == [("log_file_removed", "2026-11-03.jsonl")]
 
-async def test_a_corrupt_or_missing_baseline_starts_fresh(services, tmp_path, capsys):
+async def test_a_corrupt_or_missing_baseline_starts_fresh_and_says_so(services, tmp_path, capsys):
+    # plan review minor 7: an admin who stops the service and deletes old logs with the baseline must
+    # not get a silent fresh start
     d = services.paths.logs_dir; path = tmp_path / "data" / "tamper-baseline.json"
+    first = persisted(services, {"cmd": 1, "ps": None}, path)  # no logs, no file: a first run
     (d / "2026-11-01.jsonl").write_bytes(b"x" * 100)
-    persisted(services, {"cmd": 1, "ps": None}, path).scan()  # no file yet: a first run, nothing reported
+    first.scan()
+    assert services.tamper.recent() == []
     for junk in ("{not json", "[1, 2]", '{"version": 1, "registry": [1], "logs": {}}'):
         path.write_text(junk, "utf-8")
-        persisted(services, {"cmd": 0, "ps": None}, path).scan()
+        s = persisted(services, {"cmd": 0, "ps": None}, path)
+        s.scan(); s.scan()  # reported once, by the first scan
         assert "tamper-baseline: corrupt file, starting fresh" in capsys.readouterr().err
-    assert services.tamper.recent() == []
     assert json.loads(path.read_text("utf-8"))["registry"] == {"A\\cmd": 0, "B\\ps": None}  # rewritten
+    path.unlink()  # removed while stopped, the logs still there
+    persisted(services, {"cmd": 0, "ps": None}, path).scan()
+    got = [(r["event"], r["reason"], r["while_stopped"]) for r in services.tamper.recent()]
+    assert sorted(got) == [("baseline_reset", "corrupt", True)] * 3 + [("baseline_reset", "missing", True)]
+    # a scanner that never scans (no collection) reports nothing
+    path.unlink()
+    persisted(services, {"cmd": 0, "ps": None}, path)
+    assert len(services.tamper.recent()) == 4
 
 async def test_a_failing_save_is_logged_once_and_never_breaks_the_scan(services, tmp_path):
     path = tmp_path / "data" / "tamper-baseline.json"

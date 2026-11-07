@@ -430,3 +430,18 @@ async def test_a_query_past_the_time_limit_is_a_422_that_says_so(external_client
     r = await external_client.get("/api/logs", params={**P, "cursor": "!!"})
     assert r.status_code == 422 and "X-Error-Reason" not in r.headers
     assert await views_of(services, "logs_view") == []  # a failed query is not a view
+
+
+async def test_audit_export_also_needs_the_audit_view_permission(external_client, services, monkeypatch):
+    # plan review minor 6: if view_audit is ever narrowed (admin only), a developer must not be able to
+    # export the audit log through export_logs alone
+    from types import MappingProxyType
+
+    from app.auth import policy
+    dev(external_client, services); await seed(services)
+    narrowed = dict(policy.RULES); narrowed[policy.Action.VIEW_AUDIT] = policy.Rule("admin")
+    monkeypatch.setattr(policy, "RULES", MappingProxyType(narrowed))
+    r = await external_client.get("/api/audit/export", params={**P, "format": "csv"})
+    assert r.status_code == 403 and r.json() == {"error": "forbidden"}
+    assert (await external_client.get("/api/logs/export", params={**P, "format": "csv"})).status_code == 200
+    assert await views_of(services, "audit_export") == []

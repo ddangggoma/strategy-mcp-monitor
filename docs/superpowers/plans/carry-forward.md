@@ -191,13 +191,17 @@ Plan 5 is the last plan. Every unchecked "Later" item above is still open. The l
 ### Engineering
 - [ ] Enforce E501, or run `ruff format` once. Reason: a bulk re-wrap would clash with parallel work (W36). `ruff format` stays forbidden until then.
 - [ ] Engine-side cancel for the defensive `_apply` refusal (W18). Reason: the path is unreachable today.
-- [ ] Wide keyword search speed (W9). A keyword that matches many rows is slow: 40% of 1M rows takes about 300 ms (`docs/verification/perf-p6.md` §4). Options: cap keyword hits, or narrow the time range first. Reason: outside the P6 criterion by definition.
+- [ ] Wide keyword counts (W9). Since the plan review fix wave (I2) pages of a broad keyword walk the time index and stay under 300 ms, with any number of users; the histogram and the user facet still count every match (`focus` 40%: ~400–650 ms, `docs/verification/perf-p6.md` §3.3, §4). Every index read is capped at 5 s (`X-Error-Reason: query_timeout`). Options: approximate keyword counts, or pre-aggregated term counts. Reason: outside the P6 criterion by definition.
+- [ ] The web shows the generic "입력값을 확인하세요" text for a query that hit the 5 s limit; read `X-Error-Reason: query_timeout` and say "조건을 좁히세요" instead (plan review I2). Reason: server-only fix wave; the header is in place.
+- [ ] Service exit codes 3/4/5 (port or data root in use, newer DB) still go through the SCM recovery loop (restart after 5/10/60 s, then every 60 s per day) (plan review minor 12). Reason: with `failureflag 1` a STOPPED with a non-zero exit code queues the recovery too, so the only way out of the loop is to hide the failure (exit 0); a busy port may also free up. Revisit with a custom recovery command.
+- [ ] `logstore.dropped` does not count a batch whose write was in flight when `LogWriter.stop()` was cancelled (plan review minor 16): its worker thread usually still writes it, so it is neither surely lost nor surely written. Documented in the operations guide ⑨.
+- [ ] `DESCRIPTION` in `app/winsvc/__init__.py` names the default ports; install writes the real ports (plan review minor 19). Cosmetic.
 - [ ] Actions-only history read, so an SSE `action` event refetches only the action list (Plan 3 review). Reason: W36 deferral (preflight F07).
 - [ ] Dependency-allowlist wording: name the implied toolchain packages. Also check the `-soft` tokens on Chromium 123, if that is a target (Plan 3 review). Reason: W36 deferral (preflight F07).
 - [ ] Server 422 responses with field information (U27), and `If-Match` on script `PUT` (Plan 3 Later). Reason: forms rely on client validation, and only one editor is expected per script.
 - [ ] Replace the sleep-based "nothing arrives" waits in four web unit tests once a signal exists (Plan 3 review Later). Reason: there is no signal to wait on.
 - [ ] Window events: proof and data on one keep-alive connection (Plan 4 re-review R2), a visible `tamper` for a wildcard port squatter (R1), and session tracker edge cases (R6). Reason: Plan 4 Later; the risk is bounded by the HMAC proof.
-- [ ] `install\audit-policy.ps1 -Enable` used on its own does not record the registry values from before the change. So `-Restore` puts registry values back only when an install state file exists (Plan 5 Task 14). Reason: the plan's step ids leave no room for a state write; real-machine check X7-7.
+- [x] `install\audit-policy.ps1 -Enable` used on its own does not record the registry values from before the change (Plan 5 Task 14). Fixed in the plan review fix wave (minor 11): `-Enable` makes the data root with the install's ACL and records `data\audit-policy-state.json`.
 - [ ] A reinstall with a different `-ExternalPort` leaves the old firewall rule, and uninstall removes only the rule for the port it recorded (Plan 5 Task 14, checklist X7-8). Reason: low risk, documented in the operations guide ④.
 
 ### Web UI (Plan 5 Task 16 review: `docs/design/a11y-review-p5.md` §5, `docs/design/critique-p5.md`)
@@ -205,3 +209,5 @@ Plan 5 is the last plan. Every unchecked "Later" item above is still open. The l
 - [ ] Show the keyword help where sighted keyboard users can read it (today it is a `title` plus a screen-reader description).
 - [ ] Add one representative field to the summary of system and admin lines (for example the deleted file count of `retention.run`).
 - [ ] Listen once with a real screen reader (Narrator or NVDA) to the histogram selection and the log detail dialog. Reason: not available in automated runs; do it during P6-1.
+- [ ] At 1280×800 the logs and audit pages are slightly taller than the window (a small vertical page scroll), and the audit `result` column needs horizontal scrolling inside the table at ≤ 1280 px (plan review minor 18; Tasks 11, 12, 15). Not a W41 violation (no horizontal page scroll).
+- [ ] There is no visual baseline for the settings page (plan review minor 18, Task 15). Reason: the settings E2E checks behaviour; add a baseline when the service section settles on the real machine.

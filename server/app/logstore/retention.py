@@ -265,18 +265,23 @@ class RetentionJob:
         task.add_done_callback(self._tasks.discard)
 
     def request_run(self, reason: Reason = "settings") -> None:
-        """Run ``request_delay_sec`` from now unless a requested run is already waiting (loop thread)."""
+        """Run ``request_delay_sec`` from now unless a requested run is already waiting (loop thread).
+
+        The run uses today's KST date as of this call (the confirmed preview's), so a change
+        confirmed just before midnight does not delete one more day than it showed (plan review
+        minor 8); the next scheduled run catches up."""
         if self._stopped or self._queued:
             return
         self._queued = True
-        self._spawn(self._requested(reason), "retention-request")
+        today = self._clock.now().astimezone(KST).date()
+        self._spawn(self._requested(reason, today), "retention-request")
 
-    async def _requested(self, reason: Reason) -> None:
+    async def _requested(self, reason: Reason, today: date) -> None:
         try:
             await asyncio.sleep(self.request_delay_sec)
         finally:
             self._queued = False
-        await self._guarded(reason)
+        await self._guarded(reason, today)
 
     async def start(self) -> None:
         """Start the schedule; a start after today's ``run_at`` that finds no run today also runs
@@ -303,9 +308,9 @@ class RetentionJob:
                 await asyncio.sleep(min(left, _MAX_SLEEP_SEC))
             await self._guarded("schedule")
 
-    async def _guarded(self, reason: Reason) -> None:
+    async def _guarded(self, reason: Reason, today: date | None = None) -> None:
         try:
-            await self.run_once(reason)
+            await self.run_once(reason, today)
         except Exception as exc:
             self._log.emit("system", event="retention.failed", error=f"{type(exc).__name__}: {exc}")
 
@@ -325,19 +330,20 @@ class RetentionJob:
 
     # -- one run ---------------------------------------------------------------------------------
 
-    async def run_once(self, reason: Reason) -> RetentionResult:
+    async def run_once(self, reason: Reason, today: date | None = None) -> RetentionResult:
+        """One clean-up; ``today`` (KST) pins the cutoffs to that day instead of the clock's."""
         async with self._lock:
             self._run_task = asyncio.current_task()
             try:
-                return await self._run(reason)
+                return await self._run(reason, today)
             finally:
                 self._run_task = None
 
-    async def _run(self, reason: Reason) -> RetentionResult:
+    async def _run(self, reason: Reason, pinned: date | None) -> RetentionResult:
         started = _time.monotonic()
         s = self._settings.get()
         now = self._clock.now()
-        today = now.astimezone(KST).date()
+        today = pinned if pinned is not None else now.astimezone(KST).date()
         cutoff = retention_cutoff(today, s.log_retention_days)
         cc = compress_cutoff(today, s.log_compress_after_days)
         errors: list[str] = []
@@ -348,6 +354,7 @@ class RetentionJob:
         except Exception as exc:
             errors.append(f"files: {exc!r}")
         index_rows = 0
+        self._index.expired_before = cutoff  # the indexer leaves undeletable expired files alone (minor 14)
         try:
             index_rows = await self._index.delete_before(cutoff.isoformat(), self._delete_chunk)
         except Exception as exc:
@@ -445,6 +452,8 @@ class RetentionJob:
         """Gzip the plain file ``f`` (merged into ``gz`` when one exists for the day). False when it
         is not fully indexed yet (W15), or the day's ``gz`` is not, or ``f`` grew meanwhile."""
         state = await self._index.file_state(f.name)
+        if state is not None and state.offset < f.size:  # a torn last line is final by now (minor 9)
+            state = await self._index.finish_tail(f)
         if state is None or state.offset != f.size:
             return False
         if gz is not None:

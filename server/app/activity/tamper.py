@@ -248,6 +248,9 @@ class TamperScanner:
         # The previous run's last state, compared by this run's first scan (then dropped).
         self._prev_values: dict[str, int | str | None] | None = None
         self._prev_log_sizes: dict[str, int] | None = None
+        # Why the persisted baseline could not be used ("corrupt", or "missing" while logs already
+        # exist): reported by the first scan instead of starting fresh silently (plan review minor 7).
+        self._baseline_reset: str | None = None
         if baseline_path is not None:
             self._load_baseline(baseline_path)
 
@@ -264,6 +267,11 @@ class TamperScanner:
             self._save_baseline()
 
     def scan(self) -> None:
+        if self._baseline_reset is not None:
+            # someone with admin rights could stop the service and delete the baseline with the logs:
+            # what changed while stopped can no longer be compared, so that itself is the finding
+            self._tamper.report("baseline_reset", reason=self._baseline_reset, while_stopped=True)
+            self._baseline_reset = None
         self._scan_registry()
         self._scan_scripts()
         self._scan_logs()
@@ -275,6 +283,8 @@ class TamperScanner:
         try:
             raw = path.read_text("utf-8")
         except FileNotFoundError:
+            if self._list_logs():  # logs from an earlier run, but no baseline: removed, not new
+                self._baseline_reset = "missing"
             return
         except OSError:
             raw = ""
@@ -292,6 +302,7 @@ class TamperScanner:
                 raise ValueError("bad expected_removals")
         except (ValueError, TypeError, KeyError):
             print("tamper-baseline: corrupt file, starting fresh", file=sys.stderr, flush=True)
+            self._baseline_reset = "corrupt"
             return
         self._prev_values = registry
         self._prev_log_sizes = logs
