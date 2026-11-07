@@ -203,15 +203,14 @@ struct Shown {
 /// ([`on_notice_window_event`]).
 pub type NoticeRegistry = Arc<Mutex<HashMap<String, Arc<NoticeState>>>>;
 
-/// The app-level window-event handler (`tauri::Builder::on_window_event`): a close request is
-/// refused unless we close the window; `Destroyed` is recorded (and the label forgotten).
+/// The notice windows' events, from the app's run callback: a close request is refused unless we
+/// close the window; `Destroyed` is recorded (and the label forgotten).
 pub fn on_notice_window_event(
     registry: &NoticeRegistry,
     label: &str,
     event: &tauri::WindowEvent,
     log: &Log,
 ) {
-    log(&format!("DEBUG window event {label}: {event:?}"));
     let state = registry
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -312,7 +311,6 @@ unsafe fn configure_webview(
         settings
             .cast::<ICoreWebView2Settings3>()?
             .SetAreBrowserAcceleratorKeysEnabled(spec.accelerator_keys)?;
-        log("DEBUG webview configured");
         let mut token = 0i64;
         webview.add_ProcessFailed(
             &ProcessFailedEventHandler::create(Box::new(move |_, args| {
@@ -320,11 +318,11 @@ unsafe fn configure_webview(
                 if let Some(args) = args {
                     args.ProcessFailedKind(&mut kind)?;
                 }
+                log(&format!(
+                    "notice window: WebView2 process failed (kind {})",
+                    kind.0
+                ));
                 if process_failure_closes(kind.0) {
-                    log(&format!(
-                        "notice window: WebView2 process failed (kind {})",
-                        kind.0
-                    ));
                     state.on_process_failed();
                 }
                 Ok(())
@@ -457,9 +455,7 @@ fn build_window(
         let _ = app.run_on_main_thread(move || {
             use windows::Win32::Foundation::HWND;
             disable_close(HWND(hwnd as *mut _));
-            eprintln!("DEBUG front: start");
             bring_to_front(HWND(hwnd as *mut _));
-            eprintln!("DEBUG front: done");
         });
     }
     Ok(window)
@@ -579,11 +575,8 @@ pub fn run_webview_agent(cfg: AgentConfig) -> i32 {
     let built = {
         let (code, done, log) = (code.clone(), done.clone(), log.clone());
         let runner_for = runner_for.clone();
-        let (events, notices, events_log) = (registry.clone(), registry, log.clone());
+        let notices = registry.clone();
         tauri::Builder::default()
-            .on_window_event(move |window, event| {
-                on_notice_window_event(&events, window.label(), event, &events_log)
-            })
             .setup(move |app| {
                 let handle = app.handle().clone();
                 std::thread::Builder::new()
@@ -610,19 +603,17 @@ pub fn run_webview_agent(cfg: AgentConfig) -> i32 {
         }
     };
     let running = done.clone();
-    app.run_return(move |_, event| {
-        match &event {
-            RunEvent::MainEventsCleared | RunEvent::Resumed => {}
-            other => eprintln!("DEBUG run event: {other:?}"),
+    app.run_return(move |_, event| match event {
+        // Window events reach this callback from the window's creation on (a window's own
+        // listeners are attached a moment later: an early Alt+F4 would slip past them).
+        RunEvent::WindowEvent { label, event, .. } => {
+            on_notice_window_event(&registry, &label, &event, &log)
         }
         // The last window closing (a notice the user got rid of) must not end the agent.
-        if let RunEvent::ExitRequested {
+        RunEvent::ExitRequested {
             api, code: None, ..
-        } = event
-            && !running.load(Ordering::SeqCst)
-        {
-            api.prevent_exit();
-        }
+        } if !running.load(Ordering::SeqCst) => api.prevent_exit(),
+        _ => {}
     });
     code.load(Ordering::SeqCst)
 }
@@ -791,13 +782,7 @@ mod tests {
             &log,
         );
         assert_eq!(
-            lines
-                .lock()
-                .unwrap()
-                .iter()
-                .filter(|l| !l.starts_with("DEBUG"))
-                .cloned()
-                .collect::<Vec<_>>(),
+            lines.lock().unwrap().as_slice(),
             ["notice window: gone without a close_notice"]
         );
         assert!(!ours.take_closed_by_user());

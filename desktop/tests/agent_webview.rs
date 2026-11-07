@@ -182,9 +182,15 @@ fn a_killed_webview_is_reported_closed_and_the_notice_comes_back() {
     });
     let taskkill = mcp_monitor::winutil::system_tool("taskkill.exe");
     for pid in browsers {
-        let _ = std::process::Command::new(&taskkill)
+        let out = std::process::Command::new(&taskkill)
             .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .output();
+            .output()
+            .unwrap();
+        eprintln!(
+            "taskkill {pid}: {:?} {}",
+            out.status,
+            String::from_utf8_lossy(&out.stdout)
+        );
     }
     wait_for(10, || {
         srv.requests()
