@@ -493,6 +493,65 @@ mod tests {
         assert!(pack_dir(src.path(), 3).unwrap_err().contains("bundle.json"));
     }
 
+    /// Review item 6: Windows device names (with or without an extension, any case) are refused
+    /// in a payload, both when packing and when extracting; names that only start alike are fine.
+    #[test]
+    fn device_names_are_refused() {
+        use crate::payload_pack::name_problem;
+        for bad in [
+            "CON",
+            "con",
+            "PRN",
+            "AUX",
+            "aux.py",
+            "NUL",
+            "nul.txt",
+            "Nul.tar.gz",
+            "COM1",
+            "com9.log",
+            "LPT1",
+            "lpt9",
+            "COM¹",
+            "LPT³.txt",
+            "CONIN$",
+            "conout$",
+            "con .txt",
+        ] {
+            assert!(name_problem(bad).is_some(), "{bad}");
+        }
+        for fine in [
+            "console.txt",
+            "auxiliary.py",
+            "nullable.py",
+            "com10",
+            "lpt0x",
+            "COM0x.txt",
+            "prn_x",
+            "aconx",
+        ] {
+            assert_eq!(name_problem(fine), None, "{fine}");
+        }
+        let src = tempfile::tempdir().unwrap();
+        sample(src.path());
+        fs::write(src.path().join("web/aux.js"), "x").unwrap();
+        assert!(
+            pack_dir(src.path(), 3)
+                .unwrap_err()
+                .ends_with(r"web\aux.js: Windows 장치 이름(CON, NUL, COM1 등)은 쓸 수 없습니다"),
+            "pack refuses it"
+        );
+        let out = tempfile::tempdir().unwrap();
+        let name = "web/nul.html";
+        assert!(matches!(
+            extract(
+                &raw_files(&[(name, b"x")]),
+                &listing(&[name], b"x"),
+                &out.path().join("d")
+            ),
+            Err(PayloadError::UnexpectedEntry(_))
+        ));
+    }
+
     #[test]
     fn errors_read_in_korean() {
         assert_eq!(

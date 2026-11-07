@@ -133,6 +133,63 @@ fn real_dir(p: &Path) -> bool {
     attributes(p).is_ok_and(|a| is_directory(a) && !is_reparse(a))
 }
 
+/// Folders held open without delete sharing (closed on drop): while held, none of them can be
+/// renamed, deleted or replaced by a link, so a path through them keeps meaning what was checked.
+pub(crate) struct Pinned(Vec<isize>);
+
+impl Drop for Pinned {
+    fn drop(&mut self) {
+        use windows::Win32::Foundation::{CloseHandle, HANDLE};
+        for h in &self.0 {
+            // SAFETY: each handle was opened by pin_folders and is closed once, here.
+            let _ = unsafe { CloseHandle(HANDLE(*h as *mut _)) };
+        }
+    }
+}
+
+/// Opens each of `folders` (the link itself, never its target) and checks through the handle that
+/// it is a real folder; a link, a file or a missing path is an error (review item 7: the check and
+/// the removal see the same folders).
+pub(crate) fn pin_folders(folders: &[&Path]) -> io::Result<Pinned> {
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Storage::FileSystem::{
+        BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_FLAG_BACKUP_SEMANTICS,
+        FILE_FLAG_OPEN_REPARSE_POINT, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_SHARE_READ,
+        FILE_SHARE_WRITE, GetFileInformationByHandle, OPEN_EXISTING,
+    };
+    use windows::core::HSTRING;
+    let mut pinned = Pinned(Vec::new());
+    for folder in folders {
+        // SAFETY: the HSTRING outlives the call; the handle is owned by `pinned` from here on.
+        let h = unsafe {
+            CreateFileW(
+                &HSTRING::from(*folder),
+                // Data access (listing): a handle with only attribute access takes no part in
+                // share-mode checks and would not stop a rename.
+                FILE_LIST_DIRECTORY.0 | FILE_READ_ATTRIBUTES.0,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                None,
+                OPEN_EXISTING,
+                FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+                None,
+            )
+        }
+        .map_err(io::Error::from)?;
+        pinned.0.push(h.0 as isize);
+        let mut info = BY_HANDLE_FILE_INFORMATION::default();
+        // SAFETY: a handle opened above; `info` is a valid out pointer.
+        unsafe { GetFileInformationByHandle(HANDLE(h.0), &mut info) }.map_err(io::Error::from)?;
+        let a = info.dwFileAttributes;
+        if !is_directory(a) || is_reparse(a) {
+            return Err(io::Error::other(format!(
+                "{} 은(는) 링크이거나 폴더가 아닙니다",
+                folder.display()
+            )));
+        }
+    }
+    Ok(pinned)
+}
+
 /// `remove_webview_profiles`: removes `<Users>\*\AppData\Local\mcp-monitor` of every user (the
 /// notice window's Edge and WebView2 data and the app window's profile) and returns how many
 /// were removed. Only that pattern (`*` exactly one level, the last three parts fixed); a user,
@@ -178,10 +235,22 @@ pub(crate) fn remove_glob_within(pattern: &Path, within: Duration) -> Result<u32
                 continue;
             }
         };
-        let local = user.join("AppData").join("Local");
-        if !real_dir(&user) || !real_dir(&user.join("AppData")) || !real_dir(&local) {
+        let appdata = user.join("AppData");
+        let local = appdata.join("Local");
+        if !real_dir(&user) || !real_dir(&appdata) || !real_dir(&local) {
             continue;
         }
+        // Held until this user is done: the folders checked above stay the ones removed below.
+        let _pinned = match pin_folders(&[&user, &appdata, &local]) {
+            Ok(p) => p,
+            Err(e) => {
+                failed.push(format!(
+                    "{} 을(를) 확인하지 못했습니다: {e}",
+                    local.display()
+                ));
+                continue;
+            }
+        };
         let profile = local.join("mcp-monitor");
         match attributes(&profile) {
             Ok(a) if is_directory(a) => match remove_path_within(&profile, within) {
@@ -411,6 +480,35 @@ mod tests {
             .unwrap(),
             0
         );
+    }
+
+    /// Review item 7: while `remove_glob` removes a profile, the user, `AppData` and `Local` folders
+    /// above it are held open without delete sharing: a logged-on user cannot rename one away and
+    /// put a junction in its place between the check and the removal. A link is never pinned.
+    #[test]
+    fn pinned_folders_can_be_neither_renamed_nor_replaced() {
+        let s = Scratch::new();
+        let user = s.path().join("u");
+        let local = user.join("AppData").join("Local");
+        fs::create_dir_all(local.join("mcp-monitor")).unwrap();
+        let pins = pin_folders(&[&user, &user.join("AppData"), &local]).unwrap();
+        for (from, to) in [
+            (user.join("AppData"), user.join("AppData2")),
+            (local.clone(), user.join("AppData").join("Local2")),
+            (user.clone(), s.path().join("u2")),
+        ] {
+            assert!(fs::rename(&from, &to).is_err(), "{}", from.display());
+        }
+        assert!(fs::remove_dir(&local).is_err());
+        // What is below the pinned folders can still be removed.
+        remove_path(&local.join("mcp-monitor")).unwrap();
+        drop(pins);
+        fs::rename(user.join("AppData"), user.join("AppData2")).unwrap();
+        junction(&s.path().join("link"), &s.path().join("target"));
+        assert!(pin_folders(&[&s.path().join("link")]).is_err());
+        assert!(pin_folders(&[&s.path().join("missing")]).is_err());
+        fs::write(s.path().join("file"), "x").unwrap();
+        assert!(pin_folders(&[&s.path().join("file")]).is_err());
     }
 
     #[test]

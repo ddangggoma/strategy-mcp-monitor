@@ -100,9 +100,11 @@ fn remove_profile(scratch: &Scratch) {
 }
 
 /// The notice page of the first test: once loaded (it fetches `/ran`, so the script is known to
-/// have run), it tries to open a window and to navigate away. Neither may reach the server.
+/// have run), it tries to open a window and to navigate away, and 1.5 s later fetches
+/// `/still-here`, which only a page that was not replaced can do.
 const SCRIPTED_PAGE: &str = "<!doctype html><title>notice</title><button>확인</button>\
-<script>fetch('/ran').finally(() => { window.open('/popup'); location.href = '/elsewhere'; });</script>";
+<script>fetch('/ran').finally(() => { setTimeout(() => fetch('/still-here'), 1500); \
+window.open('/popup'); location.href = '/elsewhere'; });</script>";
 
 #[test]
 #[ignore = "opens a real WebView2 window on this desktop"]
@@ -142,26 +144,32 @@ fn webview_notice_is_topmost_ignores_wm_close_and_closes_on_command() {
         (w - 640).abs() <= 2 && (h - 600).abs() <= 2,
         "client area {w}×{h}"
     );
-    // The page ran its script; its window.open and navigation never reached the server, and the
-    // agent shows no other window.
-    wait_for(15, || {
-        srv.requests()
-            .iter()
-            .any(|r| r.path == "/ran")
-            .then_some(())
-    });
-    std::thread::sleep(Duration::from_secs(2));
-    let paths: Vec<String> = srv.requests().into_iter().map(|r| r.path).collect();
-    assert!(
-        !paths.iter().any(|p| p == "/popup" || p == "/elsewhere"),
-        "{paths:?}"
-    );
-    assert_eq!(
-        windows_of(agent.id()).len(),
-        1,
-        "{:?}",
-        windows_of(agent.id())
-    );
+    // The page ran its script and is still the one shown after trying to leave (navigation
+    // refused); its window.open never reached the server, and the agent shows no other window.
+    // (WebView2 may already have sent the GET for a navigation it then cancels: the refused page
+    // is never shown, which is what the navigation rule promises.)
+    let has = |path: &str| srv.requests().iter().any(|r| r.path == path);
+    wait_for(15, || has("/ran").then_some(()));
+    wait_for(15, || has("/still-here").then_some(()));
+    assert!(!has("/popup"), "window.open reached the server");
+    {
+        use std::io::Write;
+        let _ = writeln!(
+            std::io::stderr(),
+            "notice page: refused navigation to /elsewhere {} the server",
+            if has("/elsewhere") {
+                "reached"
+            } else {
+                "did not reach"
+            }
+        );
+    }
+    let titled: Vec<String> = windows_of(agent.id())
+        .into_iter()
+        .map(|(_, t)| t)
+        .filter(|t| !t.is_empty())
+        .collect();
+    assert_eq!(titled, ["MCP Monitor 고지"]);
     assert!(unsafe { IsWindow(Some(hwnd)) }.as_bool());
     unsafe { PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0)).unwrap() };
     std::thread::sleep(Duration::from_secs(1));
@@ -238,12 +246,17 @@ fn tree_of(root: u32) -> Vec<u32> {
     tree
 }
 
-fn kill(pid: u32) {
+/// Ends `pid` and waits up to 10 s for it to be gone; what happened, for the log.
+fn kill(pid: u32) -> String {
     use windows::Win32::System::Threading::*;
-    if let Ok(h) = unsafe { OpenProcess(PROCESS_TERMINATE, false, pid) } {
-        let _ = unsafe { TerminateProcess(h, 1) };
-        let _ = unsafe { windows::Win32::Foundation::CloseHandle(h) };
-    }
+    let h = match unsafe { OpenProcess(PROCESS_TERMINATE | PROCESS_SYNCHRONIZE, false, pid) } {
+        Ok(h) => h,
+        Err(e) => return format!("{pid}: not opened ({e})"),
+    };
+    let ended = unsafe { TerminateProcess(h, 1) };
+    let waited = unsafe { WaitForSingleObject(h, 10_000) };
+    let _ = unsafe { windows::Win32::Foundation::CloseHandle(h) };
+    format!("{pid}: terminate {ended:?}, wait {waited:?}")
 }
 
 /// Review I3 / Review Focus 6: the user ends the notice's WebView2 browser in Task Manager. The
@@ -266,10 +279,18 @@ fn a_killed_webview2_browser_is_reported_closed_and_a_fresh_window_replaces_it()
         let b = browsers_of(agent.id());
         (!b.is_empty()).then_some(b)
     });
-    for browser in browsers {
-        for pid in tree_of(browser) {
-            kill(pid);
+    let mut killed = Vec::new();
+    for browser in &browsers {
+        for pid in tree_of(*browser) {
+            killed.push(kill(pid));
         }
+    }
+    {
+        use std::io::Write;
+        let _ = writeln!(
+            std::io::stderr(),
+            "browser processes {browsers:?} ended: {killed:?}"
+        );
     }
     wait_for(20, || {
         srv.requests()

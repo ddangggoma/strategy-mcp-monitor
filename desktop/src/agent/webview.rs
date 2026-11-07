@@ -395,7 +395,12 @@ unsafe fn configure_webview(
             .BrowserProcessId(&mut pid)
             .and_then(|()| BrowserHandle::open(pid))
         {
-            Ok(handle) => state.watch_browser(Box::new(handle)),
+            Ok(handle) => {
+                log(&format!(
+                    "notice window: watching the WebView2 browser process {pid}"
+                ));
+                state.watch_browser(Box::new(handle));
+            }
             Err(e) => log(&format!(
                 "notice window: the browser process cannot be watched: {e}"
             )),

@@ -69,7 +69,9 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 /// Why one part of a payload name is not allowed, or `None` when it is fine.
 ///
 /// A part must not be empty, `.` or `..`, must not hold `\ / : * ? " < > |` or a control
-/// character, and must not end in `.` or a space (Windows would silently drop those).
+/// character, must not end in `.` or a space (Windows would silently drop those), and must not be
+/// a device name (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`, also with `¹²³`,
+/// `CONIN$`, `CONOUT$`), with or without an extension, in any case (review item 6).
 pub fn name_problem(part: &str) -> Option<&'static str> {
     if part.is_empty() {
         Some("빈 이름")
@@ -82,8 +84,31 @@ pub fn name_problem(part: &str) -> Option<&'static str> {
         Some("이름에 쓸 수 없는 문자가 있습니다")
     } else if part.ends_with('.') || part.ends_with(' ') {
         Some("이름이 '.'이나 공백으로 끝납니다")
+    } else if is_device_name(part) {
+        Some("Windows 장치 이름(CON, NUL, COM1 등)은 쓸 수 없습니다")
     } else {
         None
+    }
+}
+
+/// The part before the first `.` (spaces before it do not count) is a Windows device name.
+fn is_device_name(part: &str) -> bool {
+    let stem = part
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches(' ')
+        .to_ascii_uppercase();
+    match stem.as_str() {
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$" => true,
+        _ => ["COM", "LPT"].iter().any(|p| {
+            stem.strip_prefix(p).is_some_and(|n| {
+                matches!(
+                    n,
+                    "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+                )
+            })
+        }),
     }
 }
 
