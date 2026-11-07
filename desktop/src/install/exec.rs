@@ -1,12 +1,19 @@
 //! `RealExecutor`: runs a plan on this PC (Plan 5's `$Internal`, `$Conditions`, `$AfterStep` and
 //! `Invoke-Native`). System32 tools go through a [`Runner`] so tests never start one for real;
-//! administrator rights and the service come from the [`Host`]. Task 7 and 8 add the internal
-//! actions that are still `아직 구현되지 않았습니다`.
+//! administrator rights and the service come from the [`Host`], registry writes go through a
+//! [`Registry`]. Task 8 adds the uninstall actions that are still `아직 구현되지 않았습니다`.
 
 use crate::install::acl::{ADMINISTRATORS, SYSTEM, initialize_data_root, kst_now};
 use crate::install::audit::restore_registry;
 use crate::install::host::{Host, SERVICE_NAME};
+use crate::install::paths::is_inside;
 use crate::install::plan::{Executor, Plan, Step, StepError};
+use crate::install::procs::stop_apps;
+use crate::install::registry::{Registry, parse_reg_value};
+use crate::install::shortcut::create_shortcut;
+use crate::install::stage::{
+    PayloadSource, StdFs, remove_old, running_inside_problem, stage, swap,
+};
 use serde_json::Value;
 use std::io::{self, Write};
 use std::os::windows::process::CommandExt;
@@ -78,6 +85,51 @@ pub struct RealExecutor<'a, R: Runner, W: Write> {
     /// SYSTEM + Administrators. Tests without admin rights put this account there (Y18).
     pub data_root_owner: String,
     pub data_root_sids: Vec<String>,
+    /// `(registry-set)` writes here: the real registry, except in unit tests (a `FakeRegistry`,
+    /// so no test can write HKLM even on the elevated CI runner).
+    pub registry: Box<dyn Registry + 'a>,
+    /// This exe, copied into the install folder by `(stage)` (`None`: Windows could not say).
+    pub self_exe: Option<PathBuf>,
+    /// What `(stage)` extracts (`None`: the payload embedded in this exe).
+    pub payload: Option<PayloadSource>,
+}
+
+#[cfg(not(test))]
+fn default_registry<'a>() -> Box<dyn Registry + 'a> {
+    Box::new(crate::install::registry::WinRegistry)
+}
+
+#[cfg(test)]
+fn default_registry<'a>() -> Box<dyn Registry + 'a> {
+    Box::new(crate::install::registry::FakeRegistry::default())
+}
+
+/// `(check-os)` (Y33): warnings only, the install goes on. A Home edition (the caption says
+/// `Home`, or SKU 98–101) is no RDP host; an install folder outside Program Files may be writable
+/// by ordinary users; without the WebView2 runtime the app and notice windows cannot open.
+pub fn check_os_warnings(
+    caption: &str,
+    sku: u32,
+    install_dir: &Path,
+    program_files: &Path,
+    webview2: Option<&str>,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    if caption.contains("Home") || (98..=101).contains(&sku) {
+        out.push(format!(
+            "경고: {caption}은(는) RDP 호스트가 아니어서 세션 수집이 동작하지 않습니다. 설치는 계속합니다."
+        ));
+    }
+    if !is_inside(install_dir, program_files) {
+        out.push(format!(
+            "경고: {} 은(는) Program Files 밖입니다. 서비스(SYSTEM)가 이 폴더의 프로그램을 실행하므로 일반 사용자가 쓸 수 없는 폴더여야 합니다.",
+            install_dir.display()
+        ));
+    }
+    if webview2.is_none_or(|v| v.trim().is_empty() || v.trim() == "0.0.0.0") {
+        out.push("경고: WebView2 런타임이 없습니다. 관리 화면 창과 고지 창이 열리지 않습니다(https://go.microsoft.com/fwlink/p/?LinkId=2124703 에서 설치).".into());
+    }
+    out
 }
 
 impl<'a, R: Runner, W: Write> RealExecutor<'a, R, W> {
@@ -98,7 +150,72 @@ impl<'a, R: Runner, W: Write> RealExecutor<'a, R, W> {
             stop_wait: Duration::from_secs(60),
             data_root_owner: ADMINISTRATORS.to_string(),
             data_root_sids: vec![SYSTEM.to_string(), ADMINISTRATORS.to_string()],
+            registry: default_registry(),
+            self_exe: std::env::current_exe().ok(),
+            payload: None,
         }
+    }
+
+    /// SYSTEM, Administrators and the installing account: who may own the data root and the
+    /// install tree.
+    fn owners(&self) -> [String; 3] {
+        [
+            SYSTEM.to_string(),
+            ADMINISTRATORS.to_string(),
+            self.host.user_sid(),
+        ]
+    }
+
+    /// `(check-os)`: prints the warnings of [`check_os_warnings`] for install folder `inst`.
+    fn check_os(&mut self, inst: &str) -> Result<i32, StepError> {
+        let (caption, sku) = self.host.os_edition();
+        let program_files = self.host.env().get("ProgramFiles").unwrap_or_default();
+        let webview2 = self.host.webview2_version();
+        for line in check_os_warnings(
+            &caption,
+            sku,
+            Path::new(inst),
+            Path::new(&program_files),
+            webview2.as_deref(),
+        ) {
+            let _ = writeln!(self.out, "{line}");
+        }
+        Ok(0)
+    }
+
+    /// `(stage) <I>.staging <I>`: refused when this exe runs from the install folder (F06).
+    fn stage_payload(&mut self, staging: &str, inst: &str) -> Result<i32, StepError> {
+        let Some(exe) = self.self_exe.clone() else {
+            return Err(StepError::Failed(
+                "이 실행 파일의 위치를 알 수 없습니다".into(),
+            ));
+        };
+        let version = self.host.payload().version;
+        if let Some(why) = running_inside_problem(&exe, Path::new(inst), &version) {
+            return Err(StepError::Failed(why));
+        }
+        let src = self.payload.take().unwrap_or_else(PayloadSource::embedded);
+        let written = stage(Path::new(staging), &src, &exe).map_err(StepError::Failed)?;
+        let _ = writeln!(
+            self.out,
+            "  {staging} 에 {:.1} MB를 풀었습니다.",
+            written as f64 / 1_048_576.0
+        );
+        Ok(0)
+    }
+
+    /// `(registry-set) <key> <Name=REG_…:value>…`: every value is checked before any is written.
+    fn registry_set(&mut self, step: &Step) -> Result<i32, StepError> {
+        let key = need(step, 0)?;
+        let values = step.args[1..]
+            .iter()
+            .map(|v| parse_reg_value(v))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(StepError::Failed)?;
+        self.registry
+            .set_values(key, &values)
+            .map(|()| 0)
+            .map_err(StepError::Failed)
     }
 
     /// `<D>\data\<name>` exists.
@@ -227,12 +344,34 @@ impl<R: Runner, W: Write> Executor for RealExecutor<'_, R, W> {
                     Err(StepError::NotAdmin)
                 }
             }
+            "(check-os)" => self.check_os(need(step, 0)?),
+            "(stage)" => self.stage_payload(need(step, 0)?, need(step, 1)?),
+            "(stop-apps)" => stop_apps(Path::new(need(step, 0)?))
+                .map(|()| 0)
+                .map_err(StepError::Failed),
+            "(swap)" => swap(
+                Path::new(need(step, 0)?),
+                Path::new(need(step, 1)?),
+                Path::new(need(step, 2)?),
+                &StdFs,
+                &self.owners(),
+            )
+            .map(|()| 0)
+            .map_err(StepError::Failed),
+            "(registry-set)" => self.registry_set(step),
+            "(shortcut)" => create_shortcut(
+                Path::new(need(step, 0)?),
+                Path::new(need(step, 1)?),
+                need(step, 2)?,
+                need(step, 3)?,
+            )
+            .map(|()| 0)
+            .map_err(StepError::Failed),
+            "(remove-old)" => remove_old(Path::new(need(step, 0)?))
+                .map(|()| 0)
+                .map_err(StepError::Failed),
             "(secure-data-root)" => {
-                let owners = [
-                    SYSTEM.to_string(),
-                    ADMINISTRATORS.to_string(),
-                    self.host.user_sid(),
-                ];
+                let owners = self.owners();
                 initialize_data_root(
                     Path::new(need(step, 0)?),
                     &self.data_root_owner,
@@ -295,6 +434,8 @@ mod tests {
     use super::*;
     use crate::install::host::FakeHost;
     use crate::install::plan::{Plan, Step};
+    use crate::install::registry::{FakeRegistry, RegValue};
+    use crate::install::shortcut::read_shortcut;
     use crate::install::testutil::*;
     use serde_json::{Value, json};
     use std::fs;
@@ -610,13 +751,311 @@ mod tests {
             Ok(0)
         );
         assert_eq!(ex.runner.calls[0].0, "reg");
-        for cmd in ["(stage)", "(swap)", "(registry-set)", "(nope)"] {
+        assert_eq!(
+            ex.internal(&st("x", "(nope)", &[])),
+            Err(StepError::Failed("아직 구현되지 않았습니다".into()))
+        );
+        // Task 7's actions exist now: without their arguments they fail on those, not as missing.
+        for cmd in [
+            "(check-os)",
+            "(stage)",
+            "(stop-apps)",
+            "(swap)",
+            "(registry-set)",
+            "(shortcut)",
+            "(remove-old)",
+        ] {
             assert_eq!(
                 ex.internal(&st("x", cmd, &[])),
-                Err(StepError::Failed("아직 구현되지 않았습니다".into())),
+                Err(StepError::Failed(format!("{cmd} 의 인자가 부족합니다"))),
                 "{cmd}"
             );
         }
+    }
+
+    #[test]
+    fn check_os_warnings_cover_home_program_files_and_webview2() {
+        let pf = Path::new(r"C:\Program Files");
+        let w = check_os_warnings(
+            "Microsoft Windows 11 Home",
+            101,
+            Path::new(r"D:\apps\MCP Monitor"),
+            pf,
+            None,
+        );
+        assert_eq!(w.len(), 3);
+        assert!(
+            w[0].contains("RDP") && w[1].contains("Program Files") && w[2].contains("WebView2"),
+            "{w:?}"
+        );
+        assert!(
+            check_os_warnings(
+                "Microsoft Windows 11 Pro",
+                48,
+                &pf.join("MCP Monitor"),
+                pf,
+                Some("156.0.0.0")
+            )
+            .is_empty()
+        );
+        assert!(
+            check_os_warnings(
+                "Microsoft Windows 11 Pro",
+                48,
+                &pf.join("MCP Monitor"),
+                pf,
+                Some("0.0.0.0")
+            )[0]
+            .contains("WebView2")
+        );
+        // A Home SKU whatever the caption says; Program Files compared ignoring case (F04).
+        let w = check_os_warnings(
+            "Microsoft Windows 11",
+            98,
+            Path::new(r"c:\program files\MCP Monitor"),
+            pf,
+            Some("156.0.0.0"),
+        );
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert_eq!(
+            w[0],
+            "경고: Microsoft Windows 11은(는) RDP 호스트가 아니어서 세션 수집이 동작하지 않습니다. 설치는 계속합니다."
+        );
+        assert_eq!(
+            check_os_warnings("Microsoft Windows 11 Pro", 48, pf, pf, Some("1.0"))[0],
+            r"경고: C:\Program Files 은(는) Program Files 밖입니다. 서비스(SYSTEM)가 이 폴더의 프로그램을 실행하므로 일반 사용자가 쓸 수 없는 폴더여야 합니다.",
+            "Program Files itself is not a folder inside it"
+        );
+    }
+
+    #[test]
+    fn check_os_step_prints_the_warnings_and_goes_on() {
+        let p = plan("install", None, None, vec![]);
+        let mut h = FakeHost::new();
+        let inst = format!(r"{}\MCP Monitor", h.env.get("ProgramFiles").unwrap());
+        let step = st("check_os", "(check-os)", &[&inst]);
+        let mut ex = RealExecutor::new(&p, &h, FakeRunner::default(), Vec::new());
+        assert_eq!(ex.internal(&step), Ok(0));
+        assert!(ex.out.is_empty(), "{}", String::from_utf8_lossy(&ex.out));
+        drop(ex);
+        h.os = ("Microsoft Windows 11 Home".into(), 101);
+        h.webview2 = None;
+        let mut ex = RealExecutor::new(&p, &h, FakeRunner::default(), Vec::new());
+        assert_eq!(ex.internal(&step), Ok(0));
+        let out = String::from_utf8(ex.out).unwrap();
+        assert_eq!(out.lines().count(), 2, "{out}");
+        assert!(out.contains("Microsoft Windows 11 Home은(는) RDP") && out.contains("WebView2"));
+    }
+
+    #[test]
+    fn registry_values_are_typed_and_applied() {
+        assert_eq!(
+            parse_reg_value("DisplayName=REG_SZ:MCP Monitor").unwrap(),
+            ("DisplayName".into(), RegValue::Sz("MCP Monitor".into()))
+        );
+        assert_eq!(
+            parse_reg_value(r#"DisplayIcon=REG_SZ:"C:\a b\x.exe",0"#)
+                .unwrap()
+                .1,
+            RegValue::Sz(r#""C:\a b\x.exe",0"#.into())
+        );
+        assert_eq!(
+            parse_reg_value("NoModify=REG_DWORD:1").unwrap(),
+            ("NoModify".into(), RegValue::Dword(1))
+        );
+        assert_eq!(
+            parse_reg_value("X=REG_SZ:a=b").unwrap().1,
+            RegValue::Sz("a=b".into())
+        );
+        for bad in [
+            "X=REG_BINARY:1",
+            "X=REG_DWORD:-1",
+            "=REG_SZ:a",
+            "X",
+            "X=REG_DWORD:4294967296",
+            "X=REG_DWORD:",
+            "X=REG_DWORD:１",
+            "X=REG_DWORD:0x1",
+        ] {
+            assert!(parse_reg_value(bad).is_err(), "{bad}");
+        }
+        let mut r = FakeRegistry::default();
+        r.set_values("HKLM\\X", &[("A".into(), RegValue::Dword(1))])
+            .unwrap();
+        assert_eq!(r.string("HKLM\\X", "A"), None);
+        r.delete_key("HKLM\\X").unwrap();
+        assert!(r.subkeys("HKLM").is_empty());
+    }
+
+    #[test]
+    fn registry_set_step_writes_the_uninstall_entry_and_checks_every_value_first() {
+        let p = plan("install", None, None, vec![]);
+        let h = FakeHost::new();
+        let mut fake = FakeRegistry::default();
+        let key = crate::install::host::UNINSTALL_KEY;
+        {
+            let mut ex = RealExecutor::new(&p, &h, FakeRunner::default(), Vec::new());
+            ex.registry = Box::new(&mut fake);
+            let bad = st(
+                "uninstall_entry",
+                "(registry-set)",
+                &[
+                    key,
+                    "DisplayName=REG_SZ:MCP Monitor",
+                    "NoModify=REG_DWORD:x",
+                ],
+            );
+            assert!(
+                matches!(ex.internal(&bad), Err(StepError::Failed(m)) if m.contains("NoModify"))
+            );
+            let good = st(
+                "uninstall_entry",
+                "(registry-set)",
+                &[
+                    key,
+                    "DisplayName=REG_SZ:MCP Monitor",
+                    "DisplayVersion=REG_SZ:1.1.0",
+                    "NoModify=REG_DWORD:1",
+                ],
+            );
+            assert_eq!(ex.internal(&good), Ok(0));
+        }
+        assert_eq!(
+            fake.0.len(),
+            1,
+            "nothing written by the refused step: {fake:?}"
+        );
+        assert_eq!(fake.string(key, "DisplayVersion").as_deref(), Some("1.1.0"));
+        assert_eq!(fake.0[key]["NoModify"], RegValue::Dword(1));
+        assert_eq!(
+            fake.subkeys(r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+            ["MCPMonitor"]
+        );
+    }
+
+    #[test]
+    fn shortcut_points_at_the_target() {
+        let s = Scratch::new();
+        let target = s.path().join("i").join("mcp-monitor.exe");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, b"MZ").unwrap();
+        let lnk = s.path().join("MCP Monitor.lnk");
+        create_shortcut(&lnk, &target, "", "MCP Monitor").unwrap();
+        assert_eq!(
+            read_shortcut(&lnk).unwrap(),
+            (target.clone(), "MCP Monitor".to_string())
+        );
+        // The step replaces an existing shortcut.
+        let p = plan("install", None, None, vec![]);
+        let h = FakeHost::new();
+        let mut ex = RealExecutor::new(&p, &h, FakeRunner::default(), Vec::new());
+        let step = st(
+            "start_menu_shortcut",
+            "(shortcut)",
+            &[
+                &lnk.display().to_string(),
+                &target.display().to_string(),
+                "",
+                "MCP Monitor 1.1.0",
+            ],
+        );
+        assert_eq!(ex.internal(&step), Ok(0));
+        assert_eq!(read_shortcut(&lnk).unwrap().1, "MCP Monitor 1.1.0");
+        assert!(read_shortcut(&s.path().join("missing.lnk")).is_err());
+    }
+
+    /// A release payload of three files, packed from a scratch folder.
+    fn release_payload(s: &Scratch, version: &str) -> PayloadSource {
+        let src = s.path().join(format!("payload-{version}"));
+        fs::create_dir_all(src.join("bin/monitor")).unwrap();
+        fs::write(
+            src.join("bundle.json"),
+            format!(r#"{{"layout":"pyinstaller","version":"{version}","agent":"desktop"}}"#),
+        )
+        .unwrap();
+        fs::write(src.join("bin/monitor/mcp-monitor-server.exe"), b"MZ server").unwrap();
+        let p = crate::payload_pack::pack_dir(&src, 3).unwrap();
+        PayloadSource {
+            archive: p.archive,
+            sha256: p.sha256,
+            manifest: p.manifest,
+            kind: "release".into(),
+        }
+    }
+
+    #[test]
+    fn stage_swap_and_remove_old_steps_upgrade_an_install_folder() {
+        let s = Scratch::new();
+        let inst = s.path().join("MCP Monitor");
+        let (i, staging, old) = (
+            inst.display().to_string(),
+            format!("{}.staging", inst.display()),
+            format!("{}.old", inst.display()),
+        );
+        fs::create_dir_all(&inst).unwrap();
+        fs::write(inst.join("bundle.json"), r#"{"version":"1.0.0"}"#).unwrap();
+        let exe = s.path().join("downloads").join("mcp-monitor-1.1.0.exe");
+        fs::create_dir_all(exe.parent().unwrap()).unwrap();
+        fs::write(&exe, b"MZ 1.1.0").unwrap();
+        let p = plan("install", Some(&inst), None, vec![]);
+        let h = FakeHost::new();
+        let mut ex = RealExecutor::new(&p, &h, FakeRunner::default(), Vec::new());
+        ex.self_exe = Some(exe);
+        ex.payload = Some(release_payload(&s, "1.1.0"));
+        assert_eq!(
+            ex.internal(&st("stage_payload", "(stage)", &[&staging, &i])),
+            Ok(0)
+        );
+        assert!(String::from_utf8_lossy(&ex.out).contains("MB를 풀었습니다"));
+        assert!(!ex.condition("old_exists"));
+        assert_eq!(
+            ex.internal(&st("stop_apps", "(stop-apps)", &[&i])),
+            Ok(0),
+            "nothing runs from the scratch install folder"
+        );
+        assert_eq!(
+            ex.internal(&st("swap_install_dir", "(swap)", &[&staging, &i, &old])),
+            Ok(0)
+        );
+        assert_eq!(fs::read(inst.join("mcp-monitor.exe")).unwrap(), b"MZ 1.1.0");
+        assert!(
+            fs::read_to_string(inst.join("bundle.json"))
+                .unwrap()
+                .contains("1.1.0")
+        );
+        assert!(ex.condition("old_exists"));
+        assert_eq!(
+            ex.internal(&st("cleanup_old", "(remove-old)", &[&old])),
+            Ok(0)
+        );
+        assert!(!Path::new(&old).exists() && !Path::new(&staging).exists());
+    }
+
+    #[test]
+    fn stage_step_refuses_the_installed_copy_and_the_fixture_payload() {
+        let s = Scratch::new();
+        let inst = s.path().join("MCP Monitor");
+        let (i, staging) = (
+            inst.display().to_string(),
+            format!("{}.staging", inst.display()),
+        );
+        let p = plan("install", Some(&inst), None, vec![]);
+        let h = FakeHost::new();
+        let step = st("stage_payload", "(stage)", &[&staging, &i]);
+        // Ruling F06: run from the install folder (a repair from the installed copy).
+        let mut ex = RealExecutor::new(&p, &h, FakeRunner::default(), Vec::new());
+        ex.self_exe = Some(inst.join("mcp-monitor.exe"));
+        ex.payload = Some(release_payload(&s, "1.1.0"));
+        assert!(
+            matches!(ex.internal(&step), Err(StepError::Failed(m)) if m.contains("다운로드한 mcp-monitor-1.1.0.exe로 실행하세요"))
+        );
+        // A test build embeds the fixture payload: never installed for real.
+        let mut ex = RealExecutor::new(&p, &h, FakeRunner::default(), Vec::new());
+        assert_eq!(crate::payload::KIND, "fixture");
+        assert!(
+            matches!(ex.internal(&step), Err(StepError::Failed(m)) if m.contains("개발용(fixture)"))
+        );
+        assert!(!Path::new(&staging).exists());
     }
 
     /// A one-shot HTTP server on 127.0.0.1 that answers every request with `status`.

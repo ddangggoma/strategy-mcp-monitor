@@ -9,5 +9,9 @@ pub mod host;
 pub mod install_plan;
 pub mod paths;
 pub mod plan;
+pub mod procs;
+pub mod registry;
+pub mod shortcut;
+pub mod stage;
 #[cfg(test)]
 pub mod testutil;

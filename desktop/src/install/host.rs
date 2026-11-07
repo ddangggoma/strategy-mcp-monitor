@@ -14,6 +14,7 @@ use windows::Win32::System::Services::{
     QueryServiceStatus, SC_HANDLE, SC_MANAGER_CONNECT, SERVICE_QUERY_CONFIG, SERVICE_QUERY_STATUS,
     SERVICE_STATUS, SERVICE_STOPPED,
 };
+use windows::Win32::System::SystemInformation::{GetProductInfo, OS_PRODUCT_TYPE};
 use windows::core::{HSTRING, PCWSTR};
 
 /// The service the installer creates (`sc.exe create mcp-monitor …`).
@@ -22,6 +23,10 @@ pub const SERVICE_NAME: &str = "mcp-monitor";
 /// The Apps & features entry of an install (Y19).
 pub const UNINSTALL_KEY: &str =
     r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\MCPMonitor";
+
+/// The WebView2 Evergreen runtime's per-machine client key (below HKLM).
+pub const WEBVIEW2_CLIENT_KEY: &str =
+    r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Installed {
@@ -57,6 +62,12 @@ pub trait Host {
     fn volumes(&self) -> &dyn Volumes;
     fn user_sid(&self) -> String;
     fn payload(&self) -> PayloadInfo;
+    /// The Windows edition as `Win32_OperatingSystem.Caption` names it (`Microsoft Windows 11
+    /// Home`) and its SKU (`OperatingSystemSKU`, e.g. 101 = Home), for `(check-os)`.
+    fn os_edition(&self) -> (String, u32);
+    /// The WebView2 Evergreen runtime's version (`pv` of its client key; `None` or `0.0.0.0`:
+    /// not installed).
+    fn webview2_version(&self) -> Option<String>;
 }
 
 /// This PC, read only.
@@ -240,6 +251,28 @@ impl Host for SystemHost {
             size_kb: u32::try_from(files / 1024 + exe / 1024).unwrap_or(u32::MAX),
         }
     }
+
+    fn os_edition(&self) -> (String, u32) {
+        let key = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion";
+        let name = read_string(key, "ProductName").unwrap_or_else(|| "Windows".into());
+        // ProductName still says "Windows 10" on Windows 11 (build 22000 and later).
+        let build: u32 = read_string(key, "CurrentBuildNumber")
+            .and_then(|b| b.parse().ok())
+            .unwrap_or(0);
+        let name = if build >= 22000 {
+            name.replacen("Windows 10", "Windows 11", 1)
+        } else {
+            name
+        };
+        let mut sku = OS_PRODUCT_TYPE(0);
+        // SAFETY: a valid out pointer; 10.0 is the version every supported Windows reports.
+        let _ = unsafe { GetProductInfo(10, 0, 0, 0, &mut sku) };
+        (format!("Microsoft {name}"), sku.0)
+    }
+
+    fn webview2_version(&self) -> Option<String> {
+        read_string(WEBVIEW2_CLIENT_KEY, "pv")
+    }
 }
 
 /// A PC for tests: no administrator, no service, nothing installed, empty registry, this
@@ -258,6 +291,9 @@ pub struct FakeHost {
     pub letters: Vec<char>,
     pub sid: String,
     pub payload: PayloadInfo,
+    /// `os_edition` (Windows 11 Pro, SKU 48, unless a test says otherwise).
+    pub os: (String, u32),
+    pub webview2: Option<String>,
 }
 
 #[cfg(test)]
@@ -280,6 +316,8 @@ impl FakeHost {
                 kind: "release".into(),
                 size_kb: 60000,
             },
+            os: ("Microsoft Windows 11 Pro".into(), 48),
+            webview2: Some("156.0.0.0".into()),
         }
     }
 }
@@ -323,6 +361,12 @@ impl Host for FakeHost {
     fn payload(&self) -> PayloadInfo {
         self.payload.clone()
     }
+    fn os_edition(&self) -> (String, u32) {
+        self.os.clone()
+    }
+    fn webview2_version(&self) -> Option<String> {
+        self.webview2.clone()
+    }
 }
 
 #[cfg(test)]
@@ -364,6 +408,15 @@ mod tests {
             )
             .map(|b| !b.is_empty()),
             Some(true)
+        );
+        let (caption, sku) = h.os_edition();
+        assert!(caption.starts_with("Microsoft Windows "), "{caption}");
+        assert!(sku > 0, "{caption} {sku}");
+        // Read only. A version or nothing, never an empty string.
+        assert!(
+            h.webview2_version().is_none_or(|v| !v.is_empty()),
+            "{:?}",
+            h.webview2_version()
         );
     }
 }

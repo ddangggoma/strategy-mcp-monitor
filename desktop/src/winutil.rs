@@ -127,7 +127,7 @@ pub fn attach_parent_console() {
 }
 
 /// An open handle that is closed when dropped.
-struct Owned(HANDLE);
+pub(crate) struct Owned(pub(crate) HANDLE);
 
 impl Drop for Owned {
     fn drop(&mut self) {
