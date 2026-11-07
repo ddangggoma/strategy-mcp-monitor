@@ -29,6 +29,8 @@ pub const WINDOW_TITLE: &str = "MCP Monitor";
 /// The error box of `app` when nothing tells the local port.
 pub const NOT_INSTALLED: &str =
     "MCP Monitor가 설치되어 있지 않습니다. mcp-monitor.exe를 다시 실행해 설치하세요.";
+/// The box when the window would run with an administrator's token (review item 18).
+pub const ELEVATED_APP: &str = "관리자 권한으로 실행 중이라 MCP Monitor 창을 열지 않습니다(창과 트레이는 사용자 권한으로만 엽니다). 시작 메뉴의 MCP Monitor로 여세요.";
 /// How often the "connecting" page asks the server, and when it says the service is not answering.
 pub const CONNECT_EVERY: Duration = Duration::from_secs(1);
 pub const STOPPED_AFTER: Duration = Duration::from_secs(30);
@@ -169,7 +171,17 @@ pub fn run_auto(sys: &dyn crate::System) -> i32 {
         arp.as_ref().map(|a| a.version.clone()),
         install_dir.as_deref().unwrap_or(Path::new("")),
     );
-    match decide(installed, sys.service_exists(), own) {
+    let action = decide(installed, sys.service_exists(), own);
+    // Review item 17 (F06): an install or upgrade run from the installed copy (or its .staging /
+    // .old neighbour) would be refused at `(stage)` after the UAC prompt: say so first.
+    if matches!(action, AutoAction::Install | AutoAction::Upgrade { .. })
+        && let (Ok(me), Some(dir)) = (sys.current_exe(), install_dir.as_deref())
+        && let Some(why) = crate::install::stage::running_inside_problem(&me, dir, &own.to_string())
+    {
+        sys.error_box(&why);
+        return 1;
+    }
+    match action {
         AutoAction::App => open_installed(sys, install_dir),
         AutoAction::OlderThanInstalled { installed } => {
             sys.info_box(&older_notice(installed, own));
@@ -229,6 +241,11 @@ fn install_then_open(sys: &dyn crate::System, args: Vec<String>) -> i32 {
 /// and that file exists, it is started (`app`) and this one ends, so the download is not kept busy
 /// by the tray; otherwise (or if it cannot be started) this process opens the window.
 fn open_installed(sys: &dyn crate::System, install_dir: Option<PathBuf>) -> i32 {
+    // A copy started from here would inherit an administrator's token (review item 18).
+    if sys.is_elevated() {
+        sys.error_box(ELEVATED_APP);
+        return 1;
+    }
     if let Some(exe) = install_dir.map(|d| d.join("mcp-monitor.exe")) {
         let is_me = sys
             .current_exe()
@@ -242,8 +259,13 @@ fn open_installed(sys: &dyn crate::System, install_dir: Option<PathBuf>) -> i32 
 
 /// `app`: the window for the installed server (the Apps & features location, else this exe's own
 /// folder when it holds `install.json`), or `--server-url` in a development build. Not installed:
-/// an error box and 1.
+/// an error box and 1. Elevated: [`ELEVATED_APP`] and 1 (the window, the tray and its sign-in
+/// item belong to the user's own token, review item 18).
 pub fn run_app_command(sys: &dyn crate::System, args: &AppArgs) -> i32 {
+    if sys.is_elevated() {
+        sys.error_box(ELEVATED_APP);
+        return 1;
+    }
     let install_dir = sys.installed().map(|i| i.install_location).or_else(|| {
         let dir = sys.current_exe().ok()?.parent()?.to_path_buf();
         dir.join("install.json").is_file().then_some(dir)

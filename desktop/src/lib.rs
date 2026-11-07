@@ -1108,6 +1108,44 @@ mod tests {
         assert_eq!(f.windows.borrow()[0].0.info.local_port, 9700);
     }
 
+    /// Review item 17 (F06): the installed copy started with no arguments while the service is gone
+    /// would offer an install that its own `(stage)` step refuses: it says why instead, without a
+    /// UAC prompt.
+    #[test]
+    fn the_installed_copy_does_not_offer_an_install_it_cannot_do() {
+        let dir = install_folder(true);
+        let mut f = FakeElevator::new(false, Ok(0));
+        *f.installed.borrow_mut() = Some(entry("1.1.0", dir.path()));
+        f.exe = dir.path().join("mcp-monitor.exe");
+        f.yes = true;
+        assert_eq!(run_with(args(&[]), &f), 1);
+        assert!(f.asked.borrow().is_empty() && f.launched.borrow().is_empty());
+        let boxes = f.boxes.borrow();
+        assert!(
+            boxes.len() == 1 && boxes[0].contains("다운로드한 mcp-monitor-1.1.0.exe로 실행하세요"),
+            "{boxes:?}"
+        );
+    }
+
+    /// Review item 18: the window, the tray and its autostart item run with the user's own token,
+    /// never an administrator's ("관리자 권한으로 실행" on the download, an elevated shell). Elevated,
+    /// `app` and the no-argument start open nothing and start nothing: a box says how to open it.
+    #[test]
+    fn an_elevated_process_never_opens_the_window_or_starts_the_app() {
+        let dir = install_folder(true);
+        for a in [&["app"][..], &["app", "--background"][..], &[][..]] {
+            let mut f = FakeElevator::new(true, Ok(0));
+            *f.installed.borrow_mut() = Some(entry("1.1.0", dir.path()));
+            f.service = true;
+            assert_eq!(run_with(args(a), &f), 1, "{a:?}");
+            assert!(
+                f.windows.borrow().is_empty() && f.started.borrow().is_empty(),
+                "{a:?}"
+            );
+            assert_eq!(*f.boxes.borrow(), [app::ELEVATED_APP], "{a:?}");
+        }
+    }
+
     #[test]
     fn autostart_writes_the_run_value_of_the_installed_copy_only() {
         let f = FakeElevator::new(false, Ok(0));

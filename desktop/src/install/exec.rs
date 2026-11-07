@@ -163,7 +163,7 @@ pub fn check_os_warnings(
         ));
     }
     if webview2.is_none_or(|v| v.trim().is_empty() || v.trim() == "0.0.0.0") {
-        out.push("경고: WebView2 런타임이 없습니다. 관리 화면 창과 고지 창이 열리지 않습니다(https://go.microsoft.com/fwlink/p/?LinkId=2124703 에서 설치).".into());
+        out.push("경고: 이 PC에 설치된 WebView2 런타임을 확인하지 못했습니다. 런타임이 없으면 관리 화면 창과 고지 창이 열리지 않습니다(https://go.microsoft.com/fwlink/p/?LinkId=2124703 에서 설치). 설치는 계속합니다.".into());
     }
     out
 }

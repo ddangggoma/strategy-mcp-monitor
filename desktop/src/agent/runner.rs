@@ -918,7 +918,9 @@ mod tests {
             on_open: Some(Arc::new(move || {
                 let mut s = f2.state();
                 s.key = None; // the service is gone; something else answers now
-                s.commands.push_back(json!({"type": "show_notice", "display_id": 8, "attempt": 1, "url": "https://evil.example/x"}));
+                // A well-formed notice of the configured server (review item 13): only the
+                // missing proof keeps it from opening, not the URL filter.
+                s.commands.push_back(show(8));
             })),
             ..Win::default()
         };

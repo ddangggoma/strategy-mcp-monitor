@@ -24,9 +24,21 @@ pub const SERVICE_NAME: &str = "mcp-monitor";
 pub const UNINSTALL_KEY: &str =
     r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\MCPMonitor";
 
-/// The WebView2 Evergreen runtime's per-machine client key (below HKLM).
-pub const WEBVIEW2_CLIENT_KEY: &str =
-    r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
+/// The WebView2 Evergreen runtime's per-machine client keys (below HKLM): the 32-bit view where
+/// the runtime usually registers, and the native one (review item 9).
+pub const WEBVIEW2_CLIENT_KEYS: [&str; 2] = [
+    r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
+    r"SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
+];
+
+/// The first version that names a runtime (not empty, not `0.0.0.0`).
+pub fn first_runtime_version(versions: impl IntoIterator<Item = Option<String>>) -> Option<String> {
+    versions
+        .into_iter()
+        .flatten()
+        .map(|v| v.trim().to_string())
+        .find(|v| !v.is_empty() && v != "0.0.0.0")
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Installed {
@@ -271,7 +283,7 @@ impl Host for SystemHost {
     }
 
     fn webview2_version(&self) -> Option<String> {
-        read_string(WEBVIEW2_CLIENT_KEY, "pv")
+        first_runtime_version(WEBVIEW2_CLIENT_KEYS.map(|k| read_string(k, "pv")))
     }
 }
 
@@ -418,5 +430,28 @@ mod tests {
             "{:?}",
             h.webview2_version()
         );
+    }
+
+    /// Review item 9: the runtime registers under either the 32-bit (`WOW6432Node`) or the
+    /// native client key; the first usable version counts, an empty one or `0.0.0.0` does not.
+    #[test]
+    fn the_webview2_runtime_is_found_under_either_client_key() {
+        assert_eq!(WEBVIEW2_CLIENT_KEYS.len(), 2);
+        assert!(WEBVIEW2_CLIENT_KEYS[0].contains(r"\WOW6432Node\"));
+        assert!(!WEBVIEW2_CLIENT_KEYS[1].contains("WOW6432Node"));
+        for k in WEBVIEW2_CLIENT_KEYS {
+            assert!(k.ends_with(r"\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"));
+        }
+        let v = |a: Option<&str>, b: Option<&str>| {
+            first_runtime_version([a.map(String::from), b.map(String::from)])
+        };
+        assert_eq!(v(Some("156.0.1.2"), None).as_deref(), Some("156.0.1.2"));
+        assert_eq!(v(None, Some("156.0.1.2")).as_deref(), Some("156.0.1.2"));
+        assert_eq!(
+            v(Some("0.0.0.0"), Some("150.0.0.1")).as_deref(),
+            Some("150.0.0.1")
+        );
+        assert_eq!(v(Some(" "), None), None);
+        assert_eq!(v(None, Some("0.0.0.0")), None);
     }
 }
