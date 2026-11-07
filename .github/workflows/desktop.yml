@@ -64,9 +64,16 @@ jobs:
         run: cargo clippy --locked --all-targets --features dev -- -D warnings
 
       - name: cargo test (default features)
+        # The runner's user is an elevated administrator on a disposable VM: let the Y23-guarded
+        # tests run (winutil::elevated_tests_allowed). Tests that need a standard token skip with
+        # a printed "SKIPPED …" line.
+        env:
+          MCPMON_TESTS_ALLOW_ELEVATED: "1"
         run: cargo test --locked
 
       - name: cargo test (dev feature)
+        env:
+          MCPMON_TESTS_ALLOW_ELEVATED: "1"
         run: cargo test --locked --features dev
 
   release:

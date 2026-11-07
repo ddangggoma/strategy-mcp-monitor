@@ -30,7 +30,12 @@ fn install_dry_run_prints_one_json_line() {
 
 #[test]
 fn install_without_admin_exits_1_and_changes_nothing() {
-    mcp_monitor::winutil::assert_not_elevated();
+    if mcp_monitor::winutil::skip_when_elevated(
+        "install_without_admin_exits_1_and_changes_nothing",
+        "an elevated install would get past require_admin",
+    ) {
+        return;
+    }
     let s = Scratch::new();
     let o = exe()
         .args(["install", "--install-dir"])
@@ -55,7 +60,12 @@ fn install_without_admin_exits_1_and_changes_nothing() {
 
 #[test]
 fn audit_policy_without_admin_exits_1_and_changes_nothing() {
-    mcp_monitor::winutil::assert_not_elevated();
+    if mcp_monitor::winutil::skip_when_elevated(
+        "audit_policy_without_admin_exits_1_and_changes_nothing",
+        "an elevated run would change the runner's audit policy",
+    ) {
+        return;
+    }
     let s = Scratch::new();
     let o = exe()
         .args(["audit-policy", "--enable", "--data-root"])
@@ -158,7 +168,12 @@ fn path_errors_exit_2_with_nothing_on_stdout_for_every_command() {
 /// note on stderr, and a real run still stops at require_admin with exit 1.
 #[test]
 fn dry_run_over_an_admin_only_data_root_exits_0_with_a_note() {
-    mcp_monitor::winutil::assert_not_elevated();
+    if mcp_monitor::winutil::skip_when_elevated(
+        "dry_run_over_an_admin_only_data_root_exits_0_with_a_note",
+        "an administrator can read the data root, and the real run would pass require_admin",
+    ) {
+        return;
+    }
     let s = Scratch::new();
     let root = s.join("MCP Monitor");
     std::fs::create_dir_all(root.join("data")).unwrap();

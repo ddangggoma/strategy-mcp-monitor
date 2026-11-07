@@ -1142,6 +1142,12 @@ mod tests {
 
     #[test]
     fn tests_are_not_elevated() {
+        if crate::winutil::skip_when_elevated(
+            "tests_are_not_elevated",
+            "the runner's only user is an administrator",
+        ) {
+            return;
+        }
         assert!(
             !crate::winutil::is_elevated(),
             "run the tests from a non-elevated shell"

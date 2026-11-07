@@ -96,11 +96,42 @@ pub fn is_elevated() -> bool {
     ok && elevation.TokenIsElevated != 0
 }
 
-/// Test guard for every test that can change something: tests never run elevated (Y23).
+/// True only on the disposable GitHub Actions runner, whose user is an elevated administrator:
+/// both `GITHUB_ACTIONS=true` and `MCPMON_TESTS_ALLOW_ELEVATED=1` (set by the workflow's test job).
+pub fn elevated_tests_allowed() -> bool {
+    allowed_by(
+        std::env::var("GITHUB_ACTIONS").ok().as_deref(),
+        std::env::var("MCPMON_TESTS_ALLOW_ELEVATED").ok().as_deref(),
+    )
+}
+
+fn allowed_by(github_actions: Option<&str>, allow_elevated: Option<&str>) -> bool {
+    github_actions == Some("true") && allow_elevated == Some("1")
+}
+
+/// Test guard for every test that can change something: tests never run elevated (Y23), except
+/// on the disposable CI runner ([`elevated_tests_allowed`]).
 pub fn assert_not_elevated() {
-    if is_elevated() {
+    if is_elevated() && !elevated_tests_allowed() {
         panic!("tests must not run elevated: they could change this PC");
     }
+}
+
+/// For a test whose meaning needs a standard (non-admin) token, or that would run a real install
+/// step once `require_admin` passes: true when this process is elevated, after printing why the
+/// test is skipped. The line goes straight to the standard error handle, past the test harness's
+/// capture, so a skip is always visible in the log, never a silent pass.
+pub fn skip_when_elevated(test: &str, why: &str) -> bool {
+    assert_not_elevated();
+    if !is_elevated() {
+        return false;
+    }
+    use std::io::Write;
+    let _ = writeln!(
+        std::io::stderr(),
+        "SKIPPED {test}: elevated CI runner ({why})"
+    );
+    true
 }
 
 /// The SID of the account this process runs as, e.g. `S-1-5-21-…-1001`.
@@ -385,6 +416,23 @@ mod tests {
         let groups = whoami(&["/groups", "/fo", "csv", "/nh"]);
         assert_eq!(is_elevated(), groups.contains("S-1-16-12288"));
         assert_not_elevated();
+    }
+
+    #[test]
+    fn only_the_ci_runner_may_run_the_tests_elevated() {
+        assert!(allowed_by(Some("true"), Some("1")));
+        for (gh, flag) in [
+            (None, Some("1")),
+            (Some("true"), None),
+            (Some("false"), Some("1")),
+            (Some("true"), Some("0")),
+            (Some("TRUE"), Some("1")),
+            (None, None),
+        ] {
+            assert!(!allowed_by(gh, flag), "{gh:?} {flag:?}");
+        }
+        // On this machine: a skip happens exactly when the process is elevated.
+        assert_eq!(skip_when_elevated("this test", "check"), is_elevated());
     }
 
     #[test]

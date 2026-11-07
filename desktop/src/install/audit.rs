@@ -629,6 +629,12 @@ mod tests {
 
     #[test]
     fn audit_policy_dry_run_without_admin_plans_over_an_installed_data_root() {
+        if crate::winutil::skip_when_elevated(
+            "audit_policy_dry_run_without_admin_plans_over_an_installed_data_root",
+            "an administrator can read the locked data root, so there is no note",
+        ) {
+            return;
+        }
         let s = Scratch::new();
         let root = s.path().join("MCP Monitor");
         fs::create_dir_all(root.join("data")).unwrap();

@@ -333,7 +333,7 @@ mod tests {
     fn system_host_reads_this_pc_without_changing_it() {
         crate::winutil::assert_not_elevated();
         let h = SystemHost::new();
-        assert!(!h.is_admin());
+        assert_eq!(h.is_admin(), crate::winutil::is_elevated());
         // This development PC has no MCP Monitor service and no Apps & features entry.
         assert!(!h.service_exists() && h.service_stopped() && h.service_bin_path().is_none());
         assert_eq!(h.installed(), None);

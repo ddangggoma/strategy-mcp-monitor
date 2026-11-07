@@ -454,6 +454,13 @@ mod tests {
     fn a_copy_started_by_this_same_exe_never_relaunches_again() {
         // If "runas" ever starts the copy without elevation (UAC turned off for a standard user),
         // the copy must not start yet another copy: no endless chain of waiting processes.
+        // Without a relaunch the real install plan runs; it must stop at require_admin.
+        if crate::winutil::skip_when_elevated(
+            "a_copy_started_by_this_same_exe_never_relaunches_again",
+            "would run the real install plan past require_admin",
+        ) {
+            return;
+        }
         let mut f = FakeElevator::new(false, Ok(0));
         f.parent_is_same_exe = true;
         run_with(args(&["install", "--interactive"]), &f);
@@ -484,6 +491,17 @@ mod tests {
             (false, &[][..]),
             (false, &["--version"][..]),
         ] {
+            // An elevated process would get past require_admin and run the real plan.
+            let real_plan = matches!(a.first(), Some(&"install" | &"audit-policy"))
+                && !a.contains(&"--dry-run");
+            if real_plan
+                && crate::winutil::skip_when_elevated(
+                    &format!("nothing_else_is_ever_elevated {a:?}"),
+                    "would run the real install plan",
+                )
+            {
+                continue;
+            }
             let f = FakeElevator::new(elevated, Ok(0));
             run_with(args(a), &f);
             assert!(f.launched.borrow().is_empty(), "{a:?}");
@@ -493,6 +511,12 @@ mod tests {
     #[test]
     fn an_interactive_installer_run_reports_in_a_message_box() {
         // Not elevated: the plan stops at require_admin before it changes anything.
+        if crate::winutil::skip_when_elevated(
+            "an_interactive_installer_run_reports_in_a_message_box",
+            "would run the real install plan past require_admin",
+        ) {
+            return;
+        }
         let dir = crate::install::testutil::Scratch::new();
         let inst = dir.path().join("i");
         let data = dir.path().join("d");
