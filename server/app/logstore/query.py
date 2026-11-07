@@ -5,7 +5,9 @@ exposes them as methods (one connection per thread). All SQL uses bound paramete
 
 Pages are newest first with a ``(ts_ms, id)`` keyset cursor. A filter with several users or
 categories is read value by value through that column's ``(value, ts_ms)`` index, already in order,
-and the results are merged (``heapq.merge``): no temporary B-tree for the ``ORDER BY`` (W7).
+and the results are merged (``heapq.merge``): no temporary B-tree for the ``ORDER BY`` (W7). With a
+keyword as well, one statement serves all of them (the MATCH runs once): driven by the keyword's
+matches when they are few, by the time index when they are many (``broad_keyword``).
 Histograms and user counts come from the minute/hour rollups when the filter only has time,
 category and user conditions on minute boundaries, otherwise from counting rows (W8).
 """
@@ -31,6 +33,7 @@ MAX_SPAN_MS = 3660 * 86_400_000
 BUCKET_LADDER_SEC = (60, 300, 600, 1800, 3600, 10800, 21600, 43200, 86400)
 KST_OFFSET_MS = 9 * 3_600_000
 TOP_USERS = 10
+BROAD_KEYWORD_ROWS = 20_000  # a keyword matching this many rows pages through the time index
 
 OTHER_USERS = "__other__"  # the histogram series of the users outside the top TOP_USERS
 CHANNELS = ("local", "external")
@@ -235,9 +238,35 @@ def _residual(f: LogFilter, driver: _Driver, *, users: bool = True) -> tuple[lis
 
 # -- pages -----------------------------------------------------------------------------------------
 
-def page_queries(f: LogFilter, cursor: Cursor | None, limit: int) -> list[tuple[str, list[Any]]]:
-    """The SQL of one page: a query per driving value, each ``LIMIT limit + 1``, newest first."""
+def _keyword_drives(f: LogFilter) -> bool:
+    """The keyword decides the page's plan: alone, or with several users or categories (one
+    statement for all of them: per value, each statement would evaluate the MATCH again, so 25
+    users x a common word took seconds, plan review I2)."""
+    if f.fts is None:
+        return False
     driver = _driver(f)
+    return driver.kind == "fts" or len(driver.values) > 1
+
+
+def broad_keyword(conn: sqlite3.Connection, fts: str) -> bool:
+    """Whether the keyword matches at least ``BROAD_KEYWORD_ROWS`` rows, counted only up to that cap
+    (a few ms even for a one-letter prefix)."""
+    sql = "SELECT COUNT(*) FROM (SELECT rowid FROM events_fts WHERE events_fts MATCH ? LIMIT ?)"
+    return int(conn.execute(sql, (fts, BROAD_KEYWORD_ROWS)).fetchone()[0]) >= BROAD_KEYWORD_ROWS
+
+
+def page_queries(
+    f: LogFilter, cursor: Cursor | None, limit: int, *, broad: bool = False
+) -> list[tuple[str, list[Any]]]:
+    """The SQL of one page: a query per driving value, each ``LIMIT limit + 1``, newest first.
+
+    When the keyword drives (:func:`_keyword_drives`): a narrow keyword drives one statement through
+    its matches (sorting them is cheap); a ``broad`` one (:func:`broad_keyword`) walks the time index
+    newest first with the matches as a set built once, and stops at the page: sorting hundreds of
+    thousands of matches is what made a common word slow (W9, plan review I2)."""
+    driver = _driver(f)
+    if _keyword_drives(f):
+        driver = _Driver("time") if broad else _Driver("fts")
     hi = f.to_ms if cursor is None else min(f.to_ms, cursor.ts_ms + 1)
     queries: list[tuple[str, list[Any]]] = []
     for value in driver.values:
@@ -266,7 +295,8 @@ def _log_row(r: Sequence[Any]) -> LogRow:
 
 def page(conn: sqlite3.Connection, f: LogFilter, cursor: Cursor | None, limit: int) -> Page:
     """Up to ``limit`` rows older than ``cursor`` (newest first) and the cursor of the next page."""
-    results = [conn.execute(sql, params).fetchall() for sql, params in page_queries(f, cursor, limit)]
+    broad = _keyword_drives(f) and broad_keyword(conn, f.fts or "")
+    results = [conn.execute(sql, params).fetchall() for sql, params in page_queries(f, cursor, limit, broad=broad)]
     if len(results) == 1:
         raw = results[0]
     else:

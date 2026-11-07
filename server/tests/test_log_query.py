@@ -361,3 +361,103 @@ def test_close_all_defers_closing_a_reader_in_use(tmp_path, reader, monkeypatch)
     r.close_all()
     with pytest.raises(sqlite3.ProgrammingError):
         opened[1].execute("SELECT 1")
+
+
+# -- plan review I2: keyword + several values, the query time limit -----------------------------
+
+def test_keyword_with_several_users_runs_the_match_once(reader):
+    f = F(users=("CORP\\hong", "CORP\\kim", "a@x.com"), q="cmd")
+    (sql, params), = page_queries(f, None, 200)  # one statement, not one per user
+    assert sql.count("MATCH") == 1 and "events_fts CROSS JOIN" in sql
+    rows = reader.page(f, None, 7).rows
+    every = list(reader.page(F(q="cmd"), None, 100).rows)
+    assert [r.id for r in rows] == [r.id for r in every][:7]
+    # the user list is still a condition, and paging continues across it
+    two = F(users=("CORP\\kim", "a@x.com"), q="cmd")
+    p1 = reader.page(two, None, 5)
+    p2 = reader.page(two, decode_cursor(p1.next_cursor), 100)
+    got = p1.rows + p2.rows
+    assert len(got) == 20 and {r.user.lower() for r in got} == {"corp\\kim", "a@x.com"}
+    assert [r.ts_ms for r in got] == sorted((r.ts_ms for r in got), reverse=True)
+    # one user (or several categories without a keyword) still reads its index in order
+    assert len(page_queries(F(users=("CORP\\kim",), q="cmd"), None, 200)) == 1
+    assert len(page_queries(F(cats=("auth", "activity.window")), None, 200)) == 2
+
+
+def test_a_broad_keyword_pages_through_the_time_index(reader, tmp_path, monkeypatch):
+    """A keyword matching many rows walks ix_events_ts newest first (no sort of every match); the
+    rows are the same as through the FTS table."""
+    from app.logstore import query as query_mod
+    filters = [F(q="cmd"), F(users=("CORP\\kim", "a@x.com"), q="cmd"), F(cats=("auth", "activity.command"), q="cmd")]
+    narrow = [[r.id for r in reader.page(f, None, 7).rows] for f in filters]
+    with closing(open_reader(tmp_path / "index.db")) as conn:
+        assert not query_mod.broad_keyword(conn, F(q="cmd").fts)
+        monkeypatch.setattr(query_mod, "BROAD_KEYWORD_ROWS", 5)
+        assert query_mod.broad_keyword(conn, F(q="cmd").fts) and not query_mod.broad_keyword(conn, F(q="zebra").fts)
+        for f in filters:
+            (sql, params), = page_queries(f, None, 200, broad=True)
+            plan = " | ".join(r[3] for r in conn.execute("EXPLAIN QUERY PLAN " + sql, params))
+            assert "ix_events_ts" in plan and "TEMP B-TREE" not in plan, plan
+    assert [[r.id for r in reader.page(f, None, 7).rows] for f in filters] == narrow
+    p1 = reader.page(filters[1], None, 5)
+    rest = reader.page(filters[1], decode_cursor(p1.next_cursor), 100).rows
+    assert len(p1.rows + rest) == 20
+
+
+SPIN = "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) SELECT COUNT(*) FROM c"
+
+
+async def _spinning_index(tmp_path, clock, monkeypatch):
+    """A LogIndex whose page() runs a statement that never ends unless interrupted."""
+    from app.logstore import query as query_mod
+    monkeypatch.setattr(query_mod, "page", lambda conn, f, cursor, limit: conn.execute(SPIN).fetchall())
+    (tmp_path / "logs").mkdir()
+    idx = LogIndex(tmp_path / "index.db", tmp_path / "logs", clock, ListLog())
+    await idx.start(run_loop=False)
+    return idx
+
+
+async def test_a_query_past_its_time_limit_is_interrupted(tmp_path, clock, monkeypatch):
+    import time as time_mod
+    idx = await _spinning_index(tmp_path, clock, monkeypatch)
+    try:
+        idx.query_time_limit = 0.3
+        t0 = time_mod.monotonic()
+        with pytest.raises(indexer_mod.QueryTimeout):
+            await idx.query(idx.reader().page, F(), None, 10)
+        assert time_mod.monotonic() - t0 < 5 and not idx.query_slots.locked()
+        # the reader's connection is still usable, without the handler
+        assert idx.reader().summary().rows == 0
+    finally:
+        await idx.stop()
+
+
+async def test_a_cancelled_query_frees_its_slot_promptly(tmp_path, clock, monkeypatch):
+    import asyncio
+    import time as time_mod
+    idx = await _spinning_index(tmp_path, clock, monkeypatch)
+    try:
+        idx.query_time_limit = 60
+        tasks = [asyncio.create_task(idx.query(idx.reader().page, F(), None, 10)) for _ in range(4)]
+        await asyncio.sleep(0.3)
+        assert idx.query_slots.locked()
+        t0 = time_mod.monotonic()
+        for t in tasks:
+            t.cancel()
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        assert all(isinstance(r, asyncio.CancelledError) for r in results)
+        assert time_mod.monotonic() - t0 < 5 and not idx.query_slots.locked()  # not 60 s
+    finally:
+        await idx.stop()
+
+
+async def test_an_export_pull_runs_under_the_time_limit(tmp_path, clock, monkeypatch):
+    idx = await _spinning_index(tmp_path, clock, monkeypatch)
+    try:
+        idx.query_time_limit = 0.3
+        rows = idx.reader().iter_rows(F(), limit=10)
+        with pytest.raises(indexer_mod.QueryTimeout):
+            await idx.query(lambda: next(rows))
+        rows.close()
+    finally:
+        await idx.stop()

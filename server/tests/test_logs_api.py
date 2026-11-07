@@ -415,3 +415,18 @@ def test_log_item_shape():
         "id": 7, "ts": to_kst_iso(datetime.fromtimestamp(1_793_768_400, UTC)),
         "cat": "auth", "event": "login", "user": "a@x.com", "session_id": None, "client_ip": "1.2.3.4",
         "outcome": "fail", "data": {"ok": False}}
+
+
+async def test_a_query_past_the_time_limit_is_a_422_that_says_so(external_client, services, monkeypatch):
+    # plan review I2: no new error code; the header tells a timeout from a bad parameter
+    from app.logstore import query as query_mod
+    dev(external_client, services); await seed(services)
+    spin = "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) SELECT COUNT(*) FROM c"
+    monkeypatch.setattr(query_mod, "page", lambda conn, f, cursor, limit: conn.execute(spin).fetchall())
+    services.log_index.query_time_limit = 0.3
+    r = await external_client.get("/api/logs", params=P)
+    assert r.status_code == 422 and r.json() == {"error": "validation"}
+    assert r.headers["X-Error-Reason"] == "query_timeout"
+    r = await external_client.get("/api/logs", params={**P, "cursor": "!!"})
+    assert r.status_code == 422 and "X-Error-Reason" not in r.headers
+    assert await views_of(services, "logs_view") == []  # a failed query is not a view

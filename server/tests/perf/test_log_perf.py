@@ -5,8 +5,11 @@ from contextlib import closing
 import pytest
 
 from app.logstore.index_db import open_reader
+from app.logstore.indexer import QUERY_TIME_LIMIT_SEC
 from app.logstore.query import Histogram, Page, page_queries
 from tests.perf.conftest import (
+    ALL_USERS,
+    BROAD_WITH_USERS,
     DAY15_NOON_MS,
     S2_USERS,
     SCENARIOS,
@@ -31,6 +34,33 @@ def test_query_under_300ms(perf_index, name):
     record(name, med)
     print(f"{name}: median {med * 1000:.1f} ms")
     assert med < 0.300, f"{name}: median {med * 1000:.0f} ms"
+
+
+@pytest.mark.parametrize("name", list(BROAD_WITH_USERS))
+def test_broad_keyword_with_every_user_is_bounded(perf_index, name):
+    """Plan review I2: a broad keyword (W9 excludes it from the 300 ms criterion) with all 25 users
+    costs about what the keyword alone costs, far under the per-query time limit; recorded only."""
+    run = BROAD_WITH_USERS[name]
+    run(perf_index)
+    times = []
+    for _ in range(3):
+        t = time.perf_counter(); run(perf_index); times.append(time.perf_counter() - t)
+    med = statistics.median(times)
+    record(name, med)
+    print(f"{name}: median {med * 1000:.1f} ms")
+    assert med < QUERY_TIME_LIMIT_SEC / 4, f"{name}: median {med * 1000:.0f} ms"
+
+
+def test_keyword_with_users_scenarios_hit_rows(perf_index):
+    p = perf_index
+    s11 = SCENARIOS["S11"](p)
+    assert isinstance(s11, Page) and len(s11.rows) == 200 and all("zebra-" in r.data["text"] for r in s11.rows)
+    s12 = SCENARIOS["S12"](p)
+    assert isinstance(s12, Page) and len(s12.rows) == 200 and len({r.user for r in s12.rows}) > 1
+    s13 = SCENARIOS["S13"](p)
+    assert isinstance(s13, Histogram) and s13.total == SCENARIOS["S9"](p).total  # every user = no user filter
+    (sql, _params), = page_queries(last_days(30, users=ALL_USERS, q="zebra"), None, 200)
+    assert sql.count("MATCH") == 1  # one statement for all 25 users
 
 
 def test_ingest_rate(perf_index):

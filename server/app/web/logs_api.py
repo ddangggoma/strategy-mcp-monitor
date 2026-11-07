@@ -25,6 +25,7 @@ from fastapi.responses import StreamingResponse
 from app.auth.policy import Action
 from app.clock import KST, Clock, to_kst_iso
 from app.logstore.fts import InvalidQuery
+from app.logstore.indexer import QueryTimeout
 from app.logstore.query import DEFAULT_PAGE, MAX_PAGE, LogFilter, LogRow, decode_cursor
 from app.services import Services
 from app.users.store import User
@@ -41,6 +42,9 @@ FORMULA_START = ("=", "+", "-", "@", "\t", "\r")  # a spreadsheet would run the 
 AUDIT_KINDS: dict[str, tuple[str, ...]] = {
     "admin": ("admin.audit",), "auth": ("auth",), "all": ("admin.audit", "auth"),
 }
+
+# A 422 `validation` that ran out of time (not a bad parameter) says so in this header (I2).
+QUERY_TIMEOUT_REASON = "query_timeout"
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 _MS = timedelta(milliseconds=1)
@@ -169,6 +173,8 @@ def filters_json(f: LogFilter, kind: str | None = None) -> dict[str, Any]:
 async def _run(services: Services, fn: Any, *args: Any) -> Any:
     try:
         return await services.log_index.query(fn, *args)
+    except QueryTimeout:  # interrupted at the time limit (I2): narrow the filter, no new error code
+        raise ApiError(422, "validation", headers={"X-Error-Reason": QUERY_TIMEOUT_REASON}) from None
     except InvalidQuery:  # a bad cursor, bucket count or limit
         raise _validation() from None
 

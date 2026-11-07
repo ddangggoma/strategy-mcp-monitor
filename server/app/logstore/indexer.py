@@ -8,6 +8,7 @@ only gets the counts back and writes the ``system`` ``logindex.*`` lines.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import functools
 import sqlite3
 import threading
@@ -74,14 +75,60 @@ def _summary(conn: sqlite3.Connection) -> IndexSummary:
 
 
 QUERY_SLOTS = 4
+QUERY_TIME_LIMIT_SEC = 5.0  # one API read (a page, a histogram, an export pull): then interrupted
+_PROGRESS_STEPS = 1000  # SQLite VM steps between two deadline checks
 
 
-async def _outlive_cancel[T](fut: asyncio.Future[T]) -> T:
+class QueryTimeout(InvalidQuery):
+    """A read ran past ``QUERY_TIME_LIMIT_SEC`` (or its caller went away) and SQLite interrupted it
+    (plan review I2): the API answers 422 ``validation`` (no new error code), the slot is free."""
+
+
+@dataclass
+class _Guard:
+    """The deadline of one :meth:`LogIndex.query` call, seen by its worker thread through a context
+    variable (``asyncio.to_thread`` copies the context): every index statement the call runs checks it."""
+
+    deadline: float  # time.monotonic()
+    cancelled: threading.Event
+
+    def tripped(self) -> bool:
+        return self.cancelled.is_set() or time.monotonic() >= self.deadline
+
+
+_guard: contextvars.ContextVar[_Guard | None] = contextvars.ContextVar("index_query_guard", default=None)
+
+
+@contextmanager
+def _guarded(conn: sqlite3.Connection) -> Iterator[None]:
+    """Run the statements of this block under the current call's guard (none outside ``query()``):
+    SQLite's progress handler interrupts them once the guard trips."""
+    guard = _guard.get()
+    if guard is None:
+        yield
+        return
+    if guard.tripped():
+        raise QueryTimeout("the query took too long")
+    conn.set_progress_handler(lambda: 1 if guard.tripped() else 0, _PROGRESS_STEPS)
+    try:
+        yield
+    except sqlite3.OperationalError:
+        if guard.tripped():
+            raise QueryTimeout("the query took too long") from None
+        raise
+    finally:
+        conn.set_progress_handler(None, 0)
+
+
+async def _outlive_cancel[T](fut: asyncio.Future[T], on_cancel: Callable[[], None] | None = None) -> T:
     """Await a worker-thread future; when the caller is cancelled, wait until the thread is done (it
-    cannot be interrupted) and then re-raise, so whatever the caller holds is held until then."""
+    cannot be interrupted) and then re-raise, so whatever the caller holds is held until then.
+    ``on_cancel`` runs first (a guarded read: interrupt it, so the wait is short)."""
     try:
         return await asyncio.shield(fut)
     except asyncio.CancelledError:
+        if on_cancel is not None:
+            on_cancel()
         while not fut.done():
             try:
                 await asyncio.wait({fut})
@@ -141,7 +188,8 @@ class IndexReader:
                 self._slots.append(slot)
             local.slot = slot
         try:
-            yield slot.conn
+            with _guarded(slot.conn):
+                yield slot.conn
         finally:
             with self._lock:
                 slot.busy -= 1
@@ -214,7 +262,8 @@ class IndexReader:
             cursor: Cursor | None = None
             left = limit
             while left > 0:
-                p = query.page(conn, f, cursor, min(chunk, left))
+                with _guarded(conn):  # each pull runs under its own call's guard
+                    p = query.page(conn, f, cursor, min(chunk, left))
                 yield from p.rows
                 left -= len(p.rows)
                 if p.next_cursor is None:
@@ -373,6 +422,7 @@ class LogIndex:
         self._conn: sqlite3.Connection | None = None
         self._lock = asyncio.Lock()  # run_exclusive: one writer at a time
         self.query_slots = asyncio.Semaphore(QUERY_SLOTS)  # API reads running at once (see query())
+        self.query_time_limit = QUERY_TIME_LIMIT_SEC
         self._cycle_lock = asyncio.Lock()  # index_once: one cycle at a time
         self._inflight: asyncio.Future[object] | None = None
         self._wake = asyncio.Event()
@@ -529,10 +579,18 @@ class LogIndex:
 
     async def query[T, *Ts](self, fn: Callable[[*Ts], T], *args: *Ts) -> T:
         """Run the blocking read ``fn(*args)`` (an :class:`IndexReader` method) in a worker thread
-        inside one of the ``query_slots``. A cancelled caller keeps its slot until the thread is done,
-        so at most ``QUERY_SLOTS`` reads ever run at once."""
+        inside one of the ``query_slots``, at most ``query_time_limit`` seconds from taking the slot:
+        then SQLite interrupts it and :class:`QueryTimeout` is raised (plan review I2). A cancelled
+        caller interrupts its read the same way and keeps the slot only until the thread notices
+        (one progress-handler step), so at most ``QUERY_SLOTS`` reads ever run at once."""
         async with self.query_slots:
-            return await _outlive_cancel(asyncio.ensure_future(asyncio.to_thread(fn, *args)))
+            guard = _Guard(time.monotonic() + self.query_time_limit, threading.Event())
+            token = _guard.set(guard)
+            try:  # the task copies the context now: its thread sees the guard
+                fut = asyncio.ensure_future(asyncio.to_thread(fn, *args))
+            finally:
+                _guard.reset(token)
+            return await _outlive_cancel(fut, guard.cancelled.set)
 
     async def _run(self) -> None:
         while True:

@@ -28,7 +28,7 @@ from app.logstore.retention import RetentionJob
 from app.paths import AppPaths
 from app.settings.store import SettingsStore
 from tests.fakes import FakeClock
-from tests.perf.gen import GEN_VERSION, GenInfo, generate
+from tests.perf.gen import GEN_VERSION, WEB_USERS, WINDOWS_USERS, GenInfo, generate
 from tests.winfakes import ListLog
 
 CACHE_ROOT = Path(__file__).resolve().parents[2] / ".cache"
@@ -119,6 +119,7 @@ def last_days(days: int, **kw: object) -> LogFilter:
 
 
 S2_USERS = ("CORP\\user03", "CORP\\user11")
+ALL_USERS = (*WINDOWS_USERS, *WEB_USERS)  # all 25
 DAY15_NOON_MS = END_MS - 30 * DAY_MS + 14 * DAY_MS + 12 * 3_600_000  # 2026-10-20 12:00 KST
 _deep: dict[int, Cursor] = {}
 
@@ -143,6 +144,19 @@ SCENARIOS: dict[str, Callable[[PerfIndex], object]] = {
     "S8": lambda p: p.reader.users(last_days(30)),
     "S9": lambda p: p.reader.histogram(last_days(30, q="zebra"), 60),
     "S10": lambda p: p.reader.page(last_days(30), deep_cursor(p)),
+    # plan review I2: a keyword with every user selected (the MATCH runs once, not once per user)
+    "S11": lambda p: p.reader.page(last_days(30, users=ALL_USERS, q="zebra"), None),
+    "S12": lambda p: p.reader.page(last_days(30, users=ALL_USERS, q="chrome"), None),
+    "S13": lambda p: p.reader.histogram(last_days(30, users=ALL_USERS, q="zebra"), 60),
+}
+
+# Broad keywords (W9: over 300 ms even alone) with every user: measured and bounded, not held to 300 ms.
+BROAD_WITH_USERS: dict[str, Callable[[PerfIndex], object]] = {
+    "B1 focus x25 page": lambda p: p.reader.page(last_days(30, users=ALL_USERS, q="focus"), None),
+    "B2 focus x25 histogram": lambda p: p.reader.histogram(last_days(30, users=ALL_USERS, q="focus"), 60),
+    "B3 chrome x25 histogram": lambda p: p.reader.histogram(last_days(30, users=ALL_USERS, q="chrome"), 60),
+    "B4 t x25 + category page": lambda p: p.reader.page(
+        last_days(30, users=ALL_USERS, cats=("activity.window",), q="t"), None),
 }
 
 
