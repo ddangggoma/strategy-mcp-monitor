@@ -876,6 +876,8 @@ mod tests {
             "X=REG_DWORD:",
             "X=REG_DWORD:１",
             "X=REG_DWORD:0x1",
+            "X=REG_DWORD:+1",
+            "X=REG_DWORD: 1",
         ] {
             assert!(parse_reg_value(bad).is_err(), "{bad}");
         }
