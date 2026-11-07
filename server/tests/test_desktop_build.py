@@ -117,19 +117,40 @@ def test_dependent_load_flag_is_read_as_a_number(flag, value):
     assert "if ($flag -ne 0x800)" in text
 
 
-def test_c_runtime_imports_are_found():
-    dependents = """
+DEPENDENTS = """
   Image has the following dependencies:
 
     KERNEL32.dll
     VCRUNTIME140.dll
     api-ms-win-crt-runtime-l1-1-0.dll
+    MSVCP140_1.dll
     ucrtbase.dll
+    concrt140.dll
+    vccorlib140.dll
+    ucrtbased.dll
+    api-ms-win-crt-math-l1-1-0.dll
     WS2_32.dll
 """
-    assert call_script_function("Get-CrtImports", dependents).splitlines() == [
-        "VCRUNTIME140.dll", "api-ms-win-crt-runtime-l1-1-0.dll", "ucrtbase.dll"]
-    assert call_script_function("Get-CrtImports", "    KERNEL32.dll\n    USER32.dll\n") == "<null>"
+
+
+def test_vc_redistributable_imports_are_found():
+    # Controller ruling (CI run 42395693338): +crt-static means "no VC++ Redistributable needed". Only the
+    # redistributable's DLLs (and the debug UCRT, which no user PC has) fail the build.
+    assert call_script_function("Get-VcRedistImports", DEPENDENTS).splitlines() == [
+        "VCRUNTIME140.dll", "MSVCP140_1.dll", "concrt140.dll", "vccorlib140.dll", "ucrtbased.dll"]
+    assert call_script_function("Get-VcRedistImports", "    KERNEL32.dll\n    api-ms-win-crt-heap-l1-1-0.dll\n") == "<null>"
+
+
+def test_universal_crt_imports_are_reported_not_refused():
+    # The Universal CRT (api-ms-win-crt-*.dll, ucrtbase.dll) is part of Windows 10/11.
+    assert call_script_function("Get-UcrtImports", DEPENDENTS).splitlines() == [
+        "api-ms-win-crt-runtime-l1-1-0.dll", "ucrtbase.dll", "api-ms-win-crt-math-l1-1-0.dll"]
+    assert call_script_function("Get-UcrtImports", "    KERNEL32.dll\n    USER32.dll\n") == "<null>"
+    text = (INSTALL / "build-desktop.ps1").read_text("utf-8-sig")
+    assert "Get-CrtImports" not in text
+    assert "$redist = @(Get-VcRedistImports $dependents)" in text
+    assert "if ($redist.Count -gt 0) { throw" in text
+    assert "$ucrt = @(Get-UcrtImports $dependents)" in text
 
 
 def test_powershell_installer_is_retired():

@@ -339,7 +339,7 @@ strategy-mcp-monitor/
 powershell -NoProfile -ExecutionPolicy Bypass -File install\build-desktop.ps1
 ```
 
-- 순서: `install\build.ps1`(`pip-audit`·`pnpm audit` 관문 → `pnpm build` → PyInstaller 서버 → `dist\payload\`) → `cargo audit` → `cargo build --release --locked`(payload를 zstd로 내장, `dev` 기능 없음) → 검사(`--version`, `DependentLoadFlags`가 정확히 `0x800`, C 런타임 DLL import 없음(`+crt-static`), `verify-payload`로 풀어 내장 서버의 `--version`) → `dist\mcp-monitor-1.1.0.exe` + `.sha256`.
+- 순서: `install\build.ps1`(`pip-audit`·`pnpm audit` 관문 → `pnpm build` → PyInstaller 서버 → `dist\payload\`) → `cargo audit` → `cargo build --release --locked`(payload를 zstd로 내장, `dev` 기능 없음) → 검사(`--version`, `DependentLoadFlags`가 정확히 `0x800`, VC++ 재배포 패키지 DLL(`vcruntime*`·`msvcp*`·`concrt*`·`vccorlib*`) import 없음(`+crt-static`; Windows 10/11에 들어 있는 유니버설 CRT `api-ms-win-crt-*.dll`은 허용하고 목록만 출력), `verify-payload`로 풀어 내장 서버의 `--version`) → `dist\mcp-monitor-1.1.0.exe` + `.sha256`.
 - `RUSTFLAGS`·`CARGO_ENCODED_RUSTFLAGS`·`CARGO_BUILD_RUSTFLAGS`·`CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS`가 설정돼 있으면 시작하지 않습니다(`desktop\.cargo\config.toml`의 `+crt-static`·`/DEPENDENTLOADFLAG:0x800`을 덮어쓰므로). payload 파일 이름에 Windows 장치 이름(`CON`, `NUL`, `AUX`, `COM1` …, 확장자가 붙어도)이 있으면 묶지 않습니다.
 - 매개변수: `-SkipAudit`(경고만 남기고 관문 생략), `-SkipPayload`(이미 만든 `-Payload` 폴더를 그대로), `-Payload <폴더>`, `-Out <폴더>`, `-SignThumbprint <SHA1> -TimestampUrl <url>`(인증서가 있을 때만 서명; 없으면 `NOTE: not signed`). `uv`가 PATH에 없으면 `UV_EXE`에 경로를 줍니다.
 - 🧱 **Smart App Control이 켜진 PC에서는** 새로 빌드한 서명 없는 exe가 그때그때 막힐 수 있습니다(SAC는 파일 해시마다 평판으로 판단). 그래서 Rust 테스트와 릴리스 빌드의 정본은 **GitHub Actions**(`.github/workflows/desktop.yml`)입니다:

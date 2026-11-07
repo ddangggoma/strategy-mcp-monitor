@@ -14,7 +14,8 @@
   0. A RUSTFLAGS, CARGO_ENCODED_RUSTFLAGS, CARGO_BUILD_RUSTFLAGS or CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS
      variable is refused: it would replace desktop\.cargo\config.toml's rustflags.
   5. Checks: --version is "mcp-monitor <version> (payload <12 hex>, release)", DependentLoadFlags is exactly 0x800
-     (dumpbin /loadconfig, read as a number), no C runtime DLL import (dumpbin /dependents: +crt-static),
+     (dumpbin /loadconfig, read as a number), no VC++ Redistributable DLL import (dumpbin /dependents:
+     +crt-static; the Universal CRT api-ms-win-crt-*.dll / ucrtbase.dll is part of Windows 10/11 and only listed),
      verify-payload extracts into a scratch folder under %LOCALAPPDATA% and the
      embedded server answers --version (the scratch folder is removed).
   6. -SignThumbprint: signs mcp-monitor.exe; otherwise "NOTE: not signed".
@@ -59,10 +60,17 @@ function Get-DependentLoadFlag([string]$LoadConfig) {
     return [Convert]::ToInt32($m.Groups[1].Value, 16)
 }
 
-# The C runtime DLLs in `dumpbin /dependents` output (VCRUNTIME*.dll, MSVCP*.dll, ucrtbase.dll, api-ms-win-crt-*.dll):
-# none in a +crt-static build.
-function Get-CrtImports([string]$Dependents) {
-    return @([regex]::Matches($Dependents, '(?im)^\s*((?:vcruntime|msvcp)[0-9_a-z]*\.dll|ucrtbased?\.dll|api-ms-win-crt-[0-9a-z-]+\.dll)\s*$') |
+# The VC++ Redistributable DLLs in `dumpbin /dependents` output (vcruntime*, msvcp*, concrt*, vccorlib*, and the
+# debug UCRT ucrtbased.dll, which no user PC has): none in a +crt-static build, so no redistributable is needed.
+function Get-VcRedistImports([string]$Dependents) {
+    return @([regex]::Matches($Dependents, '(?im)^\s*((?:vcruntime|msvcp|concrt|vccorlib)[0-9_a-z]*\.dll|ucrtbased\.dll)\s*$') |
+        ForEach-Object { $_.Groups[1].Value })
+}
+
+# The Universal CRT imports (api-ms-win-crt-*.dll, ucrtbase.dll): part of Windows 10/11, so allowed and only listed
+# (controller ruling after CI run 42395693338: a /MD prebuilt lib may pull them in even with +crt-static).
+function Get-UcrtImports([string]$Dependents) {
+    return @([regex]::Matches($Dependents, '(?im)^\s*(ucrtbase\.dll|api-ms-win-crt-[0-9a-z-]+\.dll)\s*$') |
         ForEach-Object { $_.Groups[1].Value })
 }
 
@@ -150,8 +158,11 @@ $dumpbin = Find-VsTool "dumpbin.exe"
 $loadConfig = Get-NativeOutput "dumpbin /loadconfig" $dumpbin @("/loadconfig", $Exe)
 $flag = Get-DependentLoadFlag $loadConfig
 if ($flag -ne 0x800) { throw "DependentLoadFlags is $(if ($null -eq $flag) { 'missing' } else { '0x{0:X}' -f $flag }), not 0x800 (System32 only)" }
-$crt = @(Get-CrtImports (Get-NativeOutput "dumpbin /dependents" $dumpbin @("/dependents", $Exe)))
-if ($crt.Count -gt 0) { throw "the exe imports the C runtime ($($crt -join ', ')): it must be built with +crt-static" }
+$dependents = Get-NativeOutput "dumpbin /dependents" $dumpbin @("/dependents", $Exe)
+$redist = @(Get-VcRedistImports $dependents)
+if ($redist.Count -gt 0) { throw "the exe imports the VC++ Redistributable ($($redist -join ', ')): it must be built with +crt-static" }
+$ucrt = @(Get-UcrtImports $dependents)
+if ($ucrt.Count -gt 0) { Write-Host "  Universal CRT imports (part of Windows 10/11, allowed): $($ucrt -join ', ')" }
 $checkRoot = Join-Path $env:LOCALAPPDATA "mcp-monitor-build"
 $check = Join-Path $checkRoot ([guid]::NewGuid().ToString("N").Substring(0, 12))
 try {
