@@ -11,6 +11,10 @@ pub mod version;
 pub mod winutil;
 
 use cli::{ArgError, Command};
+use install::exec::{RealExecutor, SystemRunner};
+use install::host::{Host, SystemHost};
+use install::plan::{Plan, print_dry_run, run_plan};
+use std::io::Write;
 
 /// What [`run_with`] needs from Windows to re-run itself elevated. The real one is
 /// [`SystemElevator`]; tests use a fake, so no test ever shows a UAC prompt or a message box.
@@ -21,6 +25,9 @@ pub trait Elevator {
     fn current_exe(&self) -> std::io::Result<PathBuf>;
     fn elevate_and_wait(&self, exe: &Path, args: &[String]) -> Result<i32, String>;
     fn error_box(&self, text: &str);
+    /// The end of an `--interactive` install, uninstall or audit-policy run (the elevated copy has
+    /// no console to print to).
+    fn info_box(&self, text: &str);
 }
 
 pub struct SystemElevator;
@@ -40,6 +47,9 @@ impl Elevator for SystemElevator {
     }
     fn error_box(&self, text: &str) {
         winutil::message_box(text, winutil::MsgKind::Error);
+    }
+    fn info_box(&self, text: &str) {
+        winutil::message_box(text, winutil::MsgKind::Info);
     }
 }
 
@@ -84,6 +94,30 @@ pub fn run_with(args: Vec<OsString>, elevator: &dyn Elevator) -> i32 {
             0
         }
         Command::VerifyPayload(dir) => verify_payload(&dir),
+        Command::Install(a) => {
+            let host = SystemHost::new();
+            let built = install::install_plan::build_install_plan(&a, &host);
+            run_installer(
+                built,
+                a.dry_run,
+                a.interactive,
+                &host,
+                elevator,
+                install_done_line,
+            )
+        }
+        Command::AuditPolicy(a) => {
+            let host = SystemHost::new();
+            let built = install::audit::build_audit_plan(&a, &host);
+            let done = if a.enable {
+                "감사 정책을 켰습니다."
+            } else {
+                "감사 정책을 되돌렸습니다."
+            };
+            run_installer(built, a.dry_run, a.interactive, &host, elevator, |_| {
+                done.to_string()
+            })
+        }
         _ => {
             eprintln!("오류: 아직 지원하지 않는 명령입니다");
             2
@@ -112,6 +146,116 @@ fn relaunch_elevated(cmd: &Command, elevator: &dyn Elevator) -> i32 {
             1
         }
     }
+}
+
+/// The last line of a successful install.
+fn install_done_line(plan: &Plan) -> String {
+    let port = plan
+        .steps
+        .iter()
+        .find(|s| s.id == "install_info")
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s.args.get(1)?).ok())
+        .and_then(|v| v["local_port"].as_u64())
+        .unwrap_or(u64::from(install::install_plan::DEFAULT_LOCAL_PORT));
+    format!("설치 완료: http://127.0.0.1:{port}/admin/setup 에서 첫 Admin 계정을 만드세요.")
+}
+
+/// Standard output through `print!` (`Stderr`: `eprint!`), so the test harness captures what a
+/// plan prints like any other `println!`. Every write is a whole `&str` piece of a `writeln!`.
+struct Stdout;
+struct Stderr;
+
+impl Write for Stdout {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        print!("{}", String::from_utf8_lossy(buf));
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        std::io::stdout().flush()
+    }
+}
+
+impl Write for Stderr {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        eprint!("{}", String::from_utf8_lossy(buf));
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Writes through to `inner` and keeps a copy, so an `--interactive` run can show its last
+/// `[실패]` line in a message box.
+struct Tee<W: Write> {
+    inner: W,
+    copy: Vec<u8>,
+}
+
+impl<W: Write> Write for Tee<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.copy.extend_from_slice(buf);
+        self.inner.write_all(buf)?;
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+/// What the error box of a failed `--interactive` run says: the last `[실패]` line, else the last
+/// line (the administrator message).
+fn failure_text(output: &[u8]) -> String {
+    let text = String::from_utf8_lossy(output);
+    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    lines
+        .iter()
+        .rev()
+        .find(|l| l.starts_with("[실패]"))
+        .or(lines.last())
+        .map_or_else(|| "실패했습니다.".to_string(), |l| l.to_string())
+}
+
+/// `install` / `audit-policy` after the plan is built: argument errors are `오류: …` + 2,
+/// `--dry-run` prints the plan, otherwise the plan runs (0, or 1 at the first failure). With
+/// `--interactive` the result is also shown in a message box.
+fn run_installer(
+    built: Result<Plan, ArgError>,
+    dry_run: bool,
+    interactive: bool,
+    host: &dyn Host,
+    elevator: &dyn Elevator,
+    done: impl Fn(&Plan) -> String,
+) -> i32 {
+    let plan = match built {
+        Ok(plan) => plan,
+        Err(e) => {
+            eprintln!("오류: {}", e.0);
+            if interactive {
+                elevator.error_box(&format!("오류: {}", e.0));
+            }
+            return 2;
+        }
+    };
+    if dry_run {
+        return print_dry_run(&plan, &mut Stdout, &mut Stderr);
+    }
+    let mut ex = RealExecutor::new(&plan, host, SystemRunner, Stdout);
+    let mut out = Tee {
+        inner: Stdout,
+        copy: Vec::new(),
+    };
+    let code = run_plan(&plan, &mut ex, &mut out);
+    if code == 0 {
+        let line = done(&plan);
+        println!("{line}");
+        if interactive {
+            elevator.info_box(&line);
+        }
+    } else if interactive {
+        elevator.error_box(&failure_text(&out.copy));
+    }
+    code
 }
 
 /// `verify-payload <dir>`: checks the embedded archive and extracts it into `<dir>\payload`.
@@ -207,6 +351,9 @@ mod tests {
         fn error_box(&self, text: &str) {
             self.boxes.borrow_mut().push(text.to_string());
         }
+        fn info_box(&self, text: &str) {
+            self.boxes.borrow_mut().push(format!("info: {text}"));
+        }
     }
 
     fn args(v: &[&str]) -> Vec<OsString> {
@@ -218,7 +365,7 @@ mod tests {
         let f = FakeElevator::new(false, Ok(0));
         assert_eq!(run_with(args(&["--version"]), &f), 0);
         assert_eq!(run_with(args(&[]), &f), 2);
-        assert_eq!(run_with(args(&["install"]), &f), 2);
+        assert_eq!(run_with(args(&["uninstall"]), &f), 2);
         assert_eq!(run_with(args(&["--version", "extra"]), &f), 2);
         assert_eq!(run_with(args(&["install", "--bogus"]), &f), 2);
         assert!(f.launched.borrow().is_empty() && f.boxes.borrow().is_empty());
@@ -322,6 +469,8 @@ mod tests {
 
     #[test]
     fn nothing_else_is_ever_elevated() {
+        // Some of these run an install plan on this PC: it stops at require_admin (not elevated).
+        crate::winutil::assert_not_elevated();
         for (elevated, a) in [
             (true, &["install", "--interactive"][..]),
             (false, &["install", "--interactive", "--dry-run"][..]),
@@ -339,6 +488,83 @@ mod tests {
             run_with(args(a), &f);
             assert!(f.launched.borrow().is_empty(), "{a:?}");
         }
+    }
+
+    #[test]
+    fn an_interactive_installer_run_reports_in_a_message_box() {
+        // Not elevated: the plan stops at require_admin before it changes anything.
+        let dir = crate::install::testutil::Scratch::new();
+        let inst = dir.path().join("i");
+        let data = dir.path().join("d");
+        let (inst, data) = (inst.to_str().unwrap(), data.to_str().unwrap());
+        // `elevated: true` = no relaunch; the plan itself still sees this process is not elevated.
+        let f = FakeElevator::new(true, Ok(0));
+        let a = [
+            "install",
+            "--install-dir",
+            inst,
+            "--data-root",
+            data,
+            "--interactive",
+        ];
+        assert_eq!(run_with(args(&a), &f), 1);
+        assert_eq!(*f.boxes.borrow(), [install::plan::ADMIN_MESSAGE]);
+        assert!(!dir.path().join("i").exists() && !dir.path().join("d").exists());
+        let f = FakeElevator::new(true, Ok(0));
+        let a = [
+            "install",
+            "--install-dir",
+            inst,
+            "--data-root",
+            inst,
+            "--interactive",
+        ];
+        assert_eq!(run_with(args(&a), &f), 2);
+        assert!(
+            f.boxes.borrow()[0].starts_with("오류: --data-root: "),
+            "{:?}",
+            f.boxes.borrow()
+        );
+        // Without --interactive nothing is shown in a box.
+        let f = FakeElevator::new(false, Ok(0));
+        assert_eq!(
+            run_with(args(&["audit-policy", "--enable", "--data-root", data]), &f),
+            1
+        );
+        assert!(f.boxes.borrow().is_empty() && f.launched.borrow().is_empty());
+    }
+
+    #[test]
+    fn the_failure_box_shows_the_last_failure_line_and_success_names_the_port() {
+        assert_eq!(
+            failure_text("[1/2] a\n[2/2] b\n[실패] b: 종료 코드 5\n".as_bytes()),
+            "[실패] b: 종료 코드 5"
+        );
+        assert_eq!(
+            failure_text("[1/1] require_admin\n관리자 권한으로 다시 실행하세요.\n\n".as_bytes()),
+            "관리자 권한으로 다시 실행하세요."
+        );
+        assert_eq!(failure_text(b""), "실패했습니다.");
+        let mut plan = Plan {
+            script: "install".into(),
+            version: None,
+            layout: None,
+            install_dir: None,
+            data_root: None,
+            service_mode: None,
+            steps: vec![install::plan::Step::new(
+                "install_info",
+                "(write-json)",
+                vec!["x".into(), r#"{"local_port":9700}"#.into()],
+            )],
+            notes: vec![],
+        };
+        assert_eq!(
+            install_done_line(&plan),
+            "설치 완료: http://127.0.0.1:9700/admin/setup 에서 첫 Admin 계정을 만드세요."
+        );
+        plan.steps.clear();
+        assert!(install_done_line(&plan).contains("127.0.0.1:8700/"));
     }
 
     #[test]

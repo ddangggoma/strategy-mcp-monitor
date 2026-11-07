@@ -743,7 +743,7 @@ pub fn initialize_data_root(
 }
 
 /// The marker's `created_at`: now in KST, to the second (`2026-11-07T15:04:05+09:00`).
-fn kst_now() -> String {
+pub(crate) fn kst_now() -> String {
     let format = time::macros::format_description!(
         "[year]-[month]-[day]T[hour]:[minute]:[second][offset_hour sign:mandatory]:[offset_minute]"
     );
