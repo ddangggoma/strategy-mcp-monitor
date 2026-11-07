@@ -362,6 +362,21 @@ fn leave(url: &Url, port: u16) -> NavDecision {
     decision
 }
 
+/// wry's own default browser arguments (kept when we pass ours).
+const WRY_BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection";
+
+/// Development builds only (Y24): `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` (e.g. the DevTools port
+/// of the window tests) passed through the WebView2 options too — on the CI runner (an elevated
+/// process) WebView2 did not apply the variable. `None` in every other build and without the variable.
+fn dev_browser_args() -> Option<String> {
+    if !cfg!(feature = "dev") {
+        return None;
+    }
+    let extra = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").ok()?;
+    let extra = extra.trim();
+    (!extra.is_empty()).then(|| format!("{WRY_BROWSER_ARGS} {extra}"))
+}
+
 /// The main window on the "connecting" page (from `setup`, on the main thread).
 fn build_main_window(
     app: &AppHandle,
@@ -370,7 +385,12 @@ fn build_main_window(
     background: bool,
 ) -> Result<WebviewWindow, String> {
     let same_window = app.clone();
-    let window = WebviewWindowBuilder::new(app, MAIN_LABEL, WebviewUrl::App("index.html".into()))
+    let mut builder =
+        WebviewWindowBuilder::new(app, MAIN_LABEL, WebviewUrl::App("index.html".into()));
+    if let Some(args) = dev_browser_args() {
+        builder = builder.additional_browser_args(&args);
+    }
+    let window = builder
         .title(WINDOW_TITLE)
         .inner_size(1280.0, 800.0)
         .min_inner_size(640.0, 600.0)
@@ -550,6 +570,15 @@ mod tests {
             NavDecision::Allow,
             "the window may show its own #stopped page"
         );
+    }
+
+    #[test]
+    fn only_development_builds_pass_extra_browser_arguments() {
+        if !cfg!(feature = "dev") {
+            assert_eq!(dev_browser_args(), None);
+        } else if let Some(args) = dev_browser_args() {
+            assert!(args.starts_with(WRY_BROWSER_ARGS), "{args}");
+        }
     }
 
     #[test]
