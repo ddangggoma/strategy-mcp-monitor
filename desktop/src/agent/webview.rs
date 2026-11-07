@@ -16,9 +16,10 @@ use super::client::{ServerClient, UreqTransport};
 use super::config::AgentConfig;
 use super::runner::{AgentRunner, EXIT_OK, Log, NoticeWindow, log_stderr};
 use super::{current_session_id, run_with_activity};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 use tauri::webview::NewWindowResponse;
 use tauri::{AppHandle, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
@@ -26,10 +27,6 @@ use tauri::{AppHandle, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder
 pub const NOTICE_TITLE: &str = "MCP Monitor 고지";
 /// How often the window is put back on top (without activating it).
 pub const TOPMOST_EVERY: Duration = Duration::from_secs(2);
-/// How long `open` waits for the main thread to create the window (a cold WebView2 start).
-pub const OPEN_WAIT: Duration = Duration::from_secs(30);
-/// How long `close` waits for the main thread to destroy the window.
-pub const CLOSE_WAIT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, PartialEq)]
 pub struct NoticeSpec {
@@ -202,24 +199,64 @@ struct Shown {
     _ticker: mpsc::Sender<()>,
 }
 
+/// Window label → that notice window's state, read by the app's window-event handler
+/// ([`on_notice_window_event`]).
+pub type NoticeRegistry = Arc<Mutex<HashMap<String, Arc<NoticeState>>>>;
+
+/// The app-level window-event handler (`tauri::Builder::on_window_event`): a close request is
+/// refused unless we close the window; `Destroyed` is recorded (and the label forgotten).
+pub fn on_notice_window_event(registry: &NoticeRegistry, label: &str, event: &tauri::WindowEvent) {
+    let state = registry
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(label)
+        .cloned();
+    let Some(state) = state else {
+        return;
+    };
+    match event {
+        tauri::WindowEvent::CloseRequested { api, .. } => {
+            if state.should_prevent_close() {
+                api.prevent_close();
+            }
+        }
+        tauri::WindowEvent::Destroyed => {
+            state.on_destroyed();
+            registry
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(label);
+        }
+        _ => {}
+    }
+}
+
 /// The WebView2 notice window, driven from the runner's thread.
 pub struct WebViewNotice {
     app: AppHandle,
     server: String,
     data_dir: PathBuf,
     log: Log,
+    registry: NoticeRegistry,
     shown: Option<Shown>,
     /// Labels are unique per window: an old window's label is freed only after its `Destroyed`.
     next: AtomicU64,
 }
 
 impl WebViewNotice {
-    pub fn new(app: AppHandle, server: String, data_dir: PathBuf, log: Log) -> WebViewNotice {
+    pub fn new(
+        app: AppHandle,
+        server: String,
+        data_dir: PathBuf,
+        registry: NoticeRegistry,
+        log: Log,
+    ) -> WebViewNotice {
         WebViewNotice {
             app,
             server,
             data_dir,
             log,
+            registry,
             shown: None,
             next: AtomicU64::new(1),
         }
@@ -356,7 +393,9 @@ fn start_topmost_ticker(app: AppHandle, hwnd: isize, stop: mpsc::Receiver<()>) {
         });
 }
 
-/// Main thread: builds the window for `url` with `state`.
+/// Builds the window for `url` (from the runner's thread: Tauri creates it on the event loop and
+/// waits), then sets what the builder cannot (WebView2 settings, process-failure handler), greys
+/// the close button and brings the window to the front on the main thread.
 fn build_window(
     app: &AppHandle,
     label: String,
@@ -387,16 +426,6 @@ fn build_window(
         .on_new_window(|_, _| NewWindowResponse::Deny)
         .build()
         .map_err(|e| e.to_string())?;
-    let events = state.clone();
-    window.on_window_event(move |e| match e {
-        tauri::WindowEvent::CloseRequested { api, .. } => {
-            if events.should_prevent_close() {
-                api.prevent_close();
-            }
-        }
-        tauri::WindowEvent::Destroyed => events.on_destroyed(),
-        _ => {}
-    });
     let configured = window.with_webview(move |wv| {
         // SAFETY: with_webview runs this on the main thread.
         if let Err(e) = unsafe { configure_webview(wv.controller(), &spec, state) } {
@@ -408,8 +437,12 @@ fn build_window(
         return Err(e.to_string());
     }
     if let Ok(hwnd) = window.hwnd() {
-        disable_close(hwnd);
-        bring_to_front(hwnd);
+        let hwnd = hwnd.0 as isize;
+        let _ = app.run_on_main_thread(move || {
+            use windows::Win32::Foundation::HWND;
+            disable_close(HWND(hwnd as *mut _));
+            bring_to_front(HWND(hwnd as *mut _));
+        });
     }
     Ok(window)
 }
@@ -423,21 +456,22 @@ impl NoticeWindow for WebViewNotice {
         }
         let state = Arc::new(NoticeState::default());
         let label = format!("notice-{}", self.next.fetch_add(1, Ordering::SeqCst));
-        let (tx, rx) = mpsc::channel();
-        let (app, server, data_dir, st, log) = (
-            self.app.clone(),
+        // registered before the window exists, so no event of it is missed
+        self.registry
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(label.clone(), state.clone());
+        let built = build_window(
+            &self.app,
+            label.clone(),
+            parsed,
             self.server.clone(),
             self.data_dir.clone(),
             state.clone(),
             self.log.clone(),
         );
-        self.app
-            .run_on_main_thread(move || {
-                let _ = tx.send(build_window(&app, label, parsed, server, data_dir, st, log));
-            })
-            .map_err(|e| e.to_string())?;
-        match rx.recv_timeout(OPEN_WAIT) {
-            Ok(Ok(window)) => {
+        match built {
+            Ok(window) => {
                 let (stop, ticks) = mpsc::channel();
                 if let Ok(hwnd) = window.hwnd() {
                     start_topmost_ticker(self.app.clone(), hwnd.0 as isize, ticks);
@@ -449,13 +483,16 @@ impl NoticeWindow for WebViewNotice {
                 });
                 Ok(())
             }
-            Ok(Err(e)) => {
+            Err(e) => {
+                self.registry
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(&label);
                 (self.log)(&format!(
                     "notice window not created ({e}); opening the default browser"
                 ));
                 open_in_browser(url)
             }
-            Err(_) => Err("the notice window was not created in time".into()),
         }
     }
 
@@ -464,15 +501,7 @@ impl NoticeWindow for WebViewNotice {
             return;
         };
         shown.state.begin_close();
-        let window = shown.window.clone();
-        let (tx, rx) = mpsc::channel();
-        let posted = self.app.run_on_main_thread(move || {
-            let _ = window.destroy();
-            let _ = tx.send(());
-        });
-        if posted.is_ok() {
-            let _ = rx.recv_timeout(CLOSE_WAIT);
-        }
+        let _ = shown.window.destroy();
     }
 
     fn closed_by_user(&mut self) -> bool {
@@ -527,16 +556,22 @@ pub fn run_webview_agent(cfg: AgentConfig) -> i32 {
     };
     let code = Arc::new(AtomicI32::new(EXIT_OK));
     let done = Arc::new(AtomicBool::new(false));
+    let registry = NoticeRegistry::default();
     let built = {
         let (code, done, log) = (code.clone(), done.clone(), log.clone());
         let runner_for = runner_for.clone();
+        let (events, notices) = (registry.clone(), registry);
         tauri::Builder::default()
+            .on_window_event(move |window, event| {
+                on_notice_window_event(&events, window.label(), event)
+            })
             .setup(move |app| {
                 let handle = app.handle().clone();
                 std::thread::Builder::new()
                     .name("agent-runner".into())
                     .spawn(move || {
-                        let window = WebViewNotice::new(handle.clone(), server, data_dir, log);
+                        let window =
+                            WebViewNotice::new(handle.clone(), server, data_dir, notices, log);
                         let c = runner_for(Box::new(window));
                         code.store(c, Ordering::SeqCst);
                         done.store(true, Ordering::SeqCst);
@@ -699,6 +734,32 @@ mod tests {
         ] {
             assert!(!process_failure_closes(other.0), "{other:?}");
         }
+    }
+
+    #[test]
+    fn a_destroyed_notice_window_is_recorded_and_forgotten() {
+        let registry = NoticeRegistry::default();
+        let (ours, theirs) = (
+            Arc::new(NoticeState::default()),
+            Arc::new(NoticeState::default()),
+        );
+        registry
+            .lock()
+            .unwrap()
+            .insert("notice-1".into(), ours.clone());
+        registry
+            .lock()
+            .unwrap()
+            .insert("notice-2".into(), theirs.clone());
+        theirs.begin_close();
+        on_notice_window_event(&registry, "notice-1", &tauri::WindowEvent::Destroyed);
+        on_notice_window_event(&registry, "notice-2", &tauri::WindowEvent::Destroyed);
+        on_notice_window_event(&registry, "main", &tauri::WindowEvent::Destroyed); // not a notice
+        assert!(ours.take_closed_by_user());
+        assert!(!theirs.take_closed_by_user());
+        assert!(registry.lock().unwrap().is_empty());
+        on_notice_window_event(&registry, "notice-1", &tauri::WindowEvent::Focused(true));
+        assert!(!ours.take_closed_by_user());
     }
 
     #[test]
