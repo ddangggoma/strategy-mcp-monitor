@@ -154,10 +154,7 @@ fn run_agent(args: &cli::AgentArgs) -> i32 {
     };
     match cfg.dialog {
         cli::Dialog::Print => agent::run_print(&cfg),
-        cli::Dialog::Webview => {
-            err_line("오류: --dialog webview는 아직 지원하지 않습니다");
-            2
-        }
+        cli::Dialog::Webview => agent::webview::run_webview_agent(cfg),
     }
 }
 

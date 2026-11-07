@@ -1,0 +1,699 @@
+//! `agent --dialog webview` (the default): the notice is a top-most modal WebView2 window of this
+//! process (D3=A, Y10). It stays above other windows (re-asserted every 2 s without taking the
+//! focus), has no close button, no taskbar button, no minimise/maximise/resize, refuses `WM_CLOSE`
+//! (Alt+F4) and Escape does nothing to it; it navigates only to the server's own `/notice` page,
+//! opens no other window, has no context menu, devtools or browser accelerator keys, and uses an
+//! InPrivate profile under `%LOCALAPPDATA%\mcp-monitor\notice-webview` (removed by uninstall's
+//! `remove_webview_profiles`). If it goes away anyway (destroyed from outside, or a WebView2
+//! browser/renderer process died), the runner reports a user close and the server shows it again.
+//! Windows cannot block input to other apps; "modal" means the above (K01).
+//!
+//! The Tauri event loop owns the main thread; the runner (with the window activity, F09) runs on
+//! its own thread and drives the window through `run_on_main_thread`.
+
+use super::activity::WindowActivity;
+use super::client::{ServerClient, UreqTransport};
+use super::config::AgentConfig;
+use super::runner::{AgentRunner, EXIT_OK, Log, NoticeWindow, log_stderr};
+use super::{current_session_id, run_with_activity};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
+use std::sync::{Arc, mpsc};
+use std::time::Duration;
+use tauri::webview::NewWindowResponse;
+use tauri::{AppHandle, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+
+pub const NOTICE_TITLE: &str = "MCP Monitor 고지";
+/// How often the window is put back on top (without activating it).
+pub const TOPMOST_EVERY: Duration = Duration::from_secs(2);
+/// How long `open` waits for the main thread to create the window (a cold WebView2 start).
+pub const OPEN_WAIT: Duration = Duration::from_secs(30);
+/// How long `close` waits for the main thread to destroy the window.
+pub const CLOSE_WAIT: Duration = Duration::from_secs(5);
+
+#[derive(Debug, PartialEq)]
+pub struct NoticeSpec {
+    pub title: &'static str,
+    pub width: f64,
+    pub height: f64,
+    pub always_on_top: bool,
+    pub closable: bool,
+    pub minimizable: bool,
+    pub maximizable: bool,
+    pub resizable: bool,
+    pub skip_taskbar: bool,
+    pub incognito: bool,
+    pub focused: bool,
+    pub decorations: bool,
+    pub context_menu: bool,
+    pub devtools: bool,
+    pub accelerator_keys: bool,
+}
+
+/// 640×600 (logical px), shrunk to the work area less 16 px on each side, never below 320×300 (Y30).
+pub fn notice_size(w: f64, h: f64) -> (f64, f64) {
+    (
+        (640.0f64).min(w - 32.0).max(320.0),
+        (600.0f64).min(h - 32.0).max(300.0),
+    )
+}
+
+/// The notice window for a work area of `work_w`×`work_h` logical px. The title bar stays (so the
+/// window can be moved); only its close button is disabled.
+pub fn notice_spec(work_w: f64, work_h: f64) -> NoticeSpec {
+    let (width, height) = notice_size(work_w, work_h);
+    NoticeSpec {
+        title: NOTICE_TITLE,
+        width,
+        height,
+        always_on_top: true,
+        closable: false,
+        minimizable: false,
+        maximizable: false,
+        resizable: false,
+        skip_taskbar: true,
+        incognito: true,
+        focused: true,
+        decorations: true,
+        context_menu: false,
+        devtools: false,
+        accelerator_keys: false,
+    }
+}
+
+/// Only the server's own notice page: same scheme, host and port as `server`, no user info, the
+/// path exactly `/notice` and no query (the fragment carries the display id and token).
+pub fn notice_navigation_allowed(url: &tauri::Url, server: &str) -> bool {
+    let Ok(server) = tauri::Url::parse(server) else {
+        return false;
+    };
+    url.scheme() == server.scheme()
+        && url.host_str().is_some()
+        && url.host_str() == server.host_str()
+        && url.port_or_known_default() == server.port_or_known_default()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.path() == "/notice"
+        && url.query().is_none()
+}
+
+/// `<L>\mcp-monitor\notice-webview` for `%LOCALAPPDATA%` = `<L>`.
+pub fn notice_data_dir(local_app_data: &Path) -> PathBuf {
+    local_app_data.join("mcp-monitor").join("notice-webview")
+}
+
+/// `ProcessFailed` kinds after which the notice page is gone: the browser process or the main
+/// frame's renderer exited (`COREWEBVIEW2_PROCESS_FAILED_KIND` 0 and 1). The others (an
+/// unresponsive renderer, GPU, utility, iframe processes) recover or do not show the page.
+pub fn process_failure_closes(kind: i32) -> bool {
+    matches!(kind, 0 | 1)
+}
+
+/// One notice window's close bookkeeping, shared with its window-event and WebView2 handlers.
+#[derive(Debug, Default)]
+pub struct NoticeState {
+    closing: AtomicBool,
+    closed_by_user: AtomicBool,
+}
+
+impl NoticeState {
+    /// We are closing the window (a `close_notice`, a newer notice, or the agent's exit).
+    pub fn begin_close(&self) {
+        self.closing.store(true, Ordering::SeqCst);
+    }
+
+    /// A close request (Alt+F4, `WM_CLOSE`) is refused unless we are closing.
+    pub fn should_prevent_close(&self) -> bool {
+        !self.closing.load(Ordering::SeqCst)
+    }
+
+    /// The window is gone: unless we closed it, the user (or something outside) did.
+    pub fn on_destroyed(&self) {
+        if !self.closing.load(Ordering::SeqCst) {
+            self.closed_by_user.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// A WebView2 browser or renderer process died: the page is gone, so it counts as a user
+    /// close (the server shows the notice again a second later in a new window).
+    pub fn on_process_failed(&self) {
+        if !self.closing.load(Ordering::SeqCst) {
+            self.closed_by_user.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// True once after the window went away without us; reading it clears it.
+    pub fn take_closed_by_user(&self) -> bool {
+        self.closed_by_user.swap(false, Ordering::SeqCst)
+    }
+
+    /// A new window.
+    pub fn reset(&self) {
+        self.closing.store(false, Ordering::SeqCst);
+        self.closed_by_user.store(false, Ordering::SeqCst);
+    }
+}
+
+/// `%LOCALAPPDATA%` of the session user (the variable, else the known folder).
+pub fn local_app_data() -> Option<PathBuf> {
+    if let Some(v) = std::env::var_os("LOCALAPPDATA").filter(|v| !v.is_empty()) {
+        return Some(PathBuf::from(v));
+    }
+    use windows::Win32::System::Com::CoTaskMemFree;
+    use windows::Win32::UI::Shell::{FOLDERID_LocalAppData, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
+    // SAFETY: plain call; the returned buffer is freed with CoTaskMemFree after copying it.
+    unsafe {
+        let p = SHGetKnownFolderPath(&FOLDERID_LocalAppData, KF_FLAG_DEFAULT, None).ok()?;
+        let path = p.to_string().ok().map(PathBuf::from);
+        CoTaskMemFree(Some(p.0 as *const _));
+        path
+    }
+}
+
+/// The default browser on `url` (the fallback when no WebView2 window can be made — the notice
+/// must be shown, Python V25).
+fn open_in_browser(url: &str) -> Result<(), String> {
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    use windows::core::{HSTRING, w};
+    // SAFETY: plain call with valid, NUL-terminated strings.
+    let r = unsafe {
+        ShellExecuteW(
+            None,
+            w!("open"),
+            &HSTRING::from(url),
+            None,
+            None,
+            SW_SHOWNORMAL,
+        )
+    };
+    // Success is a value above 32.
+    if r.0 as usize > 32 {
+        Ok(())
+    } else {
+        Err(format!("ShellExecuteW failed ({})", r.0 as usize))
+    }
+}
+
+struct Shown {
+    window: WebviewWindow,
+    state: Arc<NoticeState>,
+    /// Dropping it ends the top-most ticker.
+    _ticker: mpsc::Sender<()>,
+}
+
+/// The WebView2 notice window, driven from the runner's thread.
+pub struct WebViewNotice {
+    app: AppHandle,
+    server: String,
+    data_dir: PathBuf,
+    log: Log,
+    shown: Option<Shown>,
+    /// Labels are unique per window: an old window's label is freed only after its `Destroyed`.
+    next: AtomicU64,
+}
+
+impl WebViewNotice {
+    pub fn new(app: AppHandle, server: String, data_dir: PathBuf, log: Log) -> WebViewNotice {
+        WebViewNotice {
+            app,
+            server,
+            data_dir,
+            log,
+            shown: None,
+            next: AtomicU64::new(1),
+        }
+    }
+}
+
+/// Logical size of the primary monitor's work area (or room for the full 640×600).
+fn work_area(app: &AppHandle) -> (f64, f64) {
+    match app.primary_monitor() {
+        Ok(Some(m)) => {
+            let scale = m.scale_factor().max(0.1);
+            let size = m.work_area().size;
+            (
+                f64::from(size.width) / scale,
+                f64::from(size.height) / scale,
+            )
+        }
+        _ => (672.0, 632.0),
+    }
+}
+
+/// The settings Tauri has no builder option for, and the process-failure handler.
+///
+/// # Safety
+/// Main thread only (the WebView2 COM objects are single-threaded).
+unsafe fn configure_webview(
+    controller: webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Controller,
+    spec: &NoticeSpec,
+    state: Arc<NoticeState>,
+) -> windows::core::Result<()> {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        COREWEBVIEW2_PROCESS_FAILED_KIND, ICoreWebView2Settings3,
+    };
+    use webview2_com::ProcessFailedEventHandler;
+    use windows::core::Interface;
+    // SAFETY: COM calls on the main thread that owns the controller.
+    unsafe {
+        let webview = controller.CoreWebView2()?;
+        let settings = webview.Settings()?;
+        settings.SetAreDevToolsEnabled(spec.devtools)?;
+        settings.SetAreDefaultContextMenusEnabled(spec.context_menu)?;
+        settings
+            .cast::<ICoreWebView2Settings3>()?
+            .SetAreBrowserAcceleratorKeysEnabled(spec.accelerator_keys)?;
+        let mut token = 0i64;
+        webview.add_ProcessFailed(
+            &ProcessFailedEventHandler::create(Box::new(move |_, args| {
+                let mut kind = COREWEBVIEW2_PROCESS_FAILED_KIND::default();
+                if let Some(args) = args {
+                    args.ProcessFailedKind(&mut kind)?;
+                }
+                if process_failure_closes(kind.0) {
+                    state.on_process_failed();
+                }
+                Ok(())
+            })),
+            &mut token,
+        )?;
+    }
+    Ok(())
+}
+
+/// Brings the new window to the front; a process that may not take the foreground flashes it
+/// instead (until it is activated).
+fn bring_to_front(hwnd: windows::Win32::Foundation::HWND) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        FLASHW_ALL, FLASHW_TIMERNOFG, FLASHWINFO, FlashWindowEx, SetForegroundWindow,
+    };
+    // SAFETY: plain calls on our own window.
+    unsafe {
+        if !SetForegroundWindow(hwnd).as_bool() {
+            let info = FLASHWINFO {
+                cbSize: std::mem::size_of::<FLASHWINFO>() as u32,
+                hwnd,
+                dwFlags: FLASHW_ALL | FLASHW_TIMERNOFG,
+                uCount: 0,
+                dwTimeout: 0,
+            };
+            let _ = FlashWindowEx(&info);
+        }
+    }
+}
+
+/// Puts the window back on top every [`TOPMOST_EVERY`] without activating it, until `stop` is
+/// dropped or the window is gone.
+fn start_topmost_ticker(app: AppHandle, hwnd: isize, stop: mpsc::Receiver<()>) {
+    let _ = std::thread::Builder::new()
+        .name("agent-notice-topmost".into())
+        .spawn(move || {
+            use windows::Win32::Foundation::HWND;
+            use windows::Win32::UI::WindowsAndMessaging::{
+                HWND_TOPMOST, IsWindow, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos,
+            };
+            while let Err(mpsc::RecvTimeoutError::Timeout) = stop.recv_timeout(TOPMOST_EVERY) {
+                // SAFETY: IsWindow accepts any value.
+                if !unsafe { IsWindow(Some(HWND(hwnd as *mut _))) }.as_bool() {
+                    return;
+                }
+                let posted = app.run_on_main_thread(move || {
+                    // SAFETY: plain call; a stale handle only makes it fail.
+                    let _ = unsafe {
+                        SetWindowPos(
+                            HWND(hwnd as *mut _),
+                            Some(HWND_TOPMOST),
+                            0,
+                            0,
+                            0,
+                            0,
+                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                        )
+                    };
+                });
+                if posted.is_err() {
+                    return;
+                }
+            }
+        });
+}
+
+/// Main thread: builds the window for `url` with `state`.
+fn build_window(
+    app: &AppHandle,
+    label: String,
+    url: tauri::Url,
+    server: String,
+    data_dir: PathBuf,
+    state: Arc<NoticeState>,
+    log: Log,
+) -> Result<WebviewWindow, String> {
+    let (w, h) = work_area(app);
+    let spec = notice_spec(w, h);
+    let window = WebviewWindowBuilder::new(app, label, WebviewUrl::External(url))
+        .title(spec.title)
+        .inner_size(spec.width, spec.height)
+        .center()
+        .always_on_top(spec.always_on_top)
+        .closable(spec.closable)
+        .minimizable(spec.minimizable)
+        .maximizable(spec.maximizable)
+        .resizable(spec.resizable)
+        .skip_taskbar(spec.skip_taskbar)
+        .incognito(spec.incognito)
+        .focused(spec.focused)
+        .decorations(spec.decorations)
+        .devtools(spec.devtools)
+        .data_directory(data_dir)
+        .on_navigation(move |u| notice_navigation_allowed(u, &server))
+        .on_new_window(|_, _| NewWindowResponse::Deny)
+        .build()
+        .map_err(|e| e.to_string())?;
+    let events = state.clone();
+    window.on_window_event(move |e| match e {
+        tauri::WindowEvent::CloseRequested { api, .. } => {
+            if events.should_prevent_close() {
+                api.prevent_close();
+            }
+        }
+        tauri::WindowEvent::Destroyed => events.on_destroyed(),
+        _ => {}
+    });
+    let configured = window.with_webview(move |wv| {
+        // SAFETY: with_webview runs this on the main thread.
+        if let Err(e) = unsafe { configure_webview(wv.controller(), &spec, state) } {
+            log(&format!("notice window settings: {e}"));
+        }
+    });
+    if let Err(e) = configured {
+        let _ = window.destroy();
+        return Err(e.to_string());
+    }
+    if let Ok(hwnd) = window.hwnd() {
+        bring_to_front(hwnd);
+    }
+    Ok(window)
+}
+
+impl NoticeWindow for WebViewNotice {
+    fn open(&mut self, url: &str, _display_id: i64) -> Result<(), String> {
+        self.close();
+        let parsed = tauri::Url::parse(url).map_err(|e| format!("bad notice url: {e}"))?;
+        if !notice_navigation_allowed(&parsed, &self.server) {
+            return Err("not the server's notice page".into());
+        }
+        let state = Arc::new(NoticeState::default());
+        let label = format!("notice-{}", self.next.fetch_add(1, Ordering::SeqCst));
+        let (tx, rx) = mpsc::channel();
+        let (app, server, data_dir, st, log) = (
+            self.app.clone(),
+            self.server.clone(),
+            self.data_dir.clone(),
+            state.clone(),
+            self.log.clone(),
+        );
+        self.app
+            .run_on_main_thread(move || {
+                let _ = tx.send(build_window(&app, label, parsed, server, data_dir, st, log));
+            })
+            .map_err(|e| e.to_string())?;
+        match rx.recv_timeout(OPEN_WAIT) {
+            Ok(Ok(window)) => {
+                let (stop, ticks) = mpsc::channel();
+                if let Ok(hwnd) = window.hwnd() {
+                    start_topmost_ticker(self.app.clone(), hwnd.0 as isize, ticks);
+                }
+                self.shown = Some(Shown {
+                    window,
+                    state,
+                    _ticker: stop,
+                });
+                Ok(())
+            }
+            Ok(Err(e)) => {
+                (self.log)(&format!(
+                    "notice window not created ({e}); opening the default browser"
+                ));
+                open_in_browser(url)
+            }
+            Err(_) => Err("the notice window was not created in time".into()),
+        }
+    }
+
+    fn close(&mut self) {
+        let Some(shown) = self.shown.take() else {
+            return;
+        };
+        shown.state.begin_close();
+        let window = shown.window.clone();
+        let (tx, rx) = mpsc::channel();
+        let posted = self.app.run_on_main_thread(move || {
+            let _ = window.destroy();
+            let _ = tx.send(());
+        });
+        if posted.is_ok() {
+            let _ = rx.recv_timeout(CLOSE_WAIT);
+        }
+    }
+
+    fn closed_by_user(&mut self) -> bool {
+        self.shown
+            .as_ref()
+            .is_some_and(|s| s.state.take_closed_by_user())
+    }
+}
+
+/// When Tauri cannot start at all: the notice goes to the default browser (no close tracking).
+struct BrowserNotice;
+
+impl NoticeWindow for BrowserNotice {
+    fn open(&mut self, url: &str, _display_id: i64) -> Result<(), String> {
+        open_in_browser(url)
+    }
+    fn close(&mut self) {}
+    fn closed_by_user(&mut self) -> bool {
+        false
+    }
+}
+
+/// `agent --dialog webview`: the Tauri event loop on this (main) thread, the runner and its window
+/// activity on another; the runner's end ends the app with its exit code (0, 3, 4, 5; 1 when the
+/// session cannot be told). No plugins and no single instance: one agent per session, apart from
+/// the app mode.
+pub fn run_webview_agent(cfg: AgentConfig) -> i32 {
+    let log = log_stderr();
+    let session_id = match current_session_id() {
+        Ok(id) => id,
+        Err(e) => {
+            log(&format!("cannot tell this process's session: {e}"));
+            return 1;
+        }
+    };
+    let data_dir = notice_data_dir(&local_app_data().unwrap_or_else(std::env::temp_dir));
+    let client = Arc::new(ServerClient::new(
+        cfg.server.clone(),
+        cfg.token.clone(),
+        cfg.server_key,
+        Box::new(UreqTransport::new()),
+    ));
+    let server = cfg.server.clone();
+    let runner_for = {
+        let (cfg, log) = (Arc::new(cfg), log.clone());
+        move |window: Box<dyn NoticeWindow>| {
+            let runner =
+                AgentRunner::new(&cfg, client.clone(), window, session_id, std::process::id())
+                    .with_log(log.clone());
+            run_with_activity(runner, WindowActivity::new(client).with_log(log))
+        }
+    };
+    let code = Arc::new(AtomicI32::new(EXIT_OK));
+    let done = Arc::new(AtomicBool::new(false));
+    let built = {
+        let (code, done, log) = (code.clone(), done.clone(), log.clone());
+        let runner_for = runner_for.clone();
+        tauri::Builder::default()
+            .setup(move |app| {
+                let handle = app.handle().clone();
+                std::thread::Builder::new()
+                    .name("agent-runner".into())
+                    .spawn(move || {
+                        let window = WebViewNotice::new(handle.clone(), server, data_dir, log);
+                        let c = runner_for(Box::new(window));
+                        code.store(c, Ordering::SeqCst);
+                        done.store(true, Ordering::SeqCst);
+                        handle.exit(c);
+                    })?;
+                Ok(())
+            })
+            .build(tauri::generate_context!())
+    };
+    let app = match built {
+        Ok(app) => app,
+        Err(e) => {
+            log(&format!(
+                "the window system did not start ({e}); notices open in the default browser"
+            ));
+            return runner_for(Box::new(BrowserNotice));
+        }
+    };
+    let running = done.clone();
+    app.run_return(move |_, event| {
+        // The last window closing (a notice the user got rid of) must not end the agent.
+        if let RunEvent::ExitRequested {
+            api, code: None, ..
+        } = event
+            && !running.load(Ordering::SeqCst)
+        {
+            api.prevent_exit();
+        }
+    });
+    code.load(Ordering::SeqCst)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn notice_window_spec_is_a_topmost_modal() {
+        let s = notice_spec(1920.0, 1040.0);
+        assert_eq!(
+            s,
+            NoticeSpec {
+                title: "MCP Monitor 고지",
+                width: 640.0,
+                height: 600.0,
+                always_on_top: true,
+                closable: false,
+                minimizable: false,
+                maximizable: false,
+                resizable: false,
+                skip_taskbar: true,
+                incognito: true,
+                focused: true,
+                decorations: true,
+                context_menu: false,
+                devtools: false,
+                accelerator_keys: false
+            }
+        );
+    }
+
+    #[test]
+    fn notice_size_fits_the_work_area() {
+        assert_eq!(notice_size(1920.0, 1040.0), (640.0, 600.0));
+        assert_eq!(notice_size(800.0, 560.0), (640.0, 528.0));
+        assert_eq!(notice_size(500.0, 400.0), (468.0, 368.0));
+        assert_eq!(notice_size(300.0, 250.0), (320.0, 300.0));
+    }
+
+    #[test]
+    fn notice_navigation_allows_only_the_notice_page() {
+        let server = "http://127.0.0.1:8700";
+        let ok = |u: &str| notice_navigation_allowed(&tauri::Url::parse(u).unwrap(), server);
+        assert!(
+            ok("http://127.0.0.1:8700/notice#d=1&t=tok_ABCDEFGHIJKLmnop")
+                && ok("http://127.0.0.1:8700/notice")
+        );
+        for bad in [
+            "http://127.0.0.1:8700/admin",
+            "http://127.0.0.1:8701/notice",
+            "http://localhost:8700/notice",
+            "https://127.0.0.1:8700/notice",
+            "http://u@127.0.0.1:8700/notice",
+            "http://127.0.0.1:8700/notice?x=1",
+            "http://127.0.0.1:8700/notice/x",
+            "file:///C:/Windows/win.ini",
+            "https://evil.example/notice",
+        ] {
+            assert!(!ok(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn notice_navigation_refuses_the_rest_too() {
+        let server = "http://127.0.0.1:8700";
+        let ok = |u: &str| notice_navigation_allowed(&tauri::Url::parse(u).unwrap(), server);
+        for bad in [
+            "http://127.0.0.1:8700/notice?",
+            "http://:p@127.0.0.1:8700/notice",
+            "http://127.0.0.1:8700/Notice",
+            "http://127.0.0.1:8700/",
+            "about:blank",
+            "data:text/html,<p>x</p>",
+            "javascript:alert(1)",
+        ] {
+            assert!(!ok(bad), "{bad}");
+        }
+        // the server's own spelling does not matter, the parsed parts do
+        assert!(notice_navigation_allowed(
+            &tauri::Url::parse("http://127.0.0.1:8700/notice#d=2").unwrap(),
+            "http://127.0.0.1:8700/"
+        ));
+        assert!(notice_navigation_allowed(
+            &tauri::Url::parse("http://127.0.0.1:80/notice").unwrap(),
+            "http://127.0.0.1"
+        ));
+        assert!(!notice_navigation_allowed(
+            &tauri::Url::parse("http://127.0.0.1:8700/notice").unwrap(),
+            "not a url"
+        ));
+    }
+
+    #[test]
+    fn close_requests_are_refused_unless_we_close() {
+        let s = NoticeState::default();
+        assert!(s.should_prevent_close());
+        s.on_destroyed(); // destroyed without our close (e.g. ended from outside)
+        assert!(s.take_closed_by_user() && !s.take_closed_by_user());
+        s.reset();
+        s.begin_close();
+        assert!(!s.should_prevent_close());
+        s.on_destroyed();
+        assert!(!s.take_closed_by_user());
+    }
+
+    #[test]
+    fn a_failed_webview_counts_as_closed_by_the_user() {
+        let s = NoticeState::default();
+        s.on_process_failed();
+        assert!(s.take_closed_by_user());
+        s.begin_close();
+        s.on_process_failed(); // while we close it: not the user
+        assert!(!s.take_closed_by_user());
+    }
+
+    #[test]
+    fn only_a_gone_browser_or_page_renderer_closes_the_notice() {
+        use webview2_com::Microsoft::Web::WebView2::Win32::*;
+        assert!(process_failure_closes(
+            COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED.0
+        ));
+        assert!(process_failure_closes(
+            COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED.0
+        ));
+        for other in [
+            COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE,
+            COREWEBVIEW2_PROCESS_FAILED_KIND_FRAME_RENDER_PROCESS_EXITED,
+            COREWEBVIEW2_PROCESS_FAILED_KIND_GPU_PROCESS_EXITED,
+            COREWEBVIEW2_PROCESS_FAILED_KIND_UTILITY_PROCESS_EXITED,
+        ] {
+            assert!(!process_failure_closes(other.0), "{other:?}");
+        }
+    }
+
+    #[test]
+    fn notice_profile_lives_under_the_removed_folder() {
+        assert_eq!(
+            notice_data_dir(Path::new(r"C:\Users\hong\AppData\Local")),
+            Path::new(r"C:\Users\hong\AppData\Local\mcp-monitor\notice-webview")
+        );
+    }
+
+    #[test]
+    fn local_app_data_is_this_users_folder() {
+        let p = local_app_data().unwrap();
+        assert!(p.is_absolute() && p.is_dir(), "{}", p.display());
+    }
+}

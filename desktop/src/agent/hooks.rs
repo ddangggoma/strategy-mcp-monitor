@@ -311,20 +311,30 @@ impl HookThread {
     /// Ends the message loop (`WM_QUIT`), which removes the hooks, and waits up to 2 s for the
     /// thread. Safe before start and when called twice.
     pub fn stop(&self) {
+        self.stop_within(STOP_WAIT);
+    }
+
+    /// [`Self::stop`] that waits at most `wait` in all (F09: the agent's exit must fit the
+    /// server's 2 s grace); a thread still running then is left to the process exit.
+    pub fn stop_within(&self, wait: Duration) {
         use windows::Win32::Foundation::{LPARAM, WPARAM};
         use windows::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT};
+        let deadline = std::time::Instant::now() + wait;
         self.shared.stopping.store(true, Ordering::SeqCst);
         let Some((handle, done)) = self.thread.lock().unwrap_or_else(|e| e.into_inner()).take()
         else {
             return;
         };
-        self.wait_ready(STOP_WAIT);
+        self.wait_ready(deadline.saturating_duration_since(std::time::Instant::now()));
         let tid = self.shared.tid.load(Ordering::SeqCst);
         if tid != 0 {
             // SAFETY: plain call; the thread's queue exists since before it was ready.
             let _ = unsafe { PostThreadMessageW(tid, WM_QUIT, WPARAM(0), LPARAM(0)) };
         }
-        if done.recv_timeout(STOP_WAIT).is_ok() {
+        if done
+            .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+            .is_ok()
+        {
             let _ = handle.join();
         }
     }

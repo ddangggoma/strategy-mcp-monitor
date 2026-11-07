@@ -20,7 +20,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub const DEFAULT_EVENTS_MAX: usize = 200;
 pub const DEFAULT_IDLE_THRESHOLD_SEC: f64 = 300.0;
@@ -185,22 +185,65 @@ impl WindowActivity {
     /// logged). Safe to call more than once.
     pub fn stop(&mut self) {
         self.hooks = None;
+        if let Some(r) = self.running.take() {
+            finish(r, None, &self.log);
+        }
+    }
+
+    /// [`Self::stop`] bounded by `budget` (F09: the server kills an agent 2 s after `exit`, so
+    /// the agent's exit, final flush included, must fit [`EXIT_STOP_BUDGET`]). The waits for the
+    /// hooks and the pump share the budget, so the final flush starts within it. True when all of
+    /// it finished in time; otherwise the rest (e.g. a flush to a stalled server) is logged and
+    /// left to the process exit.
+    pub fn stop_within(&mut self, budget: Duration) -> bool {
+        self.hooks = None;
         let Some(r) = self.running.take() else {
-            return;
+            return true;
         };
-        r.hooks.stop();
-        r.stop.store(true, Ordering::SeqCst);
-        r.thread.thread().unpark();
-        if r.done
-            .recv_timeout(Duration::from_secs(PUMP_JOIN_SEC))
-            .is_ok()
-        {
-            let _ = r.thread.join();
+        let deadline = Instant::now() + budget;
+        let (done_tx, done) = mpsc::channel();
+        let log = self.log.clone();
+        let spawned = std::thread::Builder::new()
+            .name("agent-events-stop".into())
+            .spawn(move || {
+                finish(r, Some(deadline), &log);
+                let _ = done_tx.send(());
+            });
+        if let Err(e) = spawned {
+            (self.log)(&format!("window events not stopped: {e}"));
+            return false;
         }
-        let flushed = r.sender.lock().unwrap_or_else(|e| e.into_inner()).flush();
-        if let Err(e) = flushed {
-            (self.log)(&format!("final event flush failed: {e}"));
+        if done.recv_timeout(budget).is_ok() {
+            return true;
         }
+        (self.log)(&format!(
+            "window events did not stop within {} ms; left to the process exit",
+            budget.as_millis()
+        ));
+        false
+    }
+}
+
+/// How long the agent's exit waits for the window events (stop + final flush, F09): the server
+/// kills agents 2 s after it told them to exit (`stop_grace_sec`).
+pub const EXIT_STOP_BUDGET: Duration = Duration::from_millis(1500);
+
+/// Hooks, then the pump (both waits bounded by `deadline`, else the defaults), then one flush.
+fn finish(r: Running, deadline: Option<Instant>, log: &Log) {
+    let left = |d: Instant| d.saturating_duration_since(Instant::now());
+    match deadline {
+        Some(d) => r.hooks.stop_within(left(d)),
+        None => r.hooks.stop(),
+    }
+    r.stop.store(true, Ordering::SeqCst);
+    r.thread.thread().unpark();
+    let pump_wait = deadline.map_or(Duration::from_secs(PUMP_JOIN_SEC), left);
+    if r.done.recv_timeout(pump_wait).is_ok() {
+        let _ = r.thread.join();
+    }
+    let flushed = r.sender.lock().unwrap_or_else(|e| e.into_inner()).flush();
+    if let Err(e) = flushed {
+        log(&format!("final event flush failed: {e}"));
     }
 }
 
@@ -440,5 +483,59 @@ mod tests {
                 "{bad}"
             );
         }
+    }
+
+    // --- F09: the agent's exit fits the server's 2 s grace --------------------------------------
+
+    #[test]
+    fn a_bounded_stop_delivers_what_is_left_within_the_budget() {
+        let fake = FakeServer::new();
+        let c = client(&fake);
+        c.next(0.0).unwrap();
+        let mut a = WindowActivity::new(c)
+            .with_idle_source(Arc::new(|| Some(400.0)))
+            .with_no_hooks();
+        a.on_hello(&json!({"window_events": true}));
+        wait_until(|| a.pending() > 0);
+        let t0 = Instant::now();
+        assert!(a.stop_within(EXIT_STOP_BUDGET));
+        assert!(t0.elapsed() < EXIT_STOP_BUDGET, "{:?}", t0.elapsed());
+        assert_eq!(events_sent(&fake)[0]["type"], "idle");
+        assert!(a.stop_within(EXIT_STOP_BUDGET)); // twice: nothing left to stop
+    }
+
+    #[test]
+    fn a_bounded_stop_gives_up_on_a_stalled_server_but_the_final_flush_has_started() {
+        let fake = FakeServer::new();
+        let c = client(&fake);
+        c.next(0.0).unwrap();
+        fake.state()
+            .delay_for
+            .insert("/api/agent/events".into(), Duration::from_secs(3));
+        let lines = Arc::new(Mutex::new(Vec::<String>::new()));
+        let l = lines.clone();
+        let mut a = WindowActivity::new(c)
+            .with_idle_source(Arc::new(|| Some(400.0)))
+            .with_no_hooks()
+            .with_log(Arc::new(move |s: &str| {
+                l.lock().unwrap().push(s.to_string())
+            }));
+        a.on_hello(&json!({"window_events": true}));
+        wait_until(|| a.pending() > 0);
+        let t0 = Instant::now();
+        assert!(!a.stop_within(Duration::from_millis(300)));
+        let took = t0.elapsed();
+        assert!(took < Duration::from_millis(900), "{took:?}");
+        // the events were on their way within the budget (the server holds the answer back)
+        assert!(
+            fake.state()
+                .requests
+                .iter()
+                .any(|r| r.path == "/api/agent/events")
+        );
+        assert_eq!(
+            lines.lock().unwrap().as_slice(),
+            ["window events did not stop within 300 ms; left to the process exit"]
+        );
     }
 }

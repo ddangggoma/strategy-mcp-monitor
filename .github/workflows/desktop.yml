@@ -1,14 +1,25 @@
 # Rust desktop app (desktop/) — build, lint and test on a Windows runner.
 # The dev PC's Smart App Control blocks freshly built unsigned test binaries,
-# so the Rust test loop runs here instead (Plan 6, 2026-11-07).
+# so the Rust test loop runs here instead (Plan 6, 2026-11-07). The server's agent integration
+# tests run here too, with both agents (the Rust one needs the exe built here, Task 11).
 name: desktop
 
 on:
   push:
     branches: ["main", "feat/**"]
-    paths: ["desktop/**", ".github/workflows/desktop.yml"]
+    paths:
+      - "desktop/**"
+      - ".github/workflows/desktop.yml"
+      - "server/app/activity/**"
+      - "server/tests/test_integration_agent.py"
+      - "server/tests/desktop_bundle_main.py"
   pull_request:
-    paths: ["desktop/**", ".github/workflows/desktop.yml"]
+    paths:
+      - "desktop/**"
+      - ".github/workflows/desktop.yml"
+      - "server/app/activity/**"
+      - "server/tests/test_integration_agent.py"
+      - "server/tests/desktop_bundle_main.py"
   workflow_dispatch:
 
 permissions:
@@ -75,6 +86,29 @@ jobs:
         env:
           MCPMON_TESTS_ALLOW_ELEVATED: "1"
         run: cargo test --locked --features dev
+
+      - name: WebView2 notice window (real windows on the runner desktop)
+        env:
+          MCPMON_TESTS_ALLOW_ELEVATED: "1"
+        run: cargo test --locked --test agent_webview -- --ignored
+
+      - name: cargo build (the agent exe for the server integration tests)
+        run: cargo build --locked
+
+      - name: Install uv 0.13.7
+        run: python -m pip install --disable-pip-version-check "uv==0.13.7"
+
+      - name: Server environment (Python 3.15.2 from uv)
+        working-directory: server
+        run: uv sync --locked
+
+      - name: Server agent integration (python + desktop agents)
+        # The same scenarios with `python -m mcp_agent` and the Rust `mcp-monitor.exe agent` (Plan 6
+        # Task 11); MCPMON_DESKTOP_EXE turns the [desktop] half on.
+        working-directory: server
+        env:
+          MCPMON_DESKTOP_EXE: ${{ github.workspace }}\desktop\target\debug\mcp-monitor.exe
+        run: uv run python -m pytest -m integration tests/test_integration_agent.py -v -rs
 
   release:
     name: release build · audit

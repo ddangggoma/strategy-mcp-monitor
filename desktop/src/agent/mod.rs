@@ -2,6 +2,7 @@
 //! Python `agent/mcp_agent`, same `/api/agent/*` contract, numbers and exit codes; Appendix B).
 //! Task 9: settings, the HMAC-proving client, the runner and the `--dialog print` window.
 //! Task 10: window events and idle (hooks, coalescing, batched sending, title redaction).
+//! Task 11: the `--dialog webview` notice window (a top-most modal WebView2 window).
 
 pub mod activity;
 pub mod client;
@@ -16,9 +17,10 @@ pub mod sender;
 #[cfg(test)]
 pub mod testkit;
 pub mod time;
+pub mod webview;
 pub mod window;
 
-use activity::WindowActivity;
+use activity::{EXIT_STOP_BUDGET, WindowActivity};
 use client::{ServerClient, UreqTransport};
 use config::AgentConfig;
 use runner::{AgentRunner, log_stderr};
@@ -36,7 +38,8 @@ pub fn current_session_id() -> Result<u32, String> {
 }
 
 /// Runs `runner` with `activity` started by the server's HELLO, and stopped (hooks, pump, one last
-/// flush) when the runner ends; returns the runner's exit code.
+/// flush) when the runner ends, within [`EXIT_STOP_BUDGET`] (F09); returns the runner's
+/// exit code.
 pub fn run_with_activity(runner: AgentRunner, activity: WindowActivity) -> i32 {
     let activity = Arc::new(Mutex::new(activity));
     let on_hello = activity.clone();
@@ -48,7 +51,10 @@ pub fn run_with_activity(runner: AgentRunner, activity: WindowActivity) -> i32 {
                 .on_hello(hello)
         }))
         .run();
-    activity.lock().unwrap_or_else(|e| e.into_inner()).stop();
+    activity
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .stop_within(EXIT_STOP_BUDGET);
     code
 }
 
@@ -162,5 +168,53 @@ mod tests {
                 .iter()
                 .any(|r| r.path == "/api/agent/events")
         );
+    }
+
+    #[test]
+    fn exit_fits_the_servers_2_s_grace_even_when_the_final_flush_stalls() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::time::{Duration, Instant};
+        let fake = FakeServer::new();
+        fake.state()
+            .delay_for
+            .insert("/api/agent/events".into(), Duration::from_secs(5));
+        let c = client(&fake);
+        let dir = tempfile::tempdir().unwrap();
+        let runner = AgentRunner::new(
+            &cfg(),
+            c.clone(),
+            Box::new(window::PrintWindow::new(dir.path().join("urls.txt"))),
+            2,
+            1,
+        )
+        .with_idle(Arc::new(|| Some(0.0)));
+        let stepped = Arc::new(AtomicBool::new(false));
+        let s = stepped.clone();
+        let activity = WindowActivity::new(c)
+            .with_idle_source(Arc::new(move || {
+                s.store(true, Ordering::SeqCst);
+                Some(400.0)
+            }))
+            .with_no_hooks();
+        // `exit` once the pump holds an idle event (before its first 1 s flush)
+        let told = Arc::new(Mutex::new(None::<Instant>));
+        let (t, f) = (told.clone(), fake.clone());
+        std::thread::spawn(move || {
+            wait_until(|| stepped.load(Ordering::SeqCst));
+            std::thread::sleep(Duration::from_millis(50));
+            *t.lock().unwrap() = Some(Instant::now());
+            f.state().commands.push_back(json!({"type": "exit"}));
+        });
+        assert_eq!(run_with_activity(runner, activity), runner::EXIT_OK);
+        let took = told.lock().unwrap().expect("exit was sent").elapsed();
+        assert!(took < Duration::from_secs(2), "{took:?}");
+        let st = fake.state();
+        let events = st
+            .requests
+            .iter()
+            .find(|r| r.path == "/api/agent/events")
+            .and_then(|r| r.body.clone())
+            .expect("the final flush started");
+        assert_eq!(events["events"][0]["type"], "idle");
     }
 }

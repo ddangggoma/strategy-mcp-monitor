@@ -33,6 +33,9 @@ pub struct FakeState {
     pub key: Option<[u8; 32]>,
     /// No answer at all (connection refused); nothing is recorded.
     pub down: bool,
+    /// Path → how long every answer to it is held back (a stalling server); the request is
+    /// recorded before the wait.
+    pub delay_for: HashMap<String, Duration>,
     on_answer: Vec<(String, OnAnswer)>,
 }
 
@@ -55,6 +58,7 @@ impl FakeServer {
                 hello: default_hello(),
                 key: Some(KEY),
                 down: false,
+                delay_for: HashMap::new(),
                 on_answer: Vec::new(),
             }),
         })
@@ -128,9 +132,13 @@ impl FakeServer {
             let (_, f) = st.on_answer.remove(i);
             f(&mut st);
         }
+        let delay = st.delay_for.get(path).copied();
         drop(st);
         if idle {
             std::thread::sleep(Duration::from_millis(5));
+        }
+        if let Some(delay) = delay {
+            std::thread::sleep(delay);
         }
         Ok(RawResponse {
             status,
