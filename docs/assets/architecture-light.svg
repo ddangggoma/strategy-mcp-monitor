@@ -1,0 +1,172 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 846" width="1200" height="846" font-family="'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" role="img" aria-labelledby="t d">
+<title id="t">MCP Monitor 구성도</title>
+<desc id="d">브라우저는 External 채널 0.0.0.0:8701 또는 Local 채널 127.0.0.1:8700으로 Windows 서비스 mcp-monitor의 FastAPI 라우터에 닿는다. 모니터 엔진과 스크립트 실행기가 MCP 서버를 감시하고 조치하며, 수집기와 우회 탐지의 이벤트는 LogWriter가 logs 폴더의 JSONL로 기록하고 LogIndex가 index.db에 색인한다. 에이전트 감독이 사용자 세션마다 mcp-agent를 띄우고, 에이전트는 토큰과 HMAC 증명으로 Local 채널과 통신하며 Edge 고지 창을 연다.</desc>
+<defs><marker id="a-blue" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1.5L8.5 5 1 8.5z" fill="#0a77cb"/></marker><marker id="a-teal" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1.5L8.5 5 1 8.5z" fill="#059488"/></marker><marker id="a-violet" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1.5L8.5 5 1 8.5z" fill="#65389f"/></marker><marker id="a-magenta" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1.5L8.5 5 1 8.5z" fill="#931e5a"/></marker><marker id="a-olive" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1.5L8.5 5 1 8.5z" fill="#7e8904"/></marker><marker id="a-steel" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1.5L8.5 5 1 8.5z" fill="#3c434c"/></marker></defs>
+<rect width="1200" height="846" rx="20" fill="#f4f6f8"/>
+<text x="24" y="44" font-size="20" font-weight="700" fill="#14171d">MCP Monitor 구성도</text>
+<text x="24" y="66" font-size="12.5" fill="#5a616b">Windows 11 Pro 한 대 안에서 서비스, 세션 에이전트, 저장소가 주고받는 것</text>
+<rect x="24" y="104" width="188" height="242" rx="16" fill="#fcfdff" stroke="#dadee4" stroke-width="1.2"/>
+<rect x="40" y="120" width="28" height="28" rx="8" fill="#d5e8f7"/>
+<g transform="translate(46 126) scale(1)" fill="none" stroke="#0a77cb" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M1.5 6h13"/><circle cx="4" cy="4.3" r=".4"/></g>
+<text x="78" y="133" font-size="14" font-weight="600" fill="#14171d">브라우저</text>
+<text x="78" y="149" font-size="11.5" fill="#5a616b">이 PC와 다른 PC</text>
+<rect x="284" y="104" width="620" height="424" rx="16" fill="#fcfdff" stroke="#dadee4" stroke-width="1.2"/>
+<rect x="300" y="120" width="28" height="28" rx="8" fill="#dddfe2"/>
+<g transform="translate(306 126) scale(1)" fill="none" stroke="#3c434c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="12" height="5" rx="1.5"/><rect x="2" y="9" width="12" height="5" rx="1.5"/><path d="M5 4.5h.01M5 11.5h.01"/></g>
+<text x="338" y="133" font-size="14" font-weight="600" fill="#14171d">Windows 서비스 mcp-monitor</text>
+<text x="338" y="149" font-size="11.5" fill="#5a616b">LocalSystem, 부팅 시 자동 시작, asyncio 루프 하나</text>
+<rect x="980" y="104" width="196" height="424" rx="16" fill="#fcfdff" stroke="#dadee4" stroke-width="1.2"/>
+<rect x="996" y="120" width="28" height="28" rx="8" fill="#d4ecec"/>
+<g transform="translate(1002 126) scale(1)" fill="none" stroke="#059488" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 1.5v3.5M10.5 1.5v3.5"/><rect x="3" y="5" width="10" height="4.5" rx="1.5"/><path d="M8 9.5v5"/></g>
+<text x="1034" y="133" font-size="14" font-weight="600" fill="#14171d">MCP 서버</text>
+<text x="1034" y="149" font-size="11.5" fill="#5a616b">감시하고 되살리는 대상</text>
+<rect x="24" y="568" width="560" height="214" rx="16" fill="#fcfdff" stroke="#dadee4" stroke-width="1.2"/>
+<rect x="40" y="584" width="28" height="28" rx="8" fill="#e4ddf0"/>
+<g transform="translate(46 590) scale(1)" fill="none" stroke="#65389f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="5" r="3"/><path d="M2.5 14.5c0-3.2 2.5-5 5.5-5s5.5 1.8 5.5 5"/></g>
+<text x="78" y="597" font-size="14" font-weight="600" fill="#14171d">사용자 세션</text>
+<text x="78" y="613" font-size="11.5" fill="#5a616b">RDP 연결마다 하나씩</text>
+<rect x="624" y="568" width="552" height="214" rx="16" fill="#fcfdff" stroke="#dadee4" stroke-width="1.2"/>
+<rect x="640" y="584" width="28" height="28" rx="8" fill="#e8ead7"/>
+<g transform="translate(646 590) scale(1)" fill="none" stroke="#7e8904" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="8" cy="3.5" rx="5.5" ry="2"/><path d="M2.5 3.5v9c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2v-9"/><path d="M2.5 8c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2"/></g>
+<text x="678" y="597" font-size="14" font-weight="600" fill="#14171d">저장소</text>
+<text x="678" y="613" font-size="11.5" fill="#5a616b">데이터 루트, SYSTEM·Administrators만</text>
+<rect x="40" y="166" width="156" height="64" rx="10" fill="#ffffff" stroke="#bfc5cd" stroke-width="1"/>
+<g transform="translate(52 179) scale(1)" fill="none" stroke="#0a77cb" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M1.5 6h13"/><circle cx="4" cy="4.3" r=".4"/></g>
+<text x="76" y="192" font-size="13" font-weight="600" fill="#14171d">다른 PC</text>
+<text x="76" y="210" font-size="11.5" fill="#5a616b">board · admin</text>
+<rect x="40" y="262" width="156" height="64" rx="10" fill="#ffffff" stroke="#bfc5cd" stroke-width="1"/>
+<g transform="translate(52 275) scale(1)" fill="none" stroke="#0a77cb" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M1.5 6h13"/><circle cx="4" cy="4.3" r=".4"/></g>
+<text x="76" y="288" font-size="13" font-weight="600" fill="#14171d">이 PC</text>
+<text x="76" y="306" font-size="11.5" fill="#5a616b">admin · board</text>
+<rect x="300" y="166" width="150" height="64" rx="10" fill="#e2eff9" stroke="#0a77cb" stroke-width="1.4"/>
+<text x="314" y="188" font-size="11.5" font-weight="600" fill="#5a616b">External 채널</text>
+<text x="314" y="209" font-size="15" font-weight="700" fill="#14171d" font-family="'Cascadia Mono', Consolas, 'D2Coding', monospace">0.0.0.0:8701</text>
+<text x="314" y="224" font-size="10.5" fill="#5a616b">보드 + 로그인 뒤 운영</text>
+<rect x="300" y="262" width="150" height="64" rx="10" fill="#e2eff9" stroke="#0a77cb" stroke-width="1.4"/>
+<text x="314" y="284" font-size="11.5" font-weight="600" fill="#5a616b">Local 채널</text>
+<text x="314" y="305" font-size="15" font-weight="700" fill="#14171d" font-family="'Cascadia Mono', Consolas, 'D2Coding', monospace">127.0.0.1:8700</text>
+<text x="314" y="320" font-size="10.5" fill="#5a616b">전체 관리 + 에이전트</text>
+<rect x="486" y="166" width="196" height="160" rx="10" fill="#ffffff" stroke="#bfc5cd" stroke-width="1"/>
+<g transform="translate(498 179) scale(1)" fill="none" stroke="#3c434c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="8" r="3"/><path d="M8 8h6.5M12 8v3M14.5 8v2"/></g>
+<text x="522" y="192" font-size="13" font-weight="600" fill="#14171d">FastAPI 라우터</text>
+<text x="522" y="210" font-size="11.5" fill="#5a616b">OTP 로그인, 채널별 쿠키</text>
+<text x="522" y="226" font-size="11" fill="#5a616b" font-family="'Cascadia Mono', Consolas, 'D2Coding', monospace">can(user, action,</text>
+<text x="522" y="242" font-size="11" fill="#5a616b" font-family="'Cascadia Mono', Consolas, 'D2Coding', monospace">    channel, owner_id)</text>
+<text x="522" y="258" font-size="11.5" fill="#5a616b">Local 전용 라우트는</text>
+<text x="522" y="274" font-size="11.5" fill="#5a616b">8701에 없음 (404)</text>
+<rect x="718" y="166" width="170" height="56" rx="10" fill="#ffffff" stroke="#bfc5cd" stroke-width="1"/>
+<g transform="translate(730 179) scale(1)" fill="none" stroke="#059488" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M1 8.5h3l2-5 3.5 9 2-4H15"/></g>
+<text x="754" y="192" font-size="13" font-weight="600" fill="#14171d">모니터 엔진</text>
+<text x="754" y="210" font-size="11.5" fill="#5a616b">프로브와 상태 머신</text>
+<rect x="718" y="232" width="170" height="56" rx="10" fill="#ffffff" stroke="#bfc5cd" stroke-width="1"/>
+<g transform="translate(730 245) scale(1)" fill="none" stroke="#059488" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M4.5 6l2 2-2 2M8.5 10.5h3"/></g>
+<text x="754" y="258" font-size="13" font-weight="600" fill="#14171d">스크립트 실행기</text>
+<text x="754" y="276" font-size="11.5" fill="#5a616b">자식 프로세스, 120초</text>
+<rect x="718" y="298" width="170" height="56" rx="10" fill="#ffffff" stroke="#bfc5cd" stroke-width="1"/>
+<g transform="translate(730 311) scale(1)" fill="none" stroke="#3c434c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="2.5"/><path d="M8 8l4-4"/></g>
+<text x="754" y="324" font-size="13" font-weight="600" fill="#14171d">수집기</text>
+<text x="754" y="342" font-size="11.5" fill="#5a616b">WTS, 이벤트 로그, WMI</text>
+<rect x="718" y="364" width="170" height="56" rx="10" fill="#ffffff" stroke="#bfc5cd" stroke-width="1"/>
+<g transform="translate(730 377) scale(1)" fill="none" stroke="#931e5a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5l5.5 2.2v4c0 3.4-2.4 5.8-5.5 6.8-3.1-1-5.5-3.4-5.5-6.8v-4z"/><path d="M5.8 8l1.6 1.6 3-3.2"/></g>
+<text x="754" y="390" font-size="13" font-weight="600" fill="#14171d">우회 탐지</text>
+<text x="754" y="408" font-size="11.5" fill="#5a616b">60초 스캔 + 이벤트</text>
+<rect x="300" y="360" width="150" height="56" rx="10" fill="#ffffff" stroke="#bfc5cd" stroke-width="1" stroke-dasharray="4 4"/>
+<g transform="translate(312 373) scale(1)" fill="none" stroke="#0a77cb" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M1.5 6h13M4.5 9h4"/></g>
+<text x="336" y="386" font-size="13" font-weight="600" fill="#14171d">SSE 스트림</text>
+<text x="336" y="404" font-size="11" fill="#5a616b" font-family="'Cascadia Mono', Consolas, 'D2Coding', monospace">/api/stream</text>
+<rect x="300" y="446" width="150" height="56" rx="10" fill="#ffffff" stroke="#bfc5cd" stroke-width="1"/>
+<g transform="translate(312 459) scale(1)" fill="none" stroke="#65389f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.2"/><path d="M6.5 5.3v5.4L10.8 8z"/></g>
+<text x="336" y="472" font-size="13" font-weight="600" fill="#14171d">에이전트 감독</text>
+<text x="336" y="490" font-size="11.5" fill="#5a616b">세션마다 기동</text>
+<rect x="718" y="446" width="170" height="56" rx="10" fill="#ffffff" stroke="#bfc5cd" stroke-width="1"/>
+<g transform="translate(730 459) scale(1)" fill="none" stroke="#7e8904" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 13.5l.8-3.2 7.7-7.7 2.4 2.4-7.7 7.7z"/><path d="M9.5 4l2.4 2.4"/></g>
+<text x="754" y="472" font-size="13" font-weight="600" fill="#14171d">LogWriter</text>
+<text x="754" y="490" font-size="11.5" fill="#5a616b">모든 이벤트를 배치 기록</text>
+<rect x="996" y="166" width="164" height="50" rx="10" fill="#ffffff" stroke="#bfc5cd" stroke-width="1"/>
+<text x="1010" y="192" font-size="13" font-weight="600" fill="#14171d">seoul-weather</text>
+<text x="1010" y="210" font-size="11" fill="#5a616b" font-family="'Cascadia Mono', Consolas, 'D2Coding', monospace">:9101</text>
+<rect x="996" y="226" width="164" height="50" rx="10" fill="#ffffff" stroke="#bfc5cd" stroke-width="1"/>
+<text x="1010" y="252" font-size="13" font-weight="600" fill="#14171d">calculator</text>
+<text x="1010" y="270" font-size="11" fill="#5a616b" font-family="'Cascadia Mono', Consolas, 'D2Coding', monospace">:9102</text>
+<rect x="996" y="286" width="164" height="50" rx="10" fill="#ffffff" stroke="#bfc5cd" stroke-width="1"/>
+<text x="1010" y="312" font-size="13" font-weight="600" fill="#14171d">seoul-clock</text>
+<text x="1010" y="330" font-size="11" fill="#5a616b" font-family="'Cascadia Mono', Consolas, 'D2Coding', monospace">:9103</text>
+<rect x="996" y="346" width="164" height="50" rx="10" fill="#ffffff" stroke="#bfc5cd" stroke-width="1" stroke-dasharray="4 4"/>
+<text x="1010" y="372" font-size="13" font-weight="600" fill="#14171d">직접 등록한 MCP</text>
+<text x="1010" y="390" font-size="11.5" fill="#5a616b">URL과 포트로 하나씩</text>
+<text x="1078" y="430" font-size="10.5" text-anchor="middle" fill="#79818b">위 3개는 시험용 dummy</text>
+<rect x="40" y="630" width="240" height="96" rx="10" fill="#ffffff" stroke="#bfc5cd" stroke-width="1"/>
+<g transform="translate(52 643) scale(1)" fill="none" stroke="#65389f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M1.5 6h13M5.5 9.7l1.6 1.6 3.4-3.4"/></g>
+<text x="76" y="656" font-size="13" font-weight="600" fill="#14171d">고지 창 (Edge --app)</text>
+<text x="76" y="674" font-size="11.5" fill="#5a616b">연결될 때마다 '확인' 하나</text>
+<text x="76" y="690" font-size="11.5" fill="#5a616b">닫으면 1초 뒤 다시 표시</text>
+<text x="76" y="706" font-size="11.5" fill="#5a616b">notice 번들, /notice</text>
+<rect x="324" y="630" width="244" height="96" rx="10" fill="#ffffff" stroke="#bfc5cd" stroke-width="1"/>
+<g transform="translate(336 643) scale(1)" fill="none" stroke="#65389f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="5" r="3"/><path d="M2.5 14.5c0-3.2 2.5-5 5.5-5s5.5 1.8 5.5 5"/></g>
+<text x="360" y="656" font-size="13" font-weight="600" fill="#14171d">mcp-agent</text>
+<text x="360" y="674" font-size="11.5" fill="#5a616b">포그라운드 창, 제목, 유휴 상태</text>
+<text x="360" y="690" font-size="11.5" fill="#5a616b">요청마다 새 nonce</text>
+<text x="360" y="706" font-size="11.5" fill="#5a616b">증명 못 하는 상대면 종료</text>
+<rect x="640" y="630" width="124" height="96" rx="10" fill="#ffffff" stroke="#bfc5cd" stroke-width="1"/>
+<g transform="translate(652 643) scale(1)" fill="none" stroke="#7e8904" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="8" cy="3.5" rx="5.5" ry="2"/><path d="M2.5 3.5v9c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2v-9"/><path d="M2.5 8c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2"/></g>
+<text x="676" y="656" font-size="13" font-weight="600" fill="#14171d">config.db</text>
+<text x="676" y="674" font-size="11.5" fill="#5a616b">설정, 사용자,</text>
+<text x="676" y="690" font-size="11.5" fill="#5a616b">MCP, 이력</text>
+<rect x="772" y="630" width="124" height="96" rx="10" fill="#ffffff" stroke="#bfc5cd" stroke-width="1"/>
+<g transform="translate(784 643) scale(1)" fill="none" stroke="#7e8904" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 1.5h6l3 3v10h-9z"/><path d="M9.5 1.5v3h3M5.5 8h5M5.5 10.5h5"/></g>
+<text x="808" y="656" font-size="13" font-weight="600" fill="#14171d">logs/</text>
+<text x="808" y="674" font-size="11" fill="#5a616b" font-family="'Cascadia Mono', Consolas, 'D2Coding', monospace">YYYY-MM-DD</text>
+<text x="808" y="690" font-size="11" fill="#5a616b" font-family="'Cascadia Mono', Consolas, 'D2Coding', monospace">.jsonl</text>
+<text x="808" y="706" font-size="11.5" fill="#5a616b">원본, KST</text>
+<rect x="904" y="630" width="124" height="96" rx="10" fill="#ffffff" stroke="#bfc5cd" stroke-width="1"/>
+<g transform="translate(916 643) scale(1)" fill="none" stroke="#7e8904" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.4 10.4l4 4"/></g>
+<text x="940" y="656" font-size="13" font-weight="600" fill="#14171d">index.db</text>
+<text x="940" y="674" font-size="11.5" fill="#5a616b">FTS5 색인</text>
+<text x="940" y="690" font-size="11.5" fill="#5a616b">로그 화면이</text>
+<text x="940" y="706" font-size="11.5" fill="#5a616b">읽는 곳</text>
+<rect x="1036" y="630" width="124" height="96" rx="10" fill="#ffffff" stroke="#bfc5cd" stroke-width="1"/>
+<g transform="translate(1048 643) scale(1)" fill="none" stroke="#7e8904" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 4h4.5l1.5 1.5h7v8h-13z"/></g>
+<text x="1072" y="656" font-size="13" font-weight="600" fill="#14171d">scripts/</text>
+<text x="1072" y="674" font-size="11.5" fill="#5a616b">MCP별 start,</text>
+<text x="1072" y="690" font-size="11.5" fill="#5a616b">stop, restart</text>
+<path d="M196 198 L298 198" fill="none" stroke="#0a77cb" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#a-blue)"/>
+<text x="247" y="190" font-size="11" text-anchor="middle" fill="#5a616b" font-weight="500">원격 :8701</text>
+<path d="M196 294 L298 294" fill="none" stroke="#0a77cb" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#a-blue)"/>
+<text x="247" y="286" font-size="11" text-anchor="middle" fill="#5a616b" font-weight="500">로컬 :8700</text>
+<text x="118" y="362" font-size="11" text-anchor="middle" fill="#5a616b" font-weight="500">HTTP 요청과 SSE 갱신</text>
+<path d="M450 198 L484 198" fill="none" stroke="#0a77cb" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#a-blue)"/>
+<path d="M450 282 L484 282" fill="none" stroke="#0a77cb" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#a-blue)"/>
+<path d="M682 194 L716 194" fill="none" stroke="#059488" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#a-teal)"/>
+<path d="M888 190 L994 190" fill="none" stroke="#059488" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#a-teal)"/>
+<text x="941" y="182" font-size="11" text-anchor="middle" fill="#5a616b" font-weight="500">프로브</text>
+<path d="M888 250 L994 250" fill="none" stroke="#059488" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#a-teal)"/>
+<text x="941" y="242" font-size="11" text-anchor="middle" fill="#5a616b" font-weight="500">start · stop</text>
+<path d="M888 272 L936 272 L936 548 L1098 548 L1098 628" fill="none" stroke="#7e8904" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#a-olive)"/>
+<text x="1017" y="540" font-size="11" text-anchor="middle" fill="#5a616b" font-weight="500">해시 검사 뒤 실행</text>
+<path d="M682 300 L700 300 L700 628" fill="none" stroke="#7e8904" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#a-olive)"/>
+<text x="706" y="552" font-size="11" text-anchor="start" fill="#5a616b" font-weight="500">설정 저장</text>
+<path d="M803 420 L803 444" fill="none" stroke="#7e8904" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#a-olive)"/>
+<path d="M834 502 L834 628" fill="none" stroke="#7e8904" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#a-olive)"/>
+<text x="840" y="552" font-size="11" text-anchor="start" fill="#5a616b" font-weight="500">JSONL 기록</text>
+<path d="M834 726 L834 746 L966 746 L966 728" fill="none" stroke="#7e8904" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#a-olive)"/>
+<text x="900" y="770" font-size="11" text-anchor="middle" fill="#5a616b" font-weight="500">LogIndex가 색인, 03:30 보존 정리</text>
+<path d="M375 502 L375 628" fill="none" stroke="#65389f" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#a-violet)"/>
+<text x="368" y="552" font-size="10.5" text-anchor="end" fill="#5a616b" font-weight="500" font-family="'Cascadia Mono', Consolas, 'D2Coding', monospace">CreateProcessAsUser</text>
+<path d="M322 678 L282 678" fill="none" stroke="#65389f" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#a-violet)"/>
+<text x="302" y="670" font-size="11" text-anchor="middle" fill="#5a616b" font-weight="500">열기</text>
+<path d="M468 628 L468 306 L452 306" fill="none" stroke="#931e5a" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#a-magenta)" marker-start="url(#a-magenta)"/>
+<text x="476" y="546" font-size="11" text-anchor="start" fill="#5a616b" font-weight="500">토큰 + 피어 세션 검사</text>
+<text x="476" y="561" font-size="11" text-anchor="start" fill="#5a616b" font-weight="500">응답은 HMAC 증명</text>
+<path d="M240 628 L240 318 L298 318" fill="none" stroke="#931e5a" stroke-width="1.8" stroke-linejoin="round" marker-end="url(#a-magenta)"/>
+<text x="232" y="470" font-size="10.5" text-anchor="end" fill="#5a616b" font-weight="500" font-family="'Cascadia Mono', Consolas, 'D2Coding', monospace">X-Notice-Token</text>
+<path d="M24 818h22" stroke="#0a77cb" stroke-width="2.4" stroke-linecap="round"/>
+<text x="54" y="822" font-size="12" fill="#5a616b">웹 요청</text>
+<path d="M136.6 818h22" stroke="#059488" stroke-width="2.4" stroke-linecap="round"/>
+<text x="166.6" y="822" font-size="12" fill="#5a616b">MCP 감시와 조치</text>
+<path d="M299.6 818h22" stroke="#65389f" stroke-width="2.4" stroke-linecap="round"/>
+<text x="329.6" y="822" font-size="12" fill="#5a616b">세션 에이전트</text>
+<path d="M448.20000000000005 818h22" stroke="#931e5a" stroke-width="2.4" stroke-linecap="round"/>
+<text x="478.20000000000005" y="822" font-size="12" fill="#5a616b">토큰과 증명</text>
+<path d="M584.8000000000001 818h22" stroke="#7e8904" stroke-width="2.4" stroke-linecap="round"/>
+<text x="614.8000000000001" y="822" font-size="12" fill="#5a616b">기록과 저장</text>
+</svg>

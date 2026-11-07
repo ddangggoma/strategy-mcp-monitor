@@ -1,0 +1,5 @@
+packages: []
+onlyBuiltDependencies: []
+overrides:
+  # GHSA-g3hv-75wg-m249: typescript-estree pulls minimatch 10.x (< 11.0.1 is vulnerable)
+  "@typescript-eslint/typescript-estree>minimatch": "11.0.4"

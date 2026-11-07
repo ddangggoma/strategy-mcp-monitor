@@ -1,0 +1,38 @@
+/* Resend timer ring (U25's one exception to transform/opacity): a registered number drives a
+   conic-gradient from the start ratio down to 0. linear: the ring is a clock. */
+@property --progress {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
+@layer components {
+  .resend-ring {
+    inline-size: 1.5rem;
+    block-size: 1.5rem;
+    border-radius: var(--radius-full);
+    background: conic-gradient(var(--color-fg-muted) calc(var(--progress) * 1turn), var(--color-border) 0);
+    /* a 3px ring: everything inside the stroke is masked out */
+    mask: radial-gradient(farthest-side, transparent calc(100% - 3px), currentColor calc(100% - 3px));
+    animation-name: resend-drain;
+    animation-timing-function: linear;
+    animation-fill-mode: both;
+  }
+
+  @keyframes resend-drain {
+    from {
+      --progress: var(--ring-from);
+    }
+    to {
+      --progress: 0;
+    }
+  }
+
+  /* hold at the start ratio; the seconds beside it keep counting */
+  @media (prefers-reduced-motion: reduce) {
+    .resend-ring {
+      animation: none;
+      --progress: var(--ring-from);
+    }
+  }
+}

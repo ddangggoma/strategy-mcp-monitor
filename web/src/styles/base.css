@@ -1,0 +1,192 @@
+/*
+ * Element defaults and global behavior. Colors come only from tokens.css.
+ * app.css repeats the layer order before importing Tailwind, which is what actually
+ * fixes it (the first statement wins); it is kept here as the documented order.
+ */
+@layer tokens, theme, base, components, utilities;
+
+/* Fonts are bundled from npm (OFL 1.1); no CDN. Pretendard ships unicode-range subsets so a
+   page downloads only the Hangul blocks it renders. Both use font-display: swap. */
+@import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
+@import "@fontsource-variable/jetbrains-mono/wght.css";
+
+@layer base {
+  /* Tailwind v4 defaults borders to currentColor; a bare `border` here means the hairline */
+  *,
+  ::before,
+  ::after,
+  ::backdrop {
+    border-color: var(--color-border);
+  }
+
+  :root[data-theme="light"] {
+    color-scheme: light;
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+  }
+
+  html {
+    font-family: var(--font-sans);
+    font-size: 100%;
+    background-color: var(--color-bg);
+    color: var(--color-fg);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    -webkit-tap-highlight-color: transparent;
+    /* the scrollbar slot stays reserved, so opening a modal (scroll lock) shifts nothing */
+    scrollbar-gutter: stable;
+  }
+
+  body {
+    min-height: 100dvh;
+    font-size: var(--text-sm);
+    line-height: var(--text-sm--line-height);
+    /* Korean wraps between words (eojeol), never inside one; long tokens may still break */
+    word-break: keep-all;
+    overflow-wrap: break-word;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    text-wrap: balance;
+    font-weight: var(--font-weight-semibold);
+  }
+
+  p,
+  li,
+  dd {
+    text-wrap: pretty;
+  }
+
+  code,
+  kbd,
+  samp,
+  pre {
+    font-family: var(--font-mono);
+    font-size: 0.92em; /* JetBrains Mono runs large next to Pretendard */
+    font-variant-ligatures: none;
+  }
+
+  /* numbers that update in place must not jiggle the layout */
+  time,
+  data,
+  [data-numeric] {
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::selection {
+    background-color: var(--color-selected);
+  }
+
+  /* one focus treatment everywhere: a neutral ring that never reads as a state color */
+  :focus-visible {
+    outline: var(--focus-ring-width) solid var(--color-focus);
+    outline-offset: var(--focus-ring-offset);
+  }
+
+  a,
+  button,
+  [role="button"],
+  input,
+  select,
+  textarea,
+  label {
+    touch-action: manipulation;
+  }
+
+  /* Windows dark mode paints native <select> popups from these */
+  select,
+  option {
+    background-color: var(--color-surface);
+    color: var(--color-fg);
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--color-fg-muted);
+    opacity: 1;
+  }
+
+  @media (pointer: coarse) {
+    input,
+    textarea,
+    select {
+      font-size: max(1rem, 1em);
+    }
+  }
+
+  [hidden] {
+    display: none !important;
+  }
+}
+
+/* A theme flip changes every color at once (theme.ts sets this for ~50 ms). */
+:root[data-theme-switching] *,
+:root[data-theme-switching] *::before,
+:root[data-theme-switching] *::after {
+  transition: none !important;
+}
+
+/* ── View Transitions: admin route changes crossfade (defaultViewTransition) ── */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: var(--motion-base);
+  animation-timing-function: var(--ease-out);
+}
+
+/* ── Top bar: its shadow fades in once the page scrolls (opacity of a pseudo-element,
+      so only compositing work). Unsupported browsers keep a hairline and no shadow. ── */
+@layer components {
+  [data-topbar] {
+    position: sticky;
+    top: 0;
+    z-index: var(--z-sticky);
+    isolation: isolate;
+    border-bottom: 1px solid var(--color-border);
+
+    &::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+      box-shadow: var(--shadow-md);
+      opacity: 0;
+    }
+  }
+
+  @supports (animation-timeline: scroll()) {
+    [data-topbar]::after {
+      animation: topbar-shadow linear both;
+      animation-timeline: scroll(root block);
+      animation-range: 0 4rem;
+    }
+  }
+
+  @keyframes topbar-shadow {
+    to {
+      opacity: 1;
+    }
+  }
+}
+
+/* ── Reduced motion: no CSS animation, transition or view transition anywhere ── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}

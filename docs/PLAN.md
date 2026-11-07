@@ -1,7 +1,7 @@
 # Strategy MCP Monitor — 하이레벨 개발 계획서
 
-- 버전: **v0.4** (2026-11-04)
-- 상태: 요구사항 확정. 구현 착수 전입니다.
+- 버전: **v0.8** (2026-11-07)
+- 상태: 요구사항 확정. P0–P7 구현 완료(Win 11 Pro 실기기 확인 대기: `docs/verification/win11-pro-p4-p5.md`, `win11-pro-p6-p7.md`). 운영 문서 `docs/ops/OPERATIONS.md`, 성능 기록 `docs/verification/perf-p6.md`. 이 문서가 기준이며, 구현에서 달라진 점은 변경 이력에 적습니다.
 - 대상: **Windows 11 Pro**에서 실행되는 MCP 관리 + RDP 접속·행동 감사 웹 애플리케이션
 
 ### 변경 이력
@@ -11,6 +11,11 @@
 | v0.2 | Win 11 Pro 확정, 이메일 + OTP 로그인(Dummy), 역할·소유자 기반 권한, 사전 고지 다이얼로그, 부팅 자동 실행, 로그 필터, 성능 설계, 버전 정책, 디자인 스킬 |
 | v0.3 | **역할 명칭 변경**: Admin → **MCP 개발자**, Super Admin → **Admin**. **User 역할 삭제**(로그인은 MCP 개발자·Admin만). Admin이 다른 Admin을 지정할 수 있음. 로그인 가능 이메일은 Admin이 등록. **cmd 내부 명령 수집(Clink) 제외**. 고지 다이얼로그는 **연결될 때마다** 표시. 로그 보존 기간 설정 UI 추가 |
 | v0.4 | 스크립트 예외 격리 추가: 별도 프로세스 실행, **120초 타임아웃**, 결과 분류(ok/failed/timeout/error), 출력·동시 실행 제한 (R20) |
+| v0.5 | **구현 정합 (P1–P2):** §4.3 스크립트 **조회**(읽기 전용) 행 추가(MCP 개발자 이상, Local), §4.4 `can(user, action, channel, owner_id)`, §5.8 조회/편집 권한 구분, §8 `PATCH /api/users/{id}`와 MCP·스크립트·스트림 엔드포인트 보강(수동 조치는 202 + `run_id`, 외부 채널에서 Local 전용 경로는 405가 아니라 404) |
+| v0.6 | 구현 정합 (P3): 채널별 세션 쿠키(mcpmon_sid_local/_ext), /api/auth/me otp_provider, 보드 action_delay_sec, action 이벤트 requested, 응답의 사용자 요약(actor/author/updated_by_user)·owned_mcps, GET /api/mcp-activity, GET /api/settings/retention/preview(retention_cutoff = today−(days−1)), 고지 API(versions·revert, 버전 0 = 기본 문구), 정적 라우트(/, /admin/*, /notice, /assets/*)와 CSP, loopback 스트림 상한 20, CLI --static-dir/--dev-otp-code |
+| v0.7 | 구현 정합 (P4–P5): 에이전트↔서비스는 Named Pipe 대신 Local 채널 HTTP(X-Agent-Token + TCP 피어 → 세션 ID 검증, V4), 고지 창은 pywebview 대신 Edge --app 창(같은 Chromium/WebView2 엔진, V3; 640×600, 화면 중앙 최상위, 확인 전에 닫으면 1초 뒤 다시 표시), WTS 0.5초 폴링 + nudge(V6), 보드 sessions·SSE sessions/tamper, GET /api/sessions/{current,history,collectors}, GET /api/tamper/recent, POST /api/notice/display/{open,ack}(Local, 토큰), /api/agent/*(Local), 마이그레이션 6·7(rdp_connections, rdp_logon_failures, notice_displays), pywin32 312, CLI --session-source/--collect-console/--activity/--agent-launcher/--agent-dialog/--agent-dir. 그 밖에: 고지 표시는 에이전트가 세션 이벤트를 직접 받는 대신 서버 세션 추적기가 연결을 열 때 에이전트에 `show_notice`를 보냄(§5.5, 결과 같음), 수집 스레드 → 루프 큐는 소스별 1만 개 상한에서 오래된 것부터 버리고 `collector.dropped`로 남김(§7 "유실 0"은 이 상한 안의 목표, V11), SSE `tamper`는 로그인한 MCP 개발자 이상에게만, `GET /api/tamper/recent`는 `view_logs`(MCP 개발자 이상), 익명 보드의 접속자 정보에 `connection_id`·`client_build`·`protocol`·`first_seen_ip`·`first_seen_device`도 포함(§4.3 "접속자 정보") |
+| v0.7.1 | Plan 4 전체 리뷰 수정: 에이전트가 **서비스를 검증**함(실행마다 토큰과 함께 받는 서버 키, 요청마다 새 nonce → 응답 `X-Server-Proof` = HMAC-SHA256; 증명 못 하는 상대면 곧바로 종료 코드 5, 창 제목 이벤트는 증명된 응답 뒤에만 보냄(증명 없는 401/403 뒤에는 보내지 않음), `<서버>/notice#…` 주소만 엶), 서비스는 두 포트를 수집기·에이전트 기동 **전에** 독점(`SO_EXCLUSIVEADDRUSE`)으로 엶. 남은 위험: 독점 바인드는 `127.0.0.1:8700`만 막고, 다른 프로세스가 `0.0.0.0:8700`(또는 `[::]:8700`) 와일드카드로 바인드하는 것은 서비스가 떠 있는 동안에도 성공하며 아무 것도 실패·기록되지 않음. 서비스가 죽는 순간 다음 연결은 그 소켓으로 가므로(바인드 경쟁 불필요) 이 경우는 HMAC 증명으로만 막힘: 창을 열지 않고 명령을 받지 않으며 에이전트는 종료 코드 5. 서비스가 죽기 직전에 증명이 통과한 창 제목 이벤트 최대 한 묶음은 새 연결로 그 소켓에 갈 수 있음(같은 연결 증명은 Later). 실기기 P5-5b는 `127.0.0.1`·`0.0.0.0` 점유를 둘 다 시험. 고지 토큰은 로그에 남기지 않음(명령줄·4688·창 제목의 `/notice#…t=` 값 → `<redacted>`). 요청 피어를 찾지 못하면 잠깐 다시 찾고 그래도 없으면 503 `unavailable`(우회 탐지 아님, 에이전트·고지 페이지가 재시도). `agent_impersonation`·`notice_token_misuse`는 같은 키당 1분에 한 번(`suppressed` 개수). 4625 중복 판정 = (source, record_id, 이벤트 시각)(마이그레이션 8, 로그 지운 뒤 재사용된 record_id). WTS 세션 하나를 일시적으로 못 읽으면 이전 상태 유지(로그오프 아님). 이벤트 로그 북마크는 감시 스레드가 읽은 시점에 전진(수집 큐 초과·서버 비정상 종료로 버려진 레코드는 다시 읽지 않음: 최대 한 번 전달, `collector.dropped`로 남음). 고지 페이지는 토큰을 주소창에서 지우지만 창이 닫힐 때까지 `history.state`에 둠(F5 대비; 확인 뒤 토큰은 쓸모없음) |
+| v0.8 | 구현 정합 (P6–P7): data/index.db(FTS5 unicode61 접두사 검색, 분·시간 롤업, 파생 데이터라 스키마가 다르면 다시 만듦), GET /api/logs·/histogram·/users·/status·/export, GET /api/audit[/export], 조회·내보내기 감사(logs_view 60초 제한), 보존 정리 03:30 KST + 보존 기간을 줄이면 즉시(미리보기와 같은 retention_cutoff, 압축은 최소 2일·색인 완료 파일만), DB 표 정리(auth_sessions·otp_*·mcp_actions·mcp_transitions·rdp_*·notice_displays), GET /api/settings/retention/preview delete_events, GET /api/service, 서비스 호스트(service 하위 명령, SESSIONCHANGE→nudge, 종료 코드 3/4/5, data/.lock), 배포 묶음(A: PyInstaller 6.22.3 onedir — Task 13 스파이크에서 서명 없는 exe가 이 PC의 Smart App Control을 통과, bundle.json), install.ps1/uninstall.ps1/audit-policy.ps1(SID·GUID, -DryRun), 버전 1.0.0. 그 밖에: SSE `sessions_changed`(로그인한 스트림만, 내용 없음 — 세션 화면 갱신 신호), `GET /api/service`의 `bundle`(묶음에서 실행 중인지), `python -m app reindex`, MCP 조치·전이 표는 로그 보존 기간을 따름(D3), FAILED·자동 조치 횟수는 서비스 재시작 때 초기화(W17), 우회 탐지 기준값은 data/tamper-baseline.json에 저장(꺼진 동안의 변경은 다음 시작 때 `while_stopped`), 설치는 서비스 시작 유형을 늘 delayed-auto로 만들고 서비스가 웹 설정값으로 맞춤(W25) |
 
 ---
 
@@ -76,11 +81,11 @@
 │  │  Agent Supervisor (세션별 에이전트 기동·감시, 우회 탐지)               │   │
 │  │  Log Writer (logs/YYYY-MM-DD.jsonl + data/index.db, 배치 기록, 보존)    │   │
 │  └───────────────▲────────────────────────────────────────────────────────┘   │
-│                  │ Named Pipe (세션 ID 검증)                                  │
+│                  │ loopback HTTP (에이전트 토큰 + 세션 ID 검증)               │
 │  ┌───────────────┴──────────────┐                                            │
 │  │ mcp-agent (RDP 사용자 세션)  │                                            │
 │  │ · 연결마다 사전 고지 다이얼로그│                                            │
-│  │   (WebView2, 같은 디자인)    │                                            │
+│  │   (Edge 앱 창, 같은 디자인)  │                                            │
 │  │ · 포그라운드 창/최소화/제목  │                                            │
 │  │ · 유휴 상태                  │                                            │
 │  └──────────────────────────────┘                                            │
@@ -104,7 +109,7 @@
    - 쿠키 속성은 `HttpOnly`, `SameSite=Strict`이고, HTTPS일 때는 `Secure`도 붙습니다.
    - 세션은 최대 8시간이며, 30분 동안 사용이 없으면 만료됩니다.
    - 변경 요청은 CSRF 토큰을 검사합니다.
-4. **채널별 세션:** 8700과 8701은 쿠키를 공유하지 않으므로 각각 로그인합니다.
+4. **채널별 세션:** 브라우저 쿠키는 포트가 아니라 호스트 단위라서, 두 채널이 서로의 세션을 덮어쓰지 않도록 채널별 쿠키 이름(`mcpmon_sid_local`, `mcpmon_sid_ext`)을 씁니다. 8700과 8701에는 각각 로그인합니다.
 5. **감사 기록:** 모든 로그인 시도를 남깁니다(성공·실패, 채널, IP, User-Agent). localhost에서는 브라우저를 연 Windows 계정도 함께 기록합니다.
 
 **OtpProvider (교체 가능)**
@@ -142,6 +147,7 @@
 | **MCP 시작 / 재실행 / 종료 (모든 MCP)** | ✗ | ✓ | ✓ |
 | MCP 신규 등록 (start·stop 스크립트를 함께 작성해야 하므로) | ✗ | (L) | (L) |
 | MCP 삭제 | ✗ | (L) 소유자만 | (L) |
+| 스크립트 조회 (내용·버전 이력, 읽기 전용) | ✗ | (L) | (L) |
 | **스크립트 추가·수정·삭제** | ✗ | **(L) 소유자만** | **(L) 소유자만** |
 | **소유권 이전** | ✗ | ✗ | **(L)** |
 | **사용자 관리** (로그인 이메일 등록, 역할 지정, Admin 지정, 비활성화) | ✗ | ✗ | **(L)** |
@@ -150,6 +156,7 @@
 | 사전 고지 메시지 편집 | ✗ | ✗ | **(L)** |
 | 관리자 감사 로그 조회 | ✗ | ✓ | ✓ |
 
+- **스크립트 조회**는 소유자가 아니어도 MCP 개발자 이상이면 localhost에서 읽기 전용으로 할 수 있습니다(§6.4). 외부 채널에서는 스크립트 내용을 보여주지 않습니다.
 - **스크립트 권한은 Admin도 예외가 아닙니다.** 다른 사람의 MCP 스크립트를 고쳐야 하면, Admin이 localhost에서 소유권을 이전한 다음 수정합니다.
 - 소유자 계정이 비활성화되면 그 MCP는 "소유자 없음"으로 표시됩니다. 스크립트는 계속 동작하지만, 소유권을 이전하기 전에는 수정할 수 없습니다.
 - 스크립트를 **실행**하는 것(자동 조치, 수동 시작·재실행·종료)에는 소유자 제한이 없습니다. 제한은 스크립트 **내용을 바꾸는 행위**에만 적용됩니다.
@@ -158,7 +165,7 @@
 - **서버 2개:** 8700은 `127.0.0.1`에만 바인딩합니다. 스크립트, 전역 설정, 사용자 관리, 소유권 이전, 고지 편집 라우트는 **8700 라우터에만 등록**합니다.
 - 같은 PC에서 8701로 들어온 요청도 **외부 채널로 취급**합니다. 채널은 들어온 포트로만 판별합니다.
 - 8700 앞에 같은 PC의 리버스 프록시를 두지 않습니다. 이 제약은 운영 문서에 명시합니다.
-- **권한 검사 단일화:** 모든 판단은 정책 함수 하나 `can(user, action, resource, channel)`에서 합니다. 매트릭스(§4.3) 전체를 자동 테스트로 만듭니다.
+- **권한 검사 단일화:** 모든 판단은 정책 함수 하나 `can(user, action, channel, owner_id)`에서 합니다. `owner_id`는 대상 MCP의 (활성) 소유자 id이고, 소유자 규칙이 없는 동작에서는 쓰지 않습니다. 매트릭스(§4.3) 전체를 자동 테스트로 만듭니다.
 - **UI 표시:** 권한이 없는 기능도 숨기지 않고, 비활성 상태로 두면서 이유를 함께 보여줍니다.
 
 ---
@@ -182,7 +189,7 @@
 ### 5.3 RDP 세션 수집기
 | 소스 | 얻는 정보 |
 |---|---|
-| WTS API (세션 변경 알림 + 2초 폴링 보정) | 세션 ID, 상태, 사용자명, **로그온 도메인**, **클라이언트 컴퓨터명**, **클라이언트 IP**, 클라이언트 빌드, 해상도·색 깊이, 프로토콜, 로그온/연결/해제 시각, 유휴 시간 |
+| WTS API (0.5초 폴링(+ 세션 변경 알림 시 즉시)) | 세션 ID, 상태, 사용자명, **로그온 도메인**, **클라이언트 컴퓨터명**, **클라이언트 IP**, 클라이언트 빌드, 해상도·색 깊이, 프로토콜, 로그온/연결/해제 시각, 유휴 시간 |
 | RemoteConnectionManager 1149 | 인증 성공 (사용자, 도메인, 출발지 IP) |
 | LocalSessionManager 21/22/23/24/25 | 로그온, 셸 시작, 로그오프, 연결 해제, 재연결 |
 | Security 4624(Type 10/7)/4625/4634/4647/4778/4779 | 로그온 성공·실패, 로그오프, 재연결·해제 |
@@ -201,7 +208,7 @@
 
 ### 5.5 행동 감사 사전 고지 다이얼로그
 - **표시 시점:** RDP **연결될 때마다** 표시합니다. 새 로그온과 재연결 모두 해당합니다. 에이전트가 세션 연결 이벤트를 받는 즉시 띄웁니다.
-- **형태:** 화면 중앙의 최상위 모달 창이며, '확인' 버튼 하나만 있는 안내형입니다. WebView2로 렌더링해서 웹앱과 같은 디자인 토큰과 애니메이션을 씁니다.
+- **형태:** 화면 중앙의 최상위 모달 창이며, '확인' 버튼 하나만 있는 안내형입니다. Edge 앱 창(WebView2와 같은 엔진)으로 렌더링해서 웹앱과 같은 디자인 토큰과 애니메이션을 씁니다.
 - **기록:**
   - `notice_shown`: 표시 시각, 연결 종류(로그온/재연결), 문구 버전
   - `notice_acknowledged`: 확인 시각, 확인까지 걸린 시간
@@ -247,7 +254,7 @@
 ### 5.8 스크립트 실행기와 스크립트 관리
 - **종류:** `start`(필수), `stop`(필수), `restart`(선택). 형식은 `.ps1`, `.bat`, `.cmd`입니다.
 - **저장:** `scripts/<mcp-id>/`에 둡니다. SYSTEM과 Administrators만 쓸 수 있도록 ACL을 겁니다.
-- **편집:** localhost 채널에서 MCP 소유자만 할 수 있고, CodeMirror 편집기를 씁니다. 저장할 때마다 버전 이력(작성자, 시각, diff)이 남고 되돌릴 수 있습니다.
+- **조회·편집:** 조회(내용, 버전 목록)는 localhost 채널에서 MCP 개발자 이상이 읽기 전용으로 할 수 있습니다. 편집은 localhost 채널에서 MCP 소유자만 할 수 있고, CodeMirror 편집기를 씁니다. 저장할 때마다 버전 이력(작성자, 시각, diff)이 남고 되돌릴 수 있습니다.
 - **무결성 검사:** 실행 직전에 파일 해시를 DB와 비교합니다. 앱 밖에서 바뀐 파일이면 실행을 막고 `tamper` 이벤트를 남깁니다.
 - **실행:**
   - 환경변수: `MCP_ID`, `MCP_NAME`, `MCP_HOST`, `MCP_PORT`, `MCP_PID`, `MCP_REASON`, `MCP_TRIGGER`, `MCP_ACTOR`
@@ -361,17 +368,30 @@
 
 | 엔드포인트 (예) | 익명 | MCP 개발자 | Admin | 채널 |
 |---|:-:|:-:|:-:|---|
-| `GET /api/board`, `GET /api/stream` | ✓ | ✓ | ✓ | 둘 다 |
+| `GET /api/board` (`sessions` 포함), `GET /api/stream` (SSE: `board`·`mcp`·`mcp_removed`·`sessions` 이벤트. `action`·`tamper`·`sessions_changed` 이벤트는 로그인한 MCP 개발자 이상에게만) | ✓ | ✓ | ✓ | 둘 다 |
 | `POST /api/auth/otp/request`, `POST /api/auth/otp/verify`, `POST /api/auth/logout` | ✓ | ✓ | ✓ | 둘 다 |
-| `GET /api/mcps/{id}/history`, `GET /api/sessions/history` | ✗ | ✓ | ✓ | 둘 다 |
-| `GET /api/logs?from&to&users&cat&q&cursor`, `GET /api/logs/histogram`, `GET /api/logs/export` | ✗ | ✓ | ✓ | 둘 다 |
-| `PUT /api/mcps/{id}`, `POST /api/mcps/{id}/actions/{start\|restart\|stop}` | ✗ | ✓ | ✓ | 둘 다 |
-| `POST /api/mcps`, `DELETE /api/mcps/{id}`, `GET/PUT/DELETE /api/mcps/{id}/scripts/{kind}` | ✗ | 소유자 | 소유자 | **Local만** |
+| `GET /api/mcps`, `GET /api/mcps/{id}` (설정 포함), `GET /api/mcps/{id}/history`, `GET /api/mcps/{id}/actions/{action_id}` (출력 포함) | ✗ | ✓ | ✓ | 둘 다 |
+| `GET /api/mcp-activity?limit=` (모든 MCP의 최근 상태 전이·조치, 대시보드용) | ✗ | ✓ | ✓ | 둘 다 |
+| `GET /api/sessions/current`, `GET /api/sessions/history?days=1..90&limit&before_id` (연결 이력 + 로그인 실패), `GET /api/sessions/collectors` (수집기 상태) — 세션 화면 | ✗ | ✓ | ✓ | 둘 다 |
+| `GET /api/tamper/recent?limit=1..200` (최근 우회 탐지 이벤트, 대시보드용, 로그 조회 권한) | ✗ | ✓ | ✓ | 둘 다 |
+| `POST /api/notice/display/open`, `POST /api/notice/display/ack` (고지 창 페이지 전용: `X-Notice-Token` + 요청 피어의 세션 = 표시 건의 세션, 문제는 모두 404, 피어를 못 찾으면 503) | 토큰 | 토큰 | 토큰 | **Local만** |
+| `POST /api/agent/hello`, `GET /api/agent/next`, `POST /api/agent/heartbeat`, `POST /api/agent/events`, `POST /api/agent/notice/{display_id}/closed` (세션 에이전트 전용: `X-Agent-Token` + 요청 피어의 세션 = 에이전트 슬롯의 세션, 응답마다 `X-Server-Proof`로 서비스가 자신을 증명) | 토큰 | 토큰 | 토큰 | **Local만** |
+| `GET /api/logs?from&to&users*&cat*&event*&outcome*&session&ip&q&cursor&limit=1..1000` (최신순 키셋 커서, `index.ready`), `GET /api/logs/histogram?…&buckets=10..200&group=none\|cat\|user`, `GET /api/logs/users?…&limit=1..500`, `GET /api/logs/status` (색인 상태) — 시각은 오프셋이 있는 ISO 8601만, 첫 페이지 조회는 (사용자, 채널, 조건)별 60초에 한 번 `logs_view` 감사 | ✗ | ✓ | ✓ | 둘 다 |
+| `GET /api/logs/export?…&format=csv\|jsonl&limit=1..100000` (CSV는 BOM·수식 문자 처리, JSONL은 원문 줄, 매번 `logs_export` 감사) | ✗ | ✓ | ✓ | 둘 다 |
+| `GET /api/audit?kind=admin\|auth\|all&from&to&users*&result*&channel&q&cursor&limit`, `GET /api/audit/export?…&format` (관리 작업 `admin.audit` + 로그인 `auth`, 같은 색인) | ✗ | ✓ | ✓ | 둘 다 |
+| `PUT /api/mcps/{id}`, `POST /api/mcps/{id}/actions/{start\|restart\|stop}` (**202 + `run_id`**: 결과는 `action` 이벤트와 이력으로 확인) | ✗ | ✓ | ✓ | 둘 다 |
+| `POST /api/mcps`, `DELETE /api/mcps/{id}` | ✗ | 등록: ✓ / 삭제: 소유자 | ✓ | **Local만** |
+| `GET /api/mcps/{id}/scripts`, `GET /api/mcps/{id}/scripts/{kind}`, `GET /api/mcps/{id}/scripts/{kind}/versions[/{version}]` (읽기 전용, §6.4) | ✗ | ✓ | ✓ | **Local만** |
+| `PUT/DELETE /api/mcps/{id}/scripts/{kind}`, `POST /api/mcps/{id}/scripts/{kind}/versions/{version}/revert` | ✗ | 소유자 | 소유자 | **Local만** |
 | `POST /api/mcps/{id}/owner` | ✗ | ✗ | ✓ | **Local만** |
-| `GET/POST/PUT /api/users` | ✗ | ✗ | ✓ | **Local만** |
-| `GET/PUT /api/settings` (보존 기간 포함), `GET /api/settings/retention/preview`, `GET/PUT /api/notice` | ✗ | ✗ | ✓ | **Local만** |
+| `GET/POST /api/users`, `PATCH /api/users/{id}` | ✗ | ✗ | ✓ | **Local만** |
+| `GET/PUT /api/settings` (보존 기간 포함: 줄이면 약 5초 뒤 정리 실행, 시작 유형을 바꾸면 SCM에 적용 + `service_start_type_apply` 감사), `GET /api/settings/retention/preview?days=7..3650` (삭제될 파일·용량·날짜 범위 + 색인 행 수 `delete_events`, 모르면 null), `GET/PUT /api/notice` | ✗ | ✗ | ✓ | **Local만** |
+| `GET /api/service` (`{installed, running_as_service, start_type, desired, in_sync, bundle}`) | ✗ | ✗ | ✓ | **Local만** |
+| `GET /api/notice/versions[/{v}]`, `POST /api/notice/versions/{v}/revert` (버전 0 = 기본 문구) | ✗ | ✗ | ✓ | **Local만** |
 
-`DELETE /api/mcps/{id}`는 MCP 개발자는 소유자일 때만, Admin은 모든 MCP에 대해 허용합니다. 스크립트 라우트는 역할과 관계없이 소유자만 허용합니다.
+`DELETE /api/mcps/{id}`는 MCP 개발자는 소유자일 때만, Admin은 모든 MCP에 대해 허용합니다. 스크립트를 **바꾸는** 라우트(`PUT`/`DELETE`/`revert`)는 역할과 관계없이 소유자만 허용하고, `GET` 라우트는 MCP 개발자 이상이면 소유자가 아니어도 읽을 수 있습니다.
+
+**외부 채널(8701):** Local 전용 경로(위 표의 "Local만" 행)는 라우터에 등록하지 않으므로 어떤 메서드로 불러도 **404** `not_found`입니다(405가 아닙니다). 두 채널이 같은 경로를 공유하는 경우(`GET/PUT /api/mcps/{id}` 등)에도 Local 전용 메서드(`POST /api/mcps`, `DELETE /api/mcps/{id}`)는 외부에서 404입니다.
 
 ---
 
@@ -390,13 +410,13 @@
 | 영역 | 선택 |
 |---|---|
 | 웹 서버 | FastAPI + Uvicorn (서버 2개), SSE |
-| Windows 연동 | pywin32, WMI(comtypes), ctypes(SetWinEventHook), WebView2(`pywebview`) |
+| Windows 연동 | pywin32(이벤트 로그·WMI·CreateProcessAsUser), ctypes(WTS·세션 ID·SetWinEventHook), Edge --app |
 | 모니터링 | psutil, httpx, icmplib |
 | 인증 | 자체 OTP 구현 (`secrets` 모듈, 상수 시간 비교), SQLite 세션 저장소 |
 | 저장 | SQLite(WAL, FTS5), JSONL |
 | 프런트 | §6.5 |
 | Dummy MCP | 공식 `mcp` Python SDK (FastMCP) |
-| 패키징 | PyInstaller → `mcp-monitor.exe`, `mcp-agent.exe` / `install.ps1` |
+| 패키징 | PyInstaller 6.22.3 onedir(Task 13 스파이크: 서명 없는 exe가 Smart App Control을 통과해 A 채택, W26) → 배포 묶음 폴더(`bundle.json`, `bin\monitor\mcp-monitor.exe`, `bin\agent\mcp-agent.exe`, `web\`, `install\`, `docs\OPERATIONS.md`) + zip·sha256, `install\build.ps1`(pip-audit·pnpm audit 통과가 조건) / `install.ps1`·`uninstall.ps1`·`audit-policy.ps1`. 대상 PC의 SAC가 막으면 대안 B = python.org embeddable(PSF 서명) + 묶음 런타임. 코드 서명은 추후 |
 
 ---
 
@@ -406,7 +426,11 @@
 strategy-mcp-monitor/
 ├─ docs/
 ├─ server/app/
-│  ├─ main.py                  # 서비스 진입점, 채널 2개 기동
+│  ├─ main.py                  # serve(): 채널 2개·수집기 기동, ShutdownSequence
+│  ├─ __main__.py              # CLI: 콘솔 서버, service, reindex, 종료 코드 3/4/5
+│  ├─ bundle.py                # 배포 묶음(bundle.json) 찾기: 정적 폴더·데이터 루트·에이전트 명령
+│  ├─ rootlock.py              # data/.lock: 데이터 루트당 프로세스 하나
+│  ├─ winsvc/{host,service,start_type}.py  # Windows 서비스 호스트, SCM 시작 유형
 │  ├─ web/local_api.py         # Local 전용 라우트
 │  ├─ web/shared_api.py        # 두 채널 공통 라우트
 │  ├─ auth/{otp,policy,sessions}.py
@@ -415,7 +439,7 @@ strategy-mcp-monitor/
 │  ├─ sessions/collector.py
 │  ├─ activity/{process,powershell,agent_hub,tamper}.py
 │  ├─ notice/
-│  ├─ logstore/{writer,query,retention}.py
+│  ├─ logstore/{writer,reader,files,indexer,index_db,normalize,fts,query,retention}.py
 │  └─ settings/
 ├─ server/tests/
 ├─ agent/                      # 세션 에이전트 (창 이벤트, 고지 다이얼로그)
@@ -423,7 +447,10 @@ strategy-mcp-monitor/
 ├─ web/src/components/{ui,status}/
 ├─ web/src/styles/tokens.css
 ├─ dummy-mcps/{seoul_weather,calculator,seoul_clock,common}/
-├─ install/{install.ps1,uninstall.ps1,audit-policy.ps1}
+├─ install/{build.ps1,install.ps1,uninstall.ps1,audit-policy.ps1,LAYOUT}
+├─ install/pyinstaller/        # mcp-monitor.spec, mcp-agent.spec, 진입 파일
+├─ docs/ops/OPERATIONS.md      # 운영 문서(묶음의 docs\OPERATIONS.md)
+├─ docs/verification/          # 실기기 점검표, 성능 기록
 ├─ scripts/                    # 런타임: MCP별 스크립트
 ├─ logs/                       # 런타임: YYYY-MM-DD.jsonl
 └─ data/                       # 런타임: config.db, index.db, dev/

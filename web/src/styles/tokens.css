@@ -1,0 +1,221 @@
+/*
+ * Design tokens — the only file in web/src that may spell out a color value.
+ *
+ * Direction (docs/design/direction.md): a dark-first operations console in the
+ * "high-performance HMI" tradition. Neutrals are a cool steel (hue 255); hue is
+ * reserved for MCP state, so a colored thing on screen always means a state.
+ * Interactive emphasis uses luminance (inverse fills), not a brand hue.
+ *
+ * Layer 1: OKLCH primitives (never used by components directly).
+ * Layer 2: role tokens with light-dark(light, dark), exposed to Tailwind in app.css.
+ */
+@layer tokens {
+  :root {
+    color-scheme: light dark;
+
+    /* ── Primitives: steel neutral, hue 255 ───────────────────────────── */
+    --steel-0: oklch(0.995 0.002 255);
+    --steel-50: oklch(0.972 0.004 255);
+    --steel-100: oklch(0.945 0.006 255);
+    --steel-200: oklch(0.9 0.009 255);
+    --steel-300: oklch(0.82 0.013 255);
+    --steel-400: oklch(0.735 0.016 255); /* 0.735, not 0.72: muted labels on an amber soft card reach 4.5:1 */
+    --steel-500: oklch(0.6 0.018 255);
+    --steel-600: oklch(0.49 0.018 255);
+    --steel-700: oklch(0.38 0.017 255);
+    --steel-800: oklch(0.31 0.015 255);
+    --steel-850: oklch(0.27 0.014 255);
+    --steel-900: oklch(0.235 0.013 255);
+    --steel-950: oklch(0.205 0.012 255);
+    --steel-1000: oklch(0.18 0.011 255);
+
+    /* ── Primitives: state hues. 200 = dark-theme badge text, 400 = dark-theme
+          stroke/icon, 600 = light-theme stroke/icon, 800 = light-theme badge text. */
+    --green-200: oklch(0.9 0.08 152);
+    --green-400: oklch(0.76 0.15 152);
+    --green-600: oklch(0.55 0.14 152);
+    --green-800: oklch(0.37 0.09 152);
+
+    --amber-200: oklch(0.92 0.09 88);
+    --amber-400: oklch(0.83 0.15 85);
+    --amber-600: oklch(0.6 0.124 75);
+    --amber-800: oklch(0.4 0.08 70);
+
+    --orange-200: oklch(0.9 0.058 55);
+    --orange-400: oklch(0.75 0.16 52);
+    --orange-600: oklch(0.58 0.16 45);
+    --orange-800: oklch(0.4 0.11 45);
+
+    --cyan-200: oklch(0.91 0.06 210);
+    --cyan-400: oklch(0.79 0.12 212);
+    --cyan-600: oklch(0.56 0.1 220);
+    --cyan-800: oklch(0.38 0.07 225);
+
+    --red-200: oklch(0.9 0.048 22);
+    --red-400: oklch(0.71 0.17 22);
+    --red-600: oklch(0.55 0.2 25);
+    --red-800: oklch(0.4 0.14 25);
+
+    --slate-200: oklch(0.89 0.025 255);
+    --slate-400: oklch(0.73 0.04 255);
+    --slate-600: oklch(0.53 0.04 255);
+    --slate-800: oklch(0.37 0.035 255);
+
+    /* ── Primitives: log category hues (W32). Chosen away from the state hues
+          above, so a category colour never reads as an MCP state. 400 = dark, 600 = light.
+          Lightness alternates along the histogram stack (security, session, system, activity,
+          mcp) so touching segments stay apart for colour-blind readers too (dataviz validator:
+          adjacent CVD ΔE ≥ 14, normal ΔE ≥ 24 in both themes). */
+    --blue-400: oklch(0.6 0.16 250);
+    --blue-600: oklch(0.56 0.155 250);
+    --violet-400: oklch(0.6 0.16 300);
+    --violet-600: oklch(0.45 0.16 300);
+    --teal-400: oklch(0.66 0.115 185);
+    --teal-600: oklch(0.6 0.105 185);
+    --magenta-400: oklch(0.6 0.16 355);
+    --magenta-600: oklch(0.45 0.16 355);
+    --olive-500: oklch(0.6 0.135 115); /* one step serves both themes */
+
+    /* ── Roles: surfaces and text ─────────────────────────────────────── */
+    --color-bg: light-dark(var(--steel-50), var(--steel-950));
+    --color-surface: light-dark(var(--steel-0), var(--steel-900));
+    --color-surface-raised: light-dark(oklch(1 0 0), var(--steel-850));
+    --color-sunken: light-dark(var(--steel-100), var(--steel-1000));
+    /* decorative hairline: groups content, quiet on purpose (not a 3:1 boundary) */
+    --color-border: light-dark(var(--steel-200), var(--steel-800));
+    /* meaningful boundary: input fields, checkbox/switch outlines (WCAG 1.4.11 3:1) */
+    --color-border-strong: light-dark(var(--steel-500), var(--steel-500));
+    --color-fg: light-dark(var(--steel-950), var(--steel-50));
+    --color-fg-muted: light-dark(var(--steel-600), var(--steel-400));
+
+    /* ── Roles: interaction. No brand hue — emphasis is an inverse fill. ─ */
+    --color-accent: light-dark(var(--steel-900), var(--steel-100));
+    --color-accent-fg: light-dark(var(--steel-0), var(--steel-950));
+    --color-hover: color-mix(in oklch, var(--color-fg) 7%, transparent);
+    --color-selected: color-mix(in oklch, var(--color-fg) 11%, transparent);
+    --color-focus: light-dark(var(--steel-800), var(--steel-200));
+    --color-danger: light-dark(var(--red-600), var(--red-400));
+    --color-danger-fg: light-dark(var(--steel-0), var(--steel-1000));
+    --color-scrim: light-dark(oklch(0.2 0.012 255 / 0.4), oklch(0.12 0.01 255 / 0.6));
+
+    /* ── Roles: MCP state. Base = icon/stroke, -fg = badge text, -soft = badge fill ─ */
+    --color-state-healthy: light-dark(var(--green-600), var(--green-400));
+    --color-state-healthy-fg: light-dark(var(--green-800), var(--green-200));
+    --color-state-healthy-soft: color-mix(in oklch, var(--color-state-healthy) 18%, transparent);
+
+    --color-state-suspect: light-dark(var(--amber-600), var(--amber-400));
+    --color-state-suspect-fg: light-dark(var(--amber-800), var(--amber-200));
+    --color-state-suspect-soft: color-mix(in oklch, var(--color-state-suspect) 18%, transparent);
+
+    --color-state-action: light-dark(var(--orange-600), var(--orange-400));
+    --color-state-action-fg: light-dark(var(--orange-800), var(--orange-200));
+    --color-state-action-soft: color-mix(in oklch, var(--color-state-action) 18%, transparent);
+
+    --color-state-recovering: light-dark(var(--cyan-600), var(--cyan-400));
+    --color-state-recovering-fg: light-dark(var(--cyan-800), var(--cyan-200));
+    --color-state-recovering-soft: color-mix(in oklch, var(--color-state-recovering) 18%, transparent);
+
+    --color-state-failed: light-dark(var(--red-600), var(--red-400));
+    --color-state-failed-fg: light-dark(var(--red-800), var(--red-200));
+    --color-state-failed-soft: color-mix(in oklch, var(--color-state-failed) 18%, transparent);
+
+    --color-state-maintenance: light-dark(var(--slate-600), var(--slate-400));
+    --color-state-maintenance-fg: light-dark(var(--slate-800), var(--slate-200));
+    --color-state-maintenance-soft: color-mix(in oklch, var(--color-state-maintenance) 18%, transparent);
+
+    /* Text diff rows (TextDiff): a tint of the healthy/failed hues under ordinary text; the +/− sign carries the meaning too */
+    --color-diff-add: color-mix(in oklch, var(--color-state-healthy) 14%, transparent);
+    --color-diff-del: color-mix(in oklch, var(--color-state-failed) 14%, transparent);
+
+    /* ── Roles: log category groups (histogram bars, timeline marks, chip dots; non-text,
+          3:1 on every surface). Twelve categories fold into these five (categories.ts). */
+    --color-cat-session: light-dark(var(--blue-600), var(--blue-400));
+    --color-cat-activity: light-dark(var(--violet-600), var(--violet-400));
+    --color-cat-mcp: light-dark(var(--teal-600), var(--teal-400));
+    --color-cat-security: light-dark(var(--magenta-600), var(--magenta-400));
+    --color-cat-system: var(--olive-500);
+
+    /* ── Type ─────────────────────────────────────────────────────────── */
+    --font-sans: "Pretendard Variable", Pretendard, "Segoe UI Variable Text", "Segoe UI", "Malgun Gothic",
+      "Apple SD Gothic Neo", system-ui, sans-serif;
+    --font-mono: "JetBrains Mono Variable", "Cascadia Mono", Consolas, "D2Coding", ui-monospace, monospace;
+
+    --font-weight-normal: 400;
+    --font-weight-medium: 500;
+    --font-weight-semibold: 600;
+    --font-weight-bold: 700;
+
+    /* Admin scale (dense, ratio ≈ 1.2 from a 14px body). Hangul needs more leading than Latin. */
+    --text-xs: 0.75rem;
+    --text-xs--line-height: 1.125rem;
+    --text-sm: 0.875rem;
+    --text-sm--line-height: 1.375rem;
+    --text-base: 1rem;
+    --text-base--line-height: 1.625rem;
+    --text-lg: 1.125rem;
+    --text-lg--line-height: 1.75rem;
+    --text-xl: 1.375rem;
+    --text-xl--line-height: 1.875rem;
+    --text-2xl: 1.75rem;
+    --text-2xl--line-height: 2.25rem;
+    /* Board scale (read from across the room): fluid, tight leading and tracking. */
+    --text-metric: clamp(1.75rem, 1.2rem + 1.4vw, 2.5rem);
+    --text-metric--line-height: 1.05;
+    --text-metric--letter-spacing: -0.02em;
+    --text-display: clamp(2rem, 1.2rem + 2.6vw, 3.5rem);
+    --text-display--line-height: 1.12;
+    --text-display--letter-spacing: -0.025em;
+
+    /* ── Space and size (4px grid; Tailwind spacing uses the same unit) ─ */
+    --spacing: 0.25rem;
+    --size-control: 2.25rem; /* 36px buttons and inputs in the dense admin */
+    --size-control-sm: 1.75rem;
+    --size-topbar: 3.5rem;
+    --size-sidebar: 15rem;
+    --size-rail: 3.5rem; /* the admin sidebar collapsed to icons in a narrow window (< 1024px) */
+    --size-board-card: 19rem; /* minimum card width in the board grid */
+    --size-prose: 40rem; /* forms and notice text: < 80 characters a line */
+
+    /* ── Radius: a hierarchy, not one value everywhere ────────────────── */
+    --radius-xs: 0.1875rem; /* kbd, inline code */
+    --radius-sm: 0.25rem; /* badges, inputs, checkboxes */
+    --radius-md: 0.375rem; /* buttons, cards, menus */
+    --radius-lg: 0.625rem; /* dialogs, the notice */
+    --radius-full: 9999px; /* status dots, switches */
+
+    /* ── Elevation: borders do the work in dark; shadows only for floating layers ─ */
+    --shadow-color: light-dark(oklch(0.25 0.02 255 / 0.14), oklch(0.08 0.01 255 / 0.55));
+    --shadow-xs: 0 1px 1px var(--shadow-color);
+    --shadow-sm: 0 1px 2px var(--shadow-color);
+    --shadow-md: 0 6px 16px -4px var(--shadow-color), 0 2px 4px -2px var(--shadow-color);
+    --shadow-lg: 0 20px 48px -12px var(--shadow-color), 0 8px 16px -8px var(--shadow-color);
+
+    /* ── Layers ───────────────────────────────────────────────────────── */
+    --z-sticky: 10;
+    --z-modal: 50;
+    /* above modals: a select or menu opened inside a dialog must show over it */
+    --z-popover: 60;
+    --z-toast: 70;
+    --z-tooltip: 80;
+
+    /* ── Focus ────────────────────────────────────────────────────────── */
+    --focus-ring-width: 2px;
+    --focus-ring-offset: 2px;
+
+    /* ── Motion ───────────────────────────────────────────────────────── */
+    --motion-fast: 120ms; /* hover/press feedback, badge crossfade */
+    --motion-base: 200ms; /* menus, tooltips, toasts, route crossfade */
+    --motion-slow: 360ms; /* dialogs, the notice, card reorder */
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1); /* enter/exit */
+    --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1); /* on-screen movement */
+    --ease-hover: ease; /* color/opacity feedback */
+  }
+
+  /* Inputs reach a 44px target and 16px text on touch screens (no iOS zoom). */
+  @media (pointer: coarse) {
+    :root {
+      --size-control: 2.75rem;
+      --size-control-sm: 2.25rem;
+    }
+  }
+}

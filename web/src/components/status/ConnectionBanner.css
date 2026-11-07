@@ -1,0 +1,46 @@
+@layer components {
+  .presence-dot {
+    position: relative;
+    flex-shrink: 0;
+    width: 0.75rem;
+    height: 0.75rem;
+    border-radius: var(--radius-full);
+  }
+
+  .presence-dot[data-presence="on"] {
+    background-color: var(--color-fg);
+  }
+
+  /* ○ nobody: a hollow ring */
+  .presence-dot[data-presence="off"] {
+    border: 2px solid var(--color-fg-muted);
+  }
+
+  /* ● connected: a ring that grows and fades from the dot, transform + opacity only */
+  .presence-dot[data-anim="pulse"]::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background-color: var(--color-fg);
+    animation: presence-pulse 2s var(--ease-out) infinite;
+  }
+
+  @keyframes presence-pulse {
+    from {
+      transform: scale(1);
+      opacity: 0.55;
+    }
+    to {
+      transform: scale(2.6);
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .presence-dot[data-anim="pulse"]::after {
+      animation: none;
+      opacity: 0;
+    }
+  }
+}

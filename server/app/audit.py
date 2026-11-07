@@ -1,0 +1,137 @@
+from __future__ import annotations
+
+import hashlib
+from collections.abc import Mapping
+from datetime import datetime, timedelta
+from typing import Any, Literal
+
+from app.logstore.writer import LogWriter
+from app.users.store import User
+from app.web.channels import Channel
+
+_THROTTLE_WINDOW_SEC = 600
+_THROTTLE_PURGE_AT = 1024
+_THROTTLE_MAX = 10000
+
+MAX_USER_AGENT = 512
+
+
+def cap_user_agent(ua: str | None) -> str | None:
+    """Bound an attacker-controlled User-Agent before it is logged or stored."""
+    return ua if ua is None else ua[:MAX_USER_AGENT]
+
+
+class AuditLogger:
+    """Thin typed facade over LogWriter for the `auth` and `admin.audit` categories."""
+
+    def __init__(self, log: LogWriter) -> None:
+        self._log = log
+        # (event, ip[, email digest]) -> time of the last audited rate-limit hit;
+        # insertion-ordered, bounded
+        self._throttle: dict[tuple[str, ...], datetime] = {}
+
+    @property
+    def throttle_size(self) -> int:
+        return len(self._throttle)
+
+    def claim_rate_limited(
+        self,
+        event: str,
+        email: str,
+        ip: str | None,
+        now: datetime,
+        scope: Literal["ip", "email"] = "ip",
+    ) -> bool:
+        """Whether this 429 is the one to audit for its throttle key in this window (and claim it).
+
+        Lets a route skip work that only the audit line needs (the Windows account's TCP-table
+        scan, M1) for the 429s that are not audited."""
+        window = timedelta(seconds=_THROTTLE_WINDOW_SEC)
+        key: tuple[str, ...] = (event, ip or "unknown")
+        if scope == "email":
+            digest = hashlib.sha256(email.encode("utf-8", "surrogatepass")).hexdigest()[:16]
+            key += (digest,)
+        last = self._throttle.get(key)
+        if last is not None and now - last < window:
+            return False
+        self._throttle.pop(key, None)
+        if len(self._throttle) >= _THROTTLE_PURGE_AT:
+            self._throttle = {k: t for k, t in self._throttle.items() if now - t < window}
+        while len(self._throttle) >= _THROTTLE_MAX:  # still full: evict the oldest entries
+            del self._throttle[next(iter(self._throttle))]
+        self._throttle[key] = now
+        return True
+
+    def auth_rate_limited(
+        self,
+        event: str,
+        email: str,
+        channel: Channel,
+        ip: str | None,
+        user_agent: str | None,
+        now: datetime,
+        scope: Literal["ip", "email"] = "ip",
+        windows_user: str | None = None,
+    ) -> None:
+        """Audit a rate-limited (429) auth attempt, but only the first per throttle key per window.
+
+        The key is (event, ip) for an IP-scoped limit and (event, ip, email digest) for an
+        email-scoped one (cooldown / lockout), so a locked-out victim email does not hide
+        the IP's other targets. Keeps a client that is already being rejected from flooding
+        the log.
+        """
+        if not self.claim_rate_limited(event, email, ip, now, scope):
+            return
+        self.auth(
+            event=event,
+            email=email,
+            channel=channel,
+            ip=ip,
+            user_agent=user_agent,
+            ok=False,
+            windows_user=windows_user,
+        )
+
+    def auth(
+        self,
+        event: str,
+        email: str,
+        channel: Channel,
+        ip: str | None,
+        user_agent: str | None,
+        ok: bool,
+        windows_user: str | None = None,
+    ) -> None:
+        """One ``auth`` line. Local-channel lines always carry ``windows_user`` (the Windows
+        account of the requesting process, None when unresolved); external lines never do."""
+        extra: dict[str, Any] = {"windows_user": windows_user} if channel == "local" else {}
+        self._log.emit(
+            "auth",
+            event=event,
+            email=email,
+            channel=channel,
+            ip=ip,
+            user_agent=cap_user_agent(user_agent),
+            ok=ok,
+            **extra,
+        )
+
+    def admin(
+        self,
+        actor: User | None,
+        action: str,
+        channel: Channel,
+        ip: str | None,
+        target: Mapping,
+        result: Literal["ok", "denied", "error"],
+    ) -> None:
+        self._log.emit(
+            "admin.audit",
+            actor_id=actor.id if actor else None,
+            actor_email=actor.email if actor else None,
+            action=action,
+            channel=channel,
+            ip=ip,
+            target=dict(target),
+            result=result,
+        )

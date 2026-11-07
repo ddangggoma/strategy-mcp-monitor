@@ -1,0 +1,115 @@
+// The admin tab's live data: one BoardStore fed by one BoardStreamClient (U5), shared through
+// context, and mirrored into the React Query cache so lists and detail pages update from SSE
+// without refetching.
+import type { QueryClient } from "@tanstack/react-query";
+import { createContext, createElement, useContext, useSyncExternalStore, type ReactNode } from "react";
+import type { ActionTracker } from "@/lib/action-tracker";
+import type { BoardItem, McpDetail, TamperEvent } from "@/lib/api-types";
+import type { BoardState, BoardStore } from "@/lib/board-store";
+import type { BoardStreamClient, StreamStatus } from "@/lib/board-stream";
+import { TAMPER_LIMIT, qk } from "./query-keys";
+
+export interface LiveValue {
+  store: BoardStore;
+  stream: BoardStreamClient;
+  /** Manual-action toasts for this tab: AppShell creates the tracker; null outside the logged-in shell. */
+  tracker: ActionTracker | null;
+}
+
+const LiveContext = createContext<LiveValue | null>(null);
+
+export function LiveProvider({ value, children }: { value: LiveValue; children: ReactNode }) {
+  return createElement(LiveContext.Provider, { value }, children);
+}
+
+export function useLive(): LiveValue {
+  const live = useContext(LiveContext);
+  if (!live) throw new Error("useLive() outside <LiveProvider>");
+  return live;
+}
+
+/** Only the stream status: a page that shows the indicator does not re-render on every event. */
+export function useStreamStatus(store: BoardStore): StreamStatus {
+  return useSyncExternalStore(store.subscribe, () => store.getSnapshot().status);
+}
+
+function withLive(detail: McpDetail, live: BoardItem | null): McpDetail {
+  return detail.live === live ? detail : { ...detail, live };
+}
+
+/**
+ * Mirrors BoardStore changes into the query cache. The store replaces only the items an event
+ * touched (same object otherwise), so diffing two snapshots tells `mcp` (one item), `board`
+ * (all items) and `mcp_removed` apart without hooking into the parser:
+ * - changed item → its `live` in `qk.mcps` and `qk.mcp(id)`; an id the list does not know → refetch the list;
+ * - removed id → dropped from the list, `qk.mcp(id)` invalidated;
+ * - `action` event → that MCP's history windows and the activity feed are refetched;
+ * - sessions changed (`sessions` event, a `board` event that carries them, or `sessions_changed` for
+ *   the sessions screen) → current sessions and every history period refetched (M16);
+ * - `tamper` event → put in front of the recent tamper list (at most TAMPER_LIMIT); a reconnect refetches it.
+ * Returns the unsubscribe function.
+ */
+export function connectLive(store: BoardStore, qc: QueryClient): () => void {
+  let prev: BoardState = store.getSnapshot();
+
+  // M16: the sessions screen lists disconnected sessions and the connection history as well
+  const refetchSessions = () => {
+    void qc.invalidateQueries({ queryKey: qk.sessionsCurrent, exact: true });
+    void qc.invalidateQueries({ queryKey: qk.sessionsHistories });
+  };
+
+  const offState = store.subscribe(() => {
+    const next = store.getSnapshot();
+    // the board list changed: a session came, went or changed state; an acknowledged notice or a
+    // reverse DNS name also shows in the history
+    if (next.sessions !== prev.sessions) refetchSessions();
+    if (next.items === prev.items) {
+      prev = next;
+      return; // status or sessions only
+    }
+    const changed = new Map<number, BoardItem>();
+    for (const [id, item] of next.items) if (prev.items.get(id) !== item) changed.set(id, item);
+    const removed = [...prev.items.keys()].filter((id) => !next.items.has(id));
+    prev = next;
+
+    const list = qc.getQueryData<McpDetail[]>(qk.mcps);
+    if (list) {
+      const known = new Set(list.map((m) => m.id));
+      const gone = new Set(removed);
+      qc.setQueryData<McpDetail[]>(
+        qk.mcps,
+        list.filter((m) => !gone.has(m.id)).map((m) => (changed.has(m.id) ? withLive(m, changed.get(m.id) ?? null) : m)),
+      );
+      if ([...changed.keys()].some((id) => !known.has(id))) void qc.invalidateQueries({ queryKey: qk.mcps, exact: true });
+    }
+    for (const [id, item] of changed) {
+      qc.setQueryData<McpDetail>(qk.mcp(id), (d) => (d ? withLive(d, item) : d));
+    }
+    for (const id of removed) void qc.invalidateQueries({ queryKey: qk.mcp(id), exact: true });
+  });
+
+  const offAction = store.onAction((e) => {
+    void qc.invalidateQueries({ queryKey: qk.histories(e.mcp_id) });
+    void qc.invalidateQueries({ queryKey: qk.activity });
+  });
+
+  const offTamper = store.onTamper((e) => {
+    // not loaded yet: leave it to the first read, which includes this event
+    qc.setQueryData<TamperEvent[]>(qk.tamper, (list) => (list ? [e, ...list].slice(0, TAMPER_LIMIT) : list));
+  });
+
+  const offSessions = store.onSessionsChanged(refetchSessions);
+
+  const offReconnected = store.onReconnected(() => {
+    void qc.invalidateQueries({ queryKey: qk.tamper, exact: true });
+    refetchSessions(); // sessions_changed may have been missed
+  });
+
+  return () => {
+    offState();
+    offAction();
+    offTamper();
+    offSessions();
+    offReconnected();
+  };
+}

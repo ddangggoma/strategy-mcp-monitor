@@ -1,1 +1,22 @@
 .superpowers/
+.venv/
+__pycache__/
+*.pyc
+server/.pytest_cache/
+server/.cache/
+/logs/
+/data/
+/scripts/
+node_modules/
+dist/
+/build/
+dummy-mcps/run/
+dummy-mcps/.pytest_cache/
+agent/.pytest_cache/
+
+# web
+web/test-results/
+web/playwright-report/
+web/e2e/.state.json
+web/e2e/.auth/
+web/.vite/

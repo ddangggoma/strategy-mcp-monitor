@@ -1,0 +1,216 @@
+/*
+ * The pre-connection notice. One set of classes draws both the real dialog (`/notice`, a native
+ * modal <dialog>) and the editor's live preview, so the two cannot drift apart.
+ * A formal notice read once per connection: reading size (text-base), a prose measure, left aligned,
+ * one inverted-fill button. The only motion is the dialog's entrance (@starting-style, 360 ms
+ * ease-out, scale + opacity; the backdrop fades with the same timing) — rare, so it may be felt.
+ */
+@layer components {
+  .notice-panel {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    gap: calc(var(--spacing) * 4);
+    box-sizing: border-box;
+    width: 100%;
+    max-width: calc(var(--size-prose) + var(--spacing) * 16);
+    padding: calc(var(--spacing) * 7) calc(var(--spacing) * 8) calc(var(--spacing) * 6);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    background-color: var(--color-surface-raised);
+    color: var(--color-fg);
+    box-shadow: var(--shadow-lg);
+    text-align: left;
+  }
+
+  .notice-title {
+    margin: 0;
+    font-size: var(--text-xl);
+    line-height: var(--text-xl--line-height);
+    font-weight: var(--font-weight-semibold);
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+
+  .notice-body {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
+    color: var(--color-fg);
+    border-radius: var(--radius-sm);
+  }
+
+  .notice-body > * + * {
+    margin-top: calc(var(--spacing) * 3);
+  }
+
+  .notice-body p,
+  .notice-body ul {
+    margin-bottom: 0;
+  }
+
+  .notice-body ul {
+    padding-left: 1.25em;
+    list-style: disc;
+  }
+
+  .notice-body li + li {
+    margin-top: calc(var(--spacing) * 1);
+  }
+
+  .notice-body li::marker {
+    color: var(--color-fg-muted);
+  }
+
+  .notice-body strong {
+    font-weight: var(--font-weight-bold);
+  }
+
+  .notice-actions {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: calc(var(--spacing) * 2);
+  }
+
+  .notice-button {
+    min-width: calc(var(--spacing) * 24);
+    min-height: calc(var(--spacing) * 10);
+    padding: 0 calc(var(--spacing) * 5);
+    border-radius: var(--radius-md);
+    background-color: var(--color-accent);
+    color: var(--color-accent-fg);
+    font-size: var(--text-sm);
+    font-weight: var(--font-weight-semibold);
+    cursor: pointer;
+    transition:
+      background-color var(--motion-fast) var(--ease-hover),
+      transform var(--motion-fast) var(--ease-out);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .notice-button:hover {
+      background-color: color-mix(in oklch, var(--color-accent) 85%, transparent);
+    }
+  }
+
+  .notice-button:active {
+    transform: scale(0.98);
+  }
+
+  /* the acknowledgement is on its way (up to 3 s with retries): presses are ignored, so say so */
+  .notice-button[aria-busy="true"],
+  .notice-button[aria-busy="true"]:hover {
+    cursor: progress;
+    background-color: color-mix(in oklch, var(--color-accent) 70%, transparent);
+  }
+
+  .notice-button[aria-busy="true"]:active {
+    transform: none;
+  }
+
+  /* ---- standalone: the native modal dialog ---- */
+
+  .notice-dialog {
+    box-sizing: border-box;
+    width: min(calc(var(--size-prose) + var(--spacing) * 16), calc(100% - var(--spacing) * 8));
+    max-width: none;
+    max-height: calc(100dvh - var(--spacing) * 8);
+    margin: auto;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--color-fg);
+    overflow: visible;
+    opacity: 1;
+    transform: scale(1);
+    transition:
+      opacity var(--motion-slow) var(--ease-out),
+      transform var(--motion-slow) var(--ease-out);
+  }
+
+  .notice-dialog > .notice-panel {
+    max-height: calc(100dvh - var(--spacing) * 8);
+  }
+
+  .notice-dialog::backdrop {
+    background-color: var(--color-scrim);
+    opacity: 1;
+    transition: opacity var(--motion-slow) var(--ease-out);
+  }
+
+  @starting-style {
+    .notice-dialog[open] {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+
+    .notice-dialog[open]::backdrop {
+      opacity: 0;
+    }
+  }
+
+  /* ---- the /notice page behind the dialog, and its one line after the button ---- */
+
+  /* the page never scrolls (the panel does): no reserved scrollbar strip beside the backdrop */
+  :root:has(.notice-page) {
+    scrollbar-gutter: auto;
+  }
+
+  .notice-page {
+    display: grid;
+    place-items: center;
+    min-height: 100dvh;
+    padding: calc(var(--spacing) * 4);
+  }
+
+  /* the lines after the button (acknowledged, expired, a failure + retry): one centred column */
+  .notice-page-content {
+    display: grid;
+    justify-items: center;
+    gap: calc(var(--spacing) * 4);
+    text-align: center;
+  }
+
+  .notice-page-message {
+    max-width: var(--size-prose);
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
+    color: var(--color-fg);
+  }
+
+  /* ---- preview: the same panel on a stand-in for the screen behind the dialog ---- */
+
+  .notice-preview {
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: calc(var(--spacing) * 6) calc(var(--spacing) * 4);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    background-color: var(--color-sunken);
+  }
+
+  /* the preview's button only shows what the real one looks like */
+  .notice-preview .notice-button,
+  .notice-preview .notice-button:hover {
+    cursor: default;
+    background-color: var(--color-accent);
+  }
+
+  .notice-preview .notice-button:active {
+    transform: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .notice-dialog,
+    .notice-dialog::backdrop,
+    .notice-button {
+      transition: none;
+    }
+
+    .notice-button:active {
+      transform: none;
+    }
+  }
+}

@@ -1,0 +1,61 @@
+from datetime import UTC, datetime
+
+import httpx
+import pytest
+import pytest_asyncio
+
+from app.db import Database
+from app.paths import AppPaths
+from app.services import build_services
+from app.web.app_factory import create_app
+from tests.fakes import CapturingOtpProvider, FakeClock, FakeProber, FakeRunner, FakeScm
+
+
+@pytest.fixture
+def clock():
+    return FakeClock(datetime(2026, 11, 4, 5, 0, 0, tzinfo=UTC))
+
+
+@pytest.fixture
+def paths(tmp_path):
+    p = AppPaths(tmp_path)
+    p.ensure()
+    return p
+
+
+@pytest.fixture
+def db(paths):
+    database = Database(paths.db_path)
+    database.migrate()
+    yield database
+    database.close()
+
+
+@pytest_asyncio.fixture
+async def services(tmp_path, clock):
+    svc = build_services(
+        tmp_path, clock=clock, otp_provider=CapturingOtpProvider(),
+        runner=FakeRunner(), prober=FakeProber(clock), service_configurator=FakeScm(),
+    )
+    await svc.log.start()
+    await svc.log_index.start(run_loop=False)
+    yield svc
+    await svc.retention.stop()  # first: a run requested by PUT /api/settings uses the index and the DB (F14)
+    await svc.monitor.stop()
+    await svc.log_index.stop()
+    await svc.log.stop()
+    svc.db.close()
+
+
+@pytest_asyncio.fixture
+async def local_client(services):
+    transport = httpx.ASGITransport(app=create_app("local", services))
+    async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1:8700") as client:
+        yield client
+
+
+@pytest_asyncio.fixture
+async def external_client(services):
+    transport = httpx.ASGITransport(app=create_app("external", services))
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        yield client
