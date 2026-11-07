@@ -4,14 +4,20 @@ use std::ffi::{OsString, c_void};
 use std::os::windows::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 use windows::Win32::Foundation::{
-    CloseHandle, ERROR_CANCELLED, HANDLE, HLOCAL, LocalFree, WAIT_OBJECT_0,
+    CloseHandle, ERROR_CANCELLED, GENERIC_READ, GENERIC_WRITE, HANDLE, HLOCAL, LocalFree,
+    WAIT_OBJECT_0,
 };
 use windows::Win32::Security::Authorization::ConvertSidToStringSidW;
 use windows::Win32::Security::{
     GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TOKEN_USER, TokenElevation, TokenUser,
 };
+use windows::Win32::Storage::FileSystem::{
+    CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TYPE_CHAR,
+    FILE_TYPE_DISK, FILE_TYPE_PIPE, FILE_TYPE_REMOTE, GetFileType, OPEN_EXISTING,
+};
 use windows::Win32::System::Console::{
-    ATTACH_PARENT_PROCESS, AttachConsole, GetStdHandle, STD_OUTPUT_HANDLE,
+    ATTACH_PARENT_PROCESS, AttachConsole, GetStdHandle, STD_ERROR_HANDLE, STD_HANDLE,
+    STD_OUTPUT_HANDLE, SetStdHandle,
 };
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
@@ -45,14 +51,77 @@ pub fn harden_dll_search() {
     }
 }
 
-/// The exe is GUI-subsystem: when started from a console without redirected output, attach to the
-/// parent's console so CLI output shows (Y13). Does nothing when standard output already exists
-/// (a pipe or file) or when there is no parent console (service, Explorer).
+/// What a standard stream of this GUI-subsystem process holds when it starts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StdStream {
+    /// No handle (started from cmd.exe or Explorer without redirection), or one that is not valid
+    /// in this process.
+    Missing,
+    /// A pipe: `| Write-Output`, `Command::output`, a CI runner.
+    Pipe,
+    /// A file: `> out.txt`.
+    File,
+    /// A character device: a console, or `NUL`.
+    Char,
+}
+
+/// Classifies a standard handle by what it is (`GetFileType`).
+pub fn classify_std_handle(handle: HANDLE) -> StdStream {
+    if handle.is_invalid() {
+        return StdStream::Missing;
+    }
+    // SAFETY: plain call; an invalid handle gives FILE_TYPE_UNKNOWN.
+    match unsafe { GetFileType(handle) } {
+        FILE_TYPE_PIPE => StdStream::Pipe,
+        FILE_TYPE_DISK | FILE_TYPE_REMOTE => StdStream::File,
+        FILE_TYPE_CHAR => StdStream::Char,
+        _ => StdStream::Missing,
+    }
+}
+
+/// Only a stream without a usable handle is pointed at the parent's console. An inherited pipe,
+/// file or device is what the caller chose: reopening `CONOUT$` over it would send piped output to
+/// the console and leave the pipe or file empty.
+pub fn uses_parent_console(stream: StdStream) -> bool {
+    stream == StdStream::Missing
+}
+
+/// The exe is GUI-subsystem (Y13). Standard output and error that were handed to it (a pipe, a
+/// file, `NUL`, a console handle) are kept as they are. A stream with no handle, as when started
+/// from cmd.exe without redirection, is pointed at the parent's console (`AttachConsole` +
+/// `CONOUT$`) so CLI output shows there. Without a parent console (Explorer, a service) such a
+/// stream stays empty and writes to it are dropped; they never fail the command.
 pub fn attach_parent_console() {
-    // SAFETY: plain calls with no pointers.
+    let missing: Vec<STD_HANDLE> = [STD_OUTPUT_HANDLE, STD_ERROR_HANDLE]
+        .into_iter()
+        .filter(|&id| {
+            // SAFETY: plain call with no pointers.
+            let handle = unsafe { GetStdHandle(id) }.unwrap_or_default();
+            uses_parent_console(classify_std_handle(handle))
+        })
+        .collect();
+    if missing.is_empty() {
+        return;
+    }
+    // SAFETY: plain calls; the path is a static wide string. The CONOUT$ handle stays open for the
+    // life of the process as its standard output and/or error.
     unsafe {
-        if GetStdHandle(STD_OUTPUT_HANDLE).is_err() {
-            let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+        if AttachConsole(ATTACH_PARENT_PROCESS).is_err() {
+            return;
+        }
+        let Ok(conout) = CreateFileW(
+            w!("CONOUT$"),
+            (GENERIC_READ | GENERIC_WRITE).0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAGS_AND_ATTRIBUTES(0),
+            None,
+        ) else {
+            return;
+        };
+        for id in missing {
+            let _ = SetStdHandle(id, conout);
         }
     }
 }
@@ -387,6 +456,34 @@ mod tests {
         );
         assert_eq!(system_tool("sc.exe"), dir.join("sc.exe"));
         assert!(system_tool("cmd.exe").is_file());
+    }
+
+    #[test]
+    fn only_a_missing_standard_stream_is_pointed_at_the_parent_console() {
+        assert!(uses_parent_console(StdStream::Missing));
+        for kept in [StdStream::Pipe, StdStream::File, StdStream::Char] {
+            assert!(!uses_parent_console(kept), "{kept:?}");
+        }
+    }
+
+    #[test]
+    fn standard_handles_are_classified_by_what_they_are() {
+        use std::os::windows::io::AsRawHandle;
+        let h = |x: &dyn AsRawHandle| HANDLE(x.as_raw_handle());
+        let (reader, writer) = std::io::pipe().unwrap();
+        assert_eq!(classify_std_handle(h(&writer)), StdStream::Pipe);
+        drop(reader);
+        // A pipe whose reader went away is still a pipe: it is kept, and writes to it fail.
+        assert_eq!(classify_std_handle(h(&writer)), StdStream::Pipe);
+        let file = tempfile::tempfile().unwrap();
+        assert_eq!(classify_std_handle(h(&file)), StdStream::File);
+        let nul = std::fs::OpenOptions::new().write(true).open("NUL").unwrap();
+        assert_eq!(classify_std_handle(h(&nul)), StdStream::Char);
+        assert_eq!(classify_std_handle(HANDLE::default()), StdStream::Missing);
+        assert_eq!(
+            classify_std_handle(HANDLE(-1isize as *mut c_void)),
+            StdStream::Missing
+        );
     }
 
     fn whoami(args: &[&str]) -> String {

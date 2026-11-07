@@ -73,7 +73,7 @@ pub fn run_with(args: Vec<OsString>, elevator: &dyn Elevator) -> i32 {
     let cmd = match decode_args(args).and_then(|a| cli::parse(&a)) {
         Ok(cmd) => cmd,
         Err(e) => {
-            eprintln!("오류: {}", e.0);
+            err_line(format_args!("오류: {}", e.0));
             return 2;
         }
     };
@@ -82,15 +82,12 @@ pub fn run_with(args: Vec<OsString>, elevator: &dyn Elevator) -> i32 {
     }
     match cmd {
         Command::Version => {
-            println!(
-                "{}",
-                version::version_line(
-                    version::PRODUCT,
-                    payload::ARCHIVE_SHA256,
-                    payload::KIND,
-                    cfg!(feature = "dev")
-                )
-            );
+            out_line(version::version_line(
+                version::PRODUCT,
+                payload::ARCHIVE_SHA256,
+                payload::KIND,
+                cfg!(feature = "dev"),
+            ));
             0
         }
         Command::VerifyPayload(dir) => verify_payload(&dir),
@@ -119,7 +116,7 @@ pub fn run_with(args: Vec<OsString>, elevator: &dyn Elevator) -> i32 {
             })
         }
         _ => {
-            eprintln!("오류: 아직 지원하지 않는 명령입니다");
+            err_line("오류: 아직 지원하지 않는 명령입니다");
             2
         }
     }
@@ -131,7 +128,7 @@ fn relaunch_elevated(cmd: &Command, elevator: &dyn Elevator) -> i32 {
     let cmd = match cli::with_absolute_paths(cmd, |p| std::path::absolute(p)) {
         Ok(cmd) => cmd,
         Err(e) => {
-            eprintln!("오류: {}", e.0);
+            err_line(format_args!("오류: {}", e.0));
             return 2;
         }
     };
@@ -160,29 +157,52 @@ fn install_done_line(plan: &Plan) -> String {
     format!("설치 완료: http://127.0.0.1:{port}/admin/setup 에서 첫 Admin 계정을 만드세요.")
 }
 
-/// Standard output through `print!` (`Stderr`: `eprint!`), so the test harness captures what a
-/// plan prints like any other `println!`. Every write is a whole `&str` piece of a `writeln!`.
+/// Standard output (`Stderr`: standard error) that never fails and never panics: when the reader
+/// went away (a closed pipe), or there is no handle at all, the text is dropped and the command's
+/// exit code stays what the command decided. `println!` would panic there instead. In unit tests
+/// the text goes through `print!` / `eprint!`, so the test harness captures what a plan prints.
+/// Every write is a whole `&str` piece of a `writeln!`.
 struct Stdout;
 struct Stderr;
 
 impl Write for Stdout {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        print!("{}", String::from_utf8_lossy(buf));
+        if cfg!(test) {
+            print!("{}", String::from_utf8_lossy(buf));
+        } else {
+            let _ = std::io::stdout().write_all(buf);
+        }
         Ok(buf.len())
     }
     fn flush(&mut self) -> std::io::Result<()> {
-        std::io::stdout().flush()
+        let _ = std::io::stdout().flush();
+        Ok(())
     }
 }
 
 impl Write for Stderr {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        eprint!("{}", String::from_utf8_lossy(buf));
+        if cfg!(test) {
+            eprint!("{}", String::from_utf8_lossy(buf));
+        } else {
+            let _ = std::io::stderr().write_all(buf);
+        }
         Ok(buf.len())
     }
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
     }
+}
+
+/// One line to standard output, through [`Stdout`] (never panics).
+fn out_line(line: impl std::fmt::Display) {
+    let _ = writeln!(Stdout, "{line}");
+    let _ = Stdout.flush();
+}
+
+/// One line to standard error, through [`Stderr`] (never panics).
+fn err_line(line: impl std::fmt::Display) {
+    let _ = writeln!(Stderr, "{line}");
 }
 
 /// Writes through to `inner` and keeps a copy, so an `--interactive` run can show its last
@@ -230,7 +250,7 @@ fn run_installer(
     let plan = match built {
         Ok(plan) => plan,
         Err(e) => {
-            eprintln!("오류: {}", e.0);
+            err_line(format_args!("오류: {}", e.0));
             if interactive {
                 elevator.error_box(&format!("오류: {}", e.0));
             }
@@ -248,7 +268,7 @@ fn run_installer(
     let code = run_plan(&plan, &mut ex, &mut out);
     if code == 0 {
         let line = done(&plan);
-        println!("{line}");
+        out_line(&line);
         if interactive {
             elevator.info_box(&line);
         }
@@ -263,18 +283,27 @@ fn run_installer(
 fn verify_payload(dir: &Path) -> i32 {
     if dir.exists() {
         if !dir.is_dir() {
-            eprintln!("오류: {}은(는) 폴더가 아닙니다", dir.display());
+            err_line(format_args!(
+                "오류: {}은(는) 폴더가 아닙니다",
+                dir.display()
+            ));
             return 2;
         }
         match std::fs::read_dir(dir) {
             Ok(mut entries) => {
                 if entries.next().is_some() {
-                    eprintln!("오류: {}이(가) 비어 있지 않습니다", dir.display());
+                    err_line(format_args!(
+                        "오류: {}이(가) 비어 있지 않습니다",
+                        dir.display()
+                    ));
                     return 2;
                 }
             }
             Err(e) => {
-                eprintln!("오류: {} 폴더를 읽을 수 없습니다: {e}", dir.display());
+                err_line(format_args!(
+                    "오류: {} 폴더를 읽을 수 없습니다: {e}",
+                    dir.display()
+                ));
                 return 2;
             }
         }
@@ -287,11 +316,11 @@ fn verify_payload(dir: &Path) -> i32 {
         });
     match result {
         Ok((files, bytes)) => {
-            println!("payload OK: {files} files, {bytes} bytes");
+            out_line(format_args!("payload OK: {files} files, {bytes} bytes"));
             0
         }
         Err(e) => {
-            println!("[실패] verify-payload: {e}");
+            out_line(format_args!("[실패] verify-payload: {e}"));
             1
         }
     }

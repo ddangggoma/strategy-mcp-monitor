@@ -103,10 +103,23 @@ jobs:
         run: cargo build --release --locked
 
       - name: Smoke-run the release exe
+        # The exe is GUI-subsystem. pwsh waits for a GUI exe and reads its output only when the
+        # exe sits inside a pipeline: `$x = & gui.exe` alone starts it in the background, closes
+        # the stdout pipe and leaves $LASTEXITCODE unset. So: a pipe via `| Write-Output`, then a
+        # file via Start-Process -RedirectStandardOutput.
         run: |
-          $out = & .\target\release\mcp-monitor.exe --version
-          Write-Host $out
-          if ($LASTEXITCODE -ne 0) { throw "mcp-monitor --version exited $LASTEXITCODE" }
+          $exe = '.\target\release\mcp-monitor.exe'
+          $pattern = '^mcp-monitor 1\.1\.0 \(payload [0-9a-f]{12}, (fixture|release)\)$'
+          $out = & $exe --version | Write-Output
+          if ($LASTEXITCODE -ne 0) { throw "mcp-monitor --version (pipe) exited $LASTEXITCODE" }
+          Write-Host "pipe: $out"
+          if ("$out" -notmatch $pattern) { throw "unexpected --version output through a pipe: '$out'" }
+          $file = Join-Path $env:RUNNER_TEMP 'mcp-monitor-version.txt'
+          $p = Start-Process -FilePath $exe -ArgumentList '--version' -NoNewWindow -Wait -PassThru -RedirectStandardOutput $file
+          if ($p.ExitCode -ne 0) { throw "mcp-monitor --version (file) exited $($p.ExitCode)" }
+          $text = (Get-Content -Raw -Encoding utf8 $file).TrimEnd()
+          Write-Host "file: $text"
+          if ($text -notmatch $pattern) { throw "unexpected --version output in a file: '$text'" }
 
       - name: cargo audit
         run: |
