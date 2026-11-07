@@ -204,14 +204,15 @@ jobs:
 
       - name: Install cargo-audit 0.22.2
         # Review item 20: a cached cargo-audit.exe (restore-keys may bring an older entry) is used
-        # only when it is exactly 0.22.2.
+        # only when it is exactly 0.22.2. (`cargo audit --version` prints "cargo-audit-audit 0.22.2".)
         run: |
+          $want = '^cargo-audit(-audit)? 0\.22\.2$'
           $have = if (Get-Command cargo-audit -ErrorAction SilentlyContinue) { (cargo audit --version) } else { "" }
-          if ("$have".Trim() -ne "cargo-audit 0.22.2") {
+          if ("$have".Trim() -notmatch $want) {
             cargo install cargo-audit --version 0.22.2 --locked --force
           }
           $have = (cargo audit --version)
-          if ("$have".Trim() -ne "cargo-audit 0.22.2") { throw "cargo audit --version: $have" }
+          if ("$have".Trim() -notmatch $want) { throw "cargo audit --version: $have" }
 
       - name: Install Node 26.13.0
         uses: actions/setup-node@v5.0.0
