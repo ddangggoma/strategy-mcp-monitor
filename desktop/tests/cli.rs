@@ -180,13 +180,31 @@ fn argument_errors_exit_2_in_korean() {
 }
 
 #[test]
-fn modes_of_later_tasks_are_not_supported_yet() {
-    let o = run(&["autostart", "off"]);
+fn autostart_without_an_install_exits_1_and_writes_nothing() {
+    // With an Apps & features entry this would write this user's real `Run` value (Y23: never).
+    let entry = mcp_monitor::install::host::UNINSTALL_KEY;
+    let installed = {
+        use mcp_monitor::install::registry::Registry;
+        mcp_monitor::install::registry::WinRegistry
+            .string(entry, "InstallLocation")
+            .is_some()
+    };
+    if installed {
+        println!("SKIPPED autostart_without_an_install_exits_1_and_writes_nothing: {entry} exists");
+        return;
+    }
+    for on in ["on", "off"] {
+        let o = run(&["autostart", on]);
+        assert_eq!(o.status.code(), Some(1), "{on}");
+        assert!(o.stdout.is_empty(), "{on}");
+        let err = String::from_utf8(o.stderr).unwrap();
+        assert!(
+            err.starts_with("오류: MCP Monitor가 설치되어 있지 않습니다"),
+            "{err:?}"
+        );
+    }
+    let o = run(&["autostart"]);
     assert_eq!(o.status.code(), Some(2));
-    assert_eq!(
-        String::from_utf8(o.stderr).unwrap().trim_end(),
-        "오류: 아직 지원하지 않는 명령입니다"
-    );
 }
 
 #[test]

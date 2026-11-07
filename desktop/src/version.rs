@@ -22,7 +22,18 @@ impl Version {
     }
 }
 
+impl std::fmt::Display for Version {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}.{}", self.0, self.1, self.2)
+    }
+}
+
 pub const PRODUCT: &str = env!("CARGO_PKG_VERSION");
+
+/// [`PRODUCT`] as a [`Version`].
+pub fn product() -> Version {
+    Version::parse(PRODUCT).expect("Cargo.toml's version is digits.digits.digits")
+}
 
 /// `mcp-monitor <product> (payload <first 12 of sha>, <kind>[, dev])`.
 pub fn version_line(product: &str, payload_sha: &str, kind: &str, dev: bool) -> String {
@@ -66,5 +77,9 @@ mod tests {
             "mcp-monitor 1.1.0 (payload 0123456789ab, release, dev)"
         );
         assert_eq!(PRODUCT, "1.1.0");
+        assert_eq!(
+            (product(), product().to_string()),
+            (Version(1, 1, 0), PRODUCT.into())
+        );
     }
 }

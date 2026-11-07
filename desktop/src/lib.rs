@@ -4,6 +4,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 pub mod agent;
+pub mod app;
 pub mod cli;
 pub mod install;
 pub mod payload;
@@ -30,6 +31,12 @@ pub trait Elevator {
     /// no console to print to).
     fn info_box(&self, text: &str);
 }
+
+/// Everything [`run_with`] needs from Windows: elevation and message boxes ([`Elevator`]) and the
+/// window modes' PC access ([`app::Desktop`]).
+pub trait System: Elevator + app::Desktop {}
+
+impl<T: Elevator + app::Desktop> System for T {}
 
 pub struct SystemElevator;
 
@@ -70,7 +77,7 @@ fn decode_args(args: Vec<OsString>) -> Result<Vec<String>, ArgError> {
         .collect()
 }
 
-pub fn run_with(args: Vec<OsString>, elevator: &dyn Elevator) -> i32 {
+pub fn run_with(args: Vec<OsString>, sys: &dyn System) -> i32 {
     let cmd = match decode_args(args).and_then(|a| cli::parse(&a)) {
         Ok(cmd) => cmd,
         Err(e) => {
@@ -78,8 +85,8 @@ pub fn run_with(args: Vec<OsString>, elevator: &dyn Elevator) -> i32 {
             return 2;
         }
     };
-    if cli::needs_relaunch(&cmd, elevator.is_elevated()) && !elevator.parent_is_same_exe() {
-        return relaunch_elevated(&cmd, elevator);
+    if cli::needs_relaunch(&cmd, sys.is_elevated()) && !sys.parent_is_same_exe() {
+        return relaunch_elevated(&cmd, sys);
     }
     match cmd {
         Command::Version => {
@@ -95,14 +102,9 @@ pub fn run_with(args: Vec<OsString>, elevator: &dyn Elevator) -> i32 {
         Command::Install(a) => {
             let host = SystemHost::new();
             let built = install::install_plan::build_install_plan(&a, &host);
-            run_installer(
-                built,
-                a.dry_run,
-                a.interactive,
-                &host,
-                elevator,
-                |plan, _| install_done_line(plan),
-            )
+            run_installer(built, a.dry_run, a.interactive, &host, sys, |plan, _| {
+                install_done_line(plan)
+            })
         }
         Command::Uninstall(a) => {
             let host = SystemHost::new();
@@ -112,7 +114,7 @@ pub fn run_with(args: Vec<OsString>, elevator: &dyn Elevator) -> i32 {
                 a.dry_run,
                 a.interactive,
                 &host,
-                elevator,
+                sys,
                 |plan, reboot| uninstall_done_line(plan, a.remove_data, reboot),
             )
         }
@@ -124,15 +126,14 @@ pub fn run_with(args: Vec<OsString>, elevator: &dyn Elevator) -> i32 {
             } else {
                 "감사 정책을 되돌렸습니다."
             };
-            run_installer(built, a.dry_run, a.interactive, &host, elevator, |_, _| {
+            run_installer(built, a.dry_run, a.interactive, &host, sys, |_, _| {
                 done.to_string()
             })
         }
         Command::Agent(a) => run_agent(&a),
-        _ => {
-            err_line("오류: 아직 지원하지 않는 명령입니다");
-            2
-        }
+        Command::Auto => app::run_auto(sys),
+        Command::App(a) => app::run_app_command(sys, &a),
+        Command::Autostart(on) => run_autostart(sys, on),
     }
 }
 
@@ -155,6 +156,31 @@ fn run_agent(args: &cli::AgentArgs) -> i32 {
     match cfg.dialog {
         cli::Dialog::Print => agent::run_print(&cfg),
         cli::Dialog::Webview => agent::webview::run_webview_agent(cfg),
+    }
+}
+
+/// `autostart on|off`: the current user's `Run` value for the installed copy (the Apps & features
+/// location). Not installed: `오류: …` + 1; a registry failure: `[실패] autostart: …` + 1.
+fn run_autostart(sys: &dyn System, on: bool) -> i32 {
+    let Some(installed) = sys.installed() else {
+        err_line(
+            "오류: MCP Monitor가 설치되어 있지 않습니다(앱 및 기능에 항목이 없습니다). 먼저 mcp-monitor.exe로 설치하세요.",
+        );
+        return 1;
+    };
+    match sys.set_autostart(&installed.install_location, on) {
+        Ok(()) => {
+            out_line(if on {
+                "로그인할 때 MCP Monitor 트레이를 시작합니다."
+            } else {
+                "로그인할 때 MCP Monitor 트레이를 시작하지 않습니다."
+            });
+            0
+        }
+        Err(e) => {
+            out_line(format_args!("[실패] autostart: {e}"));
+            1
+        }
     }
 }
 
@@ -395,17 +421,31 @@ mod tests {
         assert!(!tauri::is_dev());
     }
 
+    use crate::install::host::Installed;
     use std::cell::RefCell;
     use std::os::windows::ffi::OsStringExt;
     use std::path::{Path, PathBuf};
 
-    /// Records what `run_with` asks for; never shows a UAC prompt or a message box.
+    /// Records what `run_with` asks for; never shows a UAC prompt, a message box or a window,
+    /// never starts a process and never writes the registry.
     struct FakeElevator {
         elevated: bool,
         parent_is_same_exe: bool,
         answer: Result<i32, String>,
+        exe: PathBuf,
+        /// The Apps & features entry; after an elevated run that returned 0 it becomes `installs_to`.
+        installed: RefCell<Option<Installed>>,
+        installs_to: Option<Installed>,
+        service: bool,
+        bin_path: Option<String>,
+        yes: bool,
+        autostart_fails: bool,
         launched: RefCell<Vec<(PathBuf, Vec<String>)>>,
         boxes: RefCell<Vec<String>>,
+        asked: RefCell<Vec<String>>,
+        started: RefCell<Vec<PathBuf>>,
+        windows: RefCell<Vec<(app::AppTarget, bool)>>,
+        autostart: RefCell<Vec<(PathBuf, bool)>>,
     }
 
     impl FakeElevator {
@@ -414,8 +454,19 @@ mod tests {
                 elevated,
                 parent_is_same_exe: false,
                 answer,
+                exe: PathBuf::from(r"C:\Users\u\Downloads\mcp-monitor-1.1.0.exe"),
+                installed: RefCell::new(None),
+                installs_to: None,
+                service: false,
+                bin_path: None,
+                yes: false,
+                autostart_fails: false,
                 launched: RefCell::new(Vec::new()),
                 boxes: RefCell::new(Vec::new()),
+                asked: RefCell::new(Vec::new()),
+                started: RefCell::new(Vec::new()),
+                windows: RefCell::new(Vec::new()),
+                autostart: RefCell::new(Vec::new()),
             }
         }
     }
@@ -428,12 +479,15 @@ mod tests {
             self.parent_is_same_exe
         }
         fn current_exe(&self) -> std::io::Result<PathBuf> {
-            Ok(PathBuf::from(r"C:\Users\u\Downloads\mcp-monitor-1.1.0.exe"))
+            Ok(self.exe.clone())
         }
         fn elevate_and_wait(&self, exe: &Path, args: &[String]) -> Result<i32, String> {
             self.launched
                 .borrow_mut()
                 .push((exe.to_path_buf(), args.to_vec()));
+            if self.answer == Ok(0) && self.installs_to.is_some() {
+                *self.installed.borrow_mut() = self.installs_to.clone();
+            }
             self.answer.clone()
         }
         fn error_box(&self, text: &str) {
@@ -444,15 +498,54 @@ mod tests {
         }
     }
 
+    impl app::Desktop for FakeElevator {
+        fn installed(&self) -> Option<Installed> {
+            self.installed.borrow().clone()
+        }
+        fn service_exists(&self) -> bool {
+            self.service
+        }
+        fn service_bin_path(&self) -> Option<String> {
+            self.bin_path.clone()
+        }
+        fn env_folder(&self, name: &str) -> Option<PathBuf> {
+            match name {
+                "ProgramFiles" => Some(PathBuf::from(r"C:\Program Files")),
+                "ProgramData" => Some(PathBuf::from(r"C:\ProgramData")),
+                _ => None,
+            }
+        }
+        fn ask_yes_no(&self, text: &str) -> bool {
+            self.asked.borrow_mut().push(text.to_string());
+            self.yes
+        }
+        fn start_app(&self, exe: &Path) -> Result<(), String> {
+            self.started.borrow_mut().push(exe.to_path_buf());
+            Ok(())
+        }
+        fn open_window(&self, target: app::AppTarget, background: bool) -> i32 {
+            self.windows.borrow_mut().push((target, background));
+            0
+        }
+        fn set_autostart(&self, install_dir: &Path, on: bool) -> Result<(), String> {
+            if self.autostart_fails {
+                return Err("접근이 거부되었습니다.".into());
+            }
+            self.autostart
+                .borrow_mut()
+                .push((install_dir.to_path_buf(), on));
+            Ok(())
+        }
+    }
+
     fn args(v: &[&str]) -> Vec<OsString> {
         v.iter().map(OsString::from).collect()
     }
 
     #[test]
-    fn version_flag_exits_0_and_unsupported_or_bad_commands_exit_2() {
+    fn version_flag_exits_0_and_bad_commands_exit_2() {
         let f = FakeElevator::new(false, Ok(0));
         assert_eq!(run_with(args(&["--version"]), &f), 0);
-        assert_eq!(run_with(args(&[]), &f), 2);
         assert_eq!(run_with(args(&["uninstall", "--bogus"]), &f), 2);
         assert_eq!(run_with(args(&["--version", "extra"]), &f), 2);
         assert_eq!(run_with(args(&["install", "--bogus"]), &f), 2);
@@ -781,5 +874,246 @@ mod tests {
             0
         );
         assert!(empty.join("payload/bundle.json").is_file());
+    }
+
+    /// An install folder with `install.json` (local port 9700) and, when `exe`, `mcp-monitor.exe`.
+    fn install_folder(exe: bool) -> tempfile::TempDir {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(
+            d.path().join("install.json"),
+            r#"{"version":"1.1.0","local_port":9700,"external_port":9701,"data_root":"D:\\MCP"}"#,
+        )
+        .unwrap();
+        if exe {
+            std::fs::write(d.path().join("mcp-monitor.exe"), "x").unwrap();
+        }
+        d
+    }
+
+    fn entry(version: &str, dir: &Path) -> Installed {
+        Installed {
+            version: version.into(),
+            install_location: dir.to_path_buf(),
+        }
+    }
+
+    fn strings(v: &[&str]) -> Vec<String> {
+        v.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn auto_on_a_new_pc_asks_to_install_and_no_ends_it() {
+        let f = FakeElevator::new(false, Ok(0));
+        assert_eq!(run_with(args(&[]), &f), 0);
+        assert_eq!(
+            *f.asked.borrow(),
+            [app::install_prompt(
+                Some(Path::new(r"C:\Program Files\MCP Monitor")),
+                Some(Path::new(r"C:\ProgramData\MCP Monitor"))
+            )]
+        );
+        assert!(f.launched.borrow().is_empty() && f.windows.borrow().is_empty());
+        assert!(f.started.borrow().is_empty() && f.boxes.borrow().is_empty());
+    }
+
+    #[test]
+    fn auto_installs_elevated_then_starts_the_installed_copy() {
+        let dir = install_folder(true);
+        let mut f = FakeElevator::new(false, Ok(0));
+        f.yes = true;
+        f.installs_to = Some(entry("1.1.0", dir.path()));
+        assert_eq!(run_with(args(&[]), &f), 0);
+        assert_eq!(
+            *f.launched.borrow(),
+            [(f.exe.clone(), strings(&["install", "--interactive"]))]
+        );
+        // F27: the download does not stay open as the tray; the installed exe does.
+        assert_eq!(*f.started.borrow(), [dir.path().join("mcp-monitor.exe")]);
+        assert!(f.windows.borrow().is_empty() && f.boxes.borrow().is_empty());
+    }
+
+    #[test]
+    fn auto_opens_the_window_itself_when_the_installed_exe_is_not_there() {
+        let dir = install_folder(false);
+        let mut f = FakeElevator::new(false, Ok(0));
+        f.yes = true;
+        f.installs_to = Some(entry("1.1.0", dir.path()));
+        assert_eq!(run_with(args(&[]), &f), 0);
+        assert!(f.started.borrow().is_empty());
+        let windows = f.windows.borrow();
+        assert_eq!(windows.len(), 1);
+        assert_eq!((windows[0].0.info.local_port, windows[0].1), (9700, false));
+    }
+
+    #[test]
+    fn auto_stops_when_the_installer_fails_or_uac_is_refused() {
+        for (answer, code, boxes) in [
+            (Ok(1), 1, 0),
+            (Err(winutil::ELEVATION_CANCELLED.to_string()), 0, 0),
+            (
+                Err("관리자 권한으로 다시 실행하지 못했습니다: x".to_string()),
+                1,
+                1,
+            ),
+        ] {
+            let mut f = FakeElevator::new(false, answer.clone());
+            f.yes = true;
+            assert_eq!(run_with(args(&[]), &f), code, "{answer:?}");
+            assert_eq!(f.launched.borrow().len(), 1);
+            assert_eq!(f.boxes.borrow().len(), boxes, "{answer:?}");
+            assert!(f.windows.borrow().is_empty() && f.started.borrow().is_empty());
+        }
+    }
+
+    #[test]
+    fn auto_upgrades_an_older_install_in_its_own_folder() {
+        let dir = install_folder(true);
+        let mut f = FakeElevator::new(false, Ok(0));
+        *f.installed.borrow_mut() = Some(entry("1.0.0", dir.path()));
+        f.service = true;
+        f.yes = true;
+        f.installs_to = Some(entry("1.1.0", dir.path()));
+        assert_eq!(run_with(args(&[]), &f), 0);
+        assert_eq!(
+            *f.asked.borrow(),
+            [app::upgrade_prompt(
+                Some(version::Version(1, 0, 0)),
+                version::product()
+            )]
+        );
+        let shown = dir.path().display().to_string();
+        assert_eq!(
+            f.launched.borrow()[0].1,
+            strings(&["install", "--install-dir", &shown, "--interactive"])
+        );
+        assert_eq!(*f.started.borrow(), [dir.path().join("mcp-monitor.exe")]);
+    }
+
+    #[test]
+    fn auto_upgrades_a_powershell_install_found_through_its_service() {
+        // 1.0.0: no Apps & features entry, the version in bundle.json, the folder in the binPath.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("bundle.json"), r#"{"version":"1.0.0"}"#).unwrap();
+        let mut f = FakeElevator::new(false, Ok(0));
+        f.service = true;
+        f.bin_path = Some(format!(
+            r#""{}\bin\monitor\mcp-monitor.exe" service --root "D:\MCP""#,
+            dir.path().display()
+        ));
+        assert_eq!(run_with(args(&[]), &f), 0, "no: nothing happens");
+        assert!(f.asked.borrow()[0].starts_with("설치된 MCP Monitor 1.0.0을(를) "));
+        assert!(f.launched.borrow().is_empty());
+        f.yes = true;
+        run_with(args(&[]), &f);
+        let shown = dir.path().display().to_string();
+        assert_eq!(
+            f.launched.borrow()[0].1,
+            strings(&["install", "--install-dir", &shown, "--interactive"])
+        );
+    }
+
+    #[test]
+    fn auto_with_the_same_version_opens_the_installed_window_without_asking() {
+        let dir = install_folder(true);
+        let mut f = FakeElevator::new(false, Ok(0));
+        *f.installed.borrow_mut() = Some(entry("1.1.0", dir.path()));
+        f.service = true;
+        // from a download: the installed copy is started
+        assert_eq!(run_with(args(&[]), &f), 0);
+        assert_eq!(*f.started.borrow(), [dir.path().join("mcp-monitor.exe")]);
+        // the installed copy itself (the Start menu shortcut): its own window
+        f.exe = dir.path().join("MCP-MONITOR.EXE");
+        f.started.borrow_mut().clear();
+        assert_eq!(run_with(args(&[]), &f), 0);
+        assert!(f.started.borrow().is_empty());
+        assert_eq!(f.windows.borrow().len(), 1);
+        assert!(f.asked.borrow().is_empty() && f.launched.borrow().is_empty());
+    }
+
+    #[test]
+    fn auto_refuses_to_downgrade_and_opens_the_newer_install() {
+        let dir = install_folder(true);
+        let mut f = FakeElevator::new(false, Ok(0));
+        *f.installed.borrow_mut() = Some(entry("9.0.0", dir.path()));
+        f.service = true;
+        assert_eq!(run_with(args(&[]), &f), 0);
+        assert_eq!(
+            *f.boxes.borrow(),
+            [format!(
+                "info: {}",
+                app::older_notice(version::Version(9, 0, 0), version::product())
+            )]
+        );
+        assert!(f.launched.borrow().is_empty() && f.asked.borrow().is_empty());
+        assert_eq!(*f.started.borrow(), [dir.path().join("mcp-monitor.exe")]);
+    }
+
+    #[test]
+    fn auto_offers_a_repair_install_when_the_service_is_gone() {
+        let dir = install_folder(true);
+        let f = FakeElevator::new(false, Ok(0));
+        *f.installed.borrow_mut() = Some(entry("1.1.0", dir.path()));
+        assert_eq!(run_with(args(&[]), &f), 0);
+        assert_eq!(
+            *f.asked.borrow(),
+            [app::install_prompt(
+                Some(dir.path()),
+                Some(Path::new(r"D:\MCP"))
+            )]
+        );
+    }
+
+    #[test]
+    fn app_opens_the_installed_servers_window_or_says_it_is_not_installed() {
+        let f = FakeElevator::new(false, Ok(0));
+        assert_eq!(run_with(args(&["app"]), &f), 1);
+        assert_eq!(*f.boxes.borrow(), [app::NOT_INSTALLED]);
+        assert!(f.windows.borrow().is_empty());
+
+        let dir = install_folder(true);
+        let f = FakeElevator::new(false, Ok(0));
+        *f.installed.borrow_mut() = Some(entry("1.1.0", dir.path()));
+        assert_eq!(run_with(args(&["app", "--background"]), &f), 0);
+        {
+            let windows = f.windows.borrow();
+            assert_eq!(
+                (
+                    windows[0].0.info.local_port,
+                    windows[0].0.install_dir.as_deref(),
+                    windows[0].1
+                ),
+                (9700, Some(dir.path()), true)
+            );
+        }
+        assert!(f.started.borrow().is_empty() && f.launched.borrow().is_empty());
+
+        // no Apps & features entry: the exe's own folder when it holds install.json
+        let mut f = FakeElevator::new(false, Ok(0));
+        f.exe = dir.path().join("mcp-monitor.exe");
+        assert_eq!(run_with(args(&["app"]), &f), 0);
+        assert_eq!(f.windows.borrow()[0].0.info.local_port, 9700);
+    }
+
+    #[test]
+    fn autostart_writes_the_run_value_of_the_installed_copy_only() {
+        let f = FakeElevator::new(false, Ok(0));
+        assert_eq!(run_with(args(&["autostart", "on"]), &f), 1);
+        assert!(f.autostart.borrow().is_empty());
+
+        let dir = Path::new(r"C:\Program Files\MCP Monitor");
+        let f = FakeElevator::new(false, Ok(0));
+        *f.installed.borrow_mut() = Some(entry("1.1.0", dir));
+        assert_eq!(run_with(args(&["autostart", "on"]), &f), 0);
+        assert_eq!(run_with(args(&["autostart", "off"]), &f), 0);
+        assert_eq!(
+            *f.autostart.borrow(),
+            [(dir.to_path_buf(), true), (dir.to_path_buf(), false)]
+        );
+        assert!(f.launched.borrow().is_empty());
+
+        let mut f = FakeElevator::new(false, Ok(0));
+        *f.installed.borrow_mut() = Some(entry("1.1.0", dir));
+        f.autostart_fails = true;
+        assert_eq!(run_with(args(&["autostart", "off"]), &f), 1);
     }
 }

@@ -321,10 +321,36 @@ pub fn same_exe_parent() -> Option<u32> {
         .then_some(parent)
 }
 
+/// What [`elevate_and_wait`] answers when the user said no to the UAC prompt.
+pub const ELEVATION_CANCELLED: &str = "관리자 권한 요청이 취소되었습니다.";
+
+/// The default browser on an `http(s)` address (`ShellExecuteW("open")`). Callers pass only
+/// addresses they have classified as web pages: any other text would be run as a program.
+pub fn open_in_browser(url: &str) -> Result<(), String> {
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    // SAFETY: plain call with valid, NUL-terminated strings.
+    let r = unsafe {
+        ShellExecuteW(
+            None,
+            w!("open"),
+            &HSTRING::from(url),
+            None,
+            None,
+            SW_SHOWNORMAL,
+        )
+    };
+    // Success is a value above 32.
+    if r.0 as usize > 32 {
+        Ok(())
+    } else {
+        Err(format!("ShellExecuteW failed ({})", r.0 as usize))
+    }
+}
+
 /// Turns a `ShellExecuteExW` failure into the Korean message the user sees.
 fn elevation_error(e: &windows::core::Error) -> String {
     if e.code() == ERROR_CANCELLED.to_hresult() {
-        "관리자 권한 요청이 취소되었습니다.".to_string()
+        ELEVATION_CANCELLED.to_string()
     } else {
         format!("관리자 권한으로 다시 실행하지 못했습니다: {}", e.message())
     }

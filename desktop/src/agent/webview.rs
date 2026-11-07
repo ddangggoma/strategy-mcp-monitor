@@ -168,28 +168,9 @@ pub fn local_app_data() -> Option<PathBuf> {
 }
 
 /// The default browser on `url` (the fallback when no WebView2 window can be made — the notice
-/// must be shown, Python V25).
+/// must be shown, Python V25). `url` passed [`notice_navigation_allowed`] or came from the server.
 fn open_in_browser(url: &str) -> Result<(), String> {
-    use windows::Win32::UI::Shell::ShellExecuteW;
-    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-    use windows::core::{HSTRING, w};
-    // SAFETY: plain call with valid, NUL-terminated strings.
-    let r = unsafe {
-        ShellExecuteW(
-            None,
-            w!("open"),
-            &HSTRING::from(url),
-            None,
-            None,
-            SW_SHOWNORMAL,
-        )
-    };
-    // Success is a value above 32.
-    if r.0 as usize > 32 {
-        Ok(())
-    } else {
-        Err(format!("ShellExecuteW failed ({})", r.0 as usize))
-    }
+    crate::winutil::open_in_browser(url)
 }
 
 struct Shown {
@@ -591,7 +572,7 @@ pub fn run_webview_agent(cfg: AgentConfig) -> i32 {
                     })?;
                 Ok(())
             })
-            .build(tauri::generate_context!())
+            .build(crate::app::context())
     };
     let app = match built {
         Ok(app) => app,

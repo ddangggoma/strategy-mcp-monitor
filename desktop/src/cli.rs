@@ -258,6 +258,13 @@ pub fn parse(args: &[String]) -> Result<Command, ArgError> {
                 APP_OPTIONS
             };
             let o = Opts::parse(first, rest, spec)?;
+            if let Some(url) = o.value("--server-url")
+                && crate::app::server_url_port(url).is_none()
+            {
+                return Err(err(format!(
+                    "--server-url은 http://127.0.0.1:<포트> 주소여야 합니다: {url}"
+                )));
+            }
             Ok(Command::App(AppArgs {
                 background: o.flag("--background"),
                 server_url: o.value("--server-url").map(str::to_string),
@@ -711,6 +718,11 @@ mod tests {
             );
         } else {
             assert!(parsed.unwrap_err().0.contains("--server-url"));
+        }
+        if cfg!(feature = "dev") {
+            // the window accepts only the local channel's origin
+            let e = parse(&s(&["app", "--server-url", "http://localhost:1"])).unwrap_err();
+            assert!(e.0.starts_with("--server-url은 "), "{e:?}");
         }
     }
 

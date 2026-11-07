@@ -85,7 +85,7 @@ impl SystemHost {
 }
 
 /// A service-control handle that is closed when dropped.
-struct Sc(SC_HANDLE);
+pub(crate) struct Sc(pub(crate) SC_HANDLE);
 
 impl Drop for Sc {
     fn drop(&mut self) {
@@ -95,7 +95,7 @@ impl Drop for Sc {
 }
 
 /// Opens [`SERVICE_NAME`] with `access` (`None`: no such service, or no right to open it).
-fn open_service(access: u32) -> Option<Sc> {
+pub(crate) fn open_service(access: u32) -> Option<Sc> {
     // SAFETY: null machine and database names mean this PC's active database.
     let manager =
         Sc(unsafe { OpenSCManagerW(PCWSTR::null(), PCWSTR::null(), SC_MANAGER_CONNECT) }.ok()?);

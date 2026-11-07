@@ -92,6 +92,12 @@ jobs:
           MCPMON_TESTS_ALLOW_ELEVATED: "1"
         run: cargo test --locked --test agent_webview -- --ignored --test-threads=1
 
+      - name: WebView2 app window (real windows on the runner desktop, dev build)
+        # One at a time: the app is a single instance per session (Plan 6 Task 12).
+        env:
+          MCPMON_TESTS_ALLOW_ELEVATED: "1"
+        run: cargo test --locked --features dev --test app_window -- --ignored --test-threads=1
+
       - name: cargo build (the agent exe for the server integration tests)
         run: cargo build --locked
 
