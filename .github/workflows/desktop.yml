@@ -3,8 +3,19 @@
 # so the Rust test loop runs here instead (Plan 6, 2026-11-07). The server's agent integration
 # tests run here too, with both agents (the Rust one needs the exe built here, Task 11).
 # The release job runs install\build-desktop.ps1 end to end with the real payload and uploads the
-# release mcp-monitor.exe (Task 13). Server or web changes alone do not trigger it: run it by hand
-# (workflow_dispatch) when a release needs the latest payload.
+# release mcp-monitor.exe (Task 13). Since the review fix wave, server, web, agent and install changes
+# trigger it too (path filter below); a change outside the filter needs a run by hand
+# (workflow_dispatch) before a release.
+# The test job also runs the tests that need a standard token as a throw-away local standard user
+# (.github/scripts/standard-user-tests.ps1, review I1): on the elevated runner they would only skip.
+#
+# Path filter (Plan 6 review I2): every input the Rust tests, the [desktop] server tests and the release
+# payload read. The Rust tests read docs/ops/OPERATIONS.md (every CLI option documented) and
+# server/tests/fixtures/agent-events.json (event parity); the server's agent integration tests run the
+# whole server app (agent_api.py proof header, bundle.py / __main__.py / collect/cli.py agent command,
+# winsvc description parity) against both agents (agent/** is the Python one); the release job builds the
+# payload from server/, web/ and install/. A change elsewhere (other docs, dummy-mcps, the PLAN) does not
+# run this workflow; the lists are kept the same for push and pull_request.
 name: desktop
 
 on:
@@ -13,26 +24,40 @@ on:
     paths:
       - "desktop/**"
       - ".github/workflows/desktop.yml"
-      - "server/app/activity/**"
+      - ".github/scripts/**"
+      - "docs/ops/OPERATIONS.md"
+      - "server/app/**"
+      - "server/pyproject.toml"
+      - "server/uv.lock"
+      - "server/tests/conftest.py"
+      - "server/tests/live.py"
+      - "server/tests/fixtures/agent-events.json"
       - "server/tests/test_integration_agent.py"
       - "server/tests/desktop_bundle_main.py"
       - "server/tests/test_desktop_build.py"
       - "server/tests/test_desktop_exe.py"
-      - "install/build.ps1"
-      - "install/build-desktop.ps1"
-      - "install/pyinstaller/**"
+      - "agent/**"
+      - "install/**"
+      - "web/**"
   pull_request:
     paths:
       - "desktop/**"
       - ".github/workflows/desktop.yml"
-      - "server/app/activity/**"
+      - ".github/scripts/**"
+      - "docs/ops/OPERATIONS.md"
+      - "server/app/**"
+      - "server/pyproject.toml"
+      - "server/uv.lock"
+      - "server/tests/conftest.py"
+      - "server/tests/live.py"
+      - "server/tests/fixtures/agent-events.json"
       - "server/tests/test_integration_agent.py"
       - "server/tests/desktop_bundle_main.py"
       - "server/tests/test_desktop_build.py"
       - "server/tests/test_desktop_exe.py"
-      - "install/build.ps1"
-      - "install/build-desktop.ps1"
-      - "install/pyinstaller/**"
+      - "agent/**"
+      - "install/**"
+      - "web/**"
   workflow_dispatch:
 
 permissions:
@@ -113,6 +138,18 @@ jobs:
 
       - name: cargo build (the agent exe for the server integration tests)
         run: cargo build --locked
+
+      - name: Standard-user tests (non-admin guarantees, review I1)
+        # The runner user is an elevated administrator: every test that proves "without admin rights:
+        # exit 1, nothing changed" printed SKIPPED above. Here they run again as a throw-away local
+        # account in Users only (random password, masked; deleted at the end), from the default-feature
+        # test binaries and target\debug\mcp-monitor.exe just built. The step fails when one of them is
+        # missing, fails, is not reported ok, or anything prints SKIPPED, or when the account's token is
+        # elevated. Windows PowerShell 5.1 (Start-Process -Credential, ADSI).
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          & ..\.github\scripts\standard-user-tests.ps1
 
       - name: Install uv 0.13.7
         run: python -m pip install --disable-pip-version-check "uv==0.13.7"
