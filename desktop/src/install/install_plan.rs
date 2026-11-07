@@ -1,6 +1,7 @@
-//! `install [--dry-run]`: the install and upgrade plan (Plan 5's `install.ps1` with the same steps
-//! and arguments where the action is the same, Y17), built from the arguments, what this PC says
-//! ([`Host`]) and the files of an earlier install. Nothing here changes anything.
+//! `install [--dry-run]`: the install and upgrade plan (Plan 5's PowerShell install script with
+//! the same steps and arguments where the action is the same, Y17), built from the arguments,
+//! what this PC says ([`Host`]) and the files of an earlier install. Nothing here changes
+//! anything.
 
 use crate::cli::{ArgError, InstallArgs};
 use crate::install::acl::{
@@ -52,7 +53,7 @@ pub(crate) fn default_data_root(h: &dyn Host) -> Result<String, ArgError> {
     env_folder(h, "--data-root", "ProgramData")
 }
 
-/// The data root checks of `install.ps1` and `audit-policy.ps1 -Enable` (C1, I3): not an unsafe
+/// The data root checks of `install` and `audit-policy --enable` (C1, I3): not an unsafe
 /// root; empty, missing or an earlier data root owned by [`owners`] with nothing others may change;
 /// no folder above it others may swap. Without admin rights an admin-only data root cannot be
 /// looked into: that is a note (`what` names what could not be read), not an error; the
@@ -223,7 +224,7 @@ fn lossy(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
 
-/// `install.ps1`'s plan with the desktop steps (Y15–Y19). Folders (Y15, F13): `I` = `--install-dir`
+/// Plan 5's install plan with the desktop steps (Y15–Y19). Folders (Y15, F13): `I` = `--install-dir`
 /// → the Apps & features entry → the service's binPath → `%ProgramFiles%\MCP Monitor`; `D` =
 /// `--data-root` → `<I>\install.json` → the service's binPath → `%ProgramData%\MCP Monitor`. Ports:
 /// arguments → `install.json` → `install-state.json` → binPath → 8700/8701. The firewall rule stays

@@ -1,6 +1,6 @@
-//! `uninstall [--dry-run]`: the uninstall plan (Plan 5's `uninstall.ps1` with the desktop steps,
-//! Y19–Y21). Data stays unless `--remove-data`, and then only a data root with our marker.
-//! Nothing here changes anything.
+//! `uninstall [--dry-run]`: the uninstall plan (Plan 5's PowerShell uninstall script with the
+//! desktop steps, Y19–Y21). Data stays unless `--remove-data`, and then only a data root with
+//! our marker. Nothing here changes anything.
 
 use crate::cli::{ArgError, UninstallArgs};
 use crate::install::acl::data_root_readable;
@@ -27,7 +27,7 @@ fn text(v: Option<&Value>, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// `uninstall.ps1`'s plan with the desktop steps. Folders (F13 b): `D0` = `--data-root` or
+/// Plan 5's uninstall plan with the desktop steps. Folders (F13 b): `D0` = `--data-root` or
 /// `%ProgramData%\MCP Monitor`; `I` = `--install-dir` → the Apps & features entry →
 /// `<D0>\data\install-state.json`'s `install_dir` → the service's binPath →
 /// `%ProgramFiles%\MCP Monitor`; `D` = `--data-root` → `<I>\install.json`'s `data_root` → the

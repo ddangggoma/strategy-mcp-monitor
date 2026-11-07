@@ -1,6 +1,6 @@
-//! What `uninstall` removes and the guards around it (Plan 5's `uninstall.ps1` `(remove)` and its
-//! conditions, Y20, Y21). A link (junction or symbolic link) is never followed: only the link
-//! itself is removed.
+//! What `uninstall` removes and the guards around it (the `(remove)` step of Plan 5's PowerShell
+//! uninstall script and its conditions, Y20, Y21). A link (junction or symbolic link) is never
+//! followed: only the link itself is removed.
 
 use crate::install::paths::{
     Env, Volumes, attributes, data_root_marker, is_directory, is_inside, is_reparse, same_path,

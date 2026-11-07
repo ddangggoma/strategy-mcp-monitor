@@ -1,5 +1,5 @@
-//! Installer building blocks: the path and ACL guards ported from Plan 5's `install.ps1`,
-//! `uninstall.ps1` and `audit-policy.ps1` with the same rules (Y18, Task 5), and the
+//! Installer building blocks: the path and ACL guards ported from Plan 5's PowerShell
+//! install, uninstall and audit-policy scripts with the same rules (Y18, Task 5), and the
 //! "plan (step list) → run" path of the installer modes (Task 6+).
 
 pub mod acl;

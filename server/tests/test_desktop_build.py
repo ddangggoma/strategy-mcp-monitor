@@ -2,6 +2,7 @@
 and the checks build-desktop.ps1 makes before it builds anything (ruling F03: the cargo invocations are read from
 the parsed script, not counted as substrings, so comments and progress lines do not matter)."""
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -65,3 +66,12 @@ def test_a_release_build_refuses_the_fixture_payload(tmp_path):
     p = build_desktop("-SkipPayload", "-SkipAudit", "-Payload", str(payload))
     assert p.returncode != 0 and "is a development (fixture) payload" in p.stdout + p.stderr, p.stdout + p.stderr
     assert "==> cargo" not in p.stdout
+
+
+def test_powershell_installer_is_retired():
+    for name in ("install.ps1", "uninstall.ps1", "audit-policy.ps1", "LAYOUT", "pyinstaller/mcp-agent.spec", "pyinstaller/entry_agent.py"):
+        assert not (INSTALL / name).exists(), name
+    assert not (REPO / "server" / "tests" / "test_install_scripts.py").exists()
+    for script in ("build.ps1", "build-desktop.ps1"):
+        text = (INSTALL / script).read_text("utf-8-sig")
+        assert not re.search(r"install\.ps1|uninstall\.ps1|audit-policy\.ps1|mcp-agent|LAYOUT", text), script

@@ -1,5 +1,6 @@
-//! `audit-policy --enable | --restore <file>` (Plan 5's `audit-policy.ps1`) and the audit steps
-//! `install` shares with it: the same subcategory GUIDs, registry values and log sizes.
+//! `audit-policy --enable | --restore <file>` (Plan 5's PowerShell audit-policy script) and the
+//! audit steps `install` shares with it: the same subcategory GUIDs, registry values and log
+//! sizes.
 
 use crate::cli::{ArgError, AuditArgs};
 use crate::install::host::Host;
@@ -51,7 +52,7 @@ pub fn backup_path(data_root: &str) -> String {
     format!(r"{data_root}\data\auditpol-backup.csv")
 }
 
-/// The audit steps of `install.ps1` and `audit-policy.ps1 -Enable`, in [`AUDIT_STEPS`] order.
+/// The audit steps of `install` and `audit-policy --enable`, in [`AUDIT_STEPS`] order.
 pub fn audit_steps(data_root: &str) -> Vec<Step> {
     let reg_add = |key: &str, name: &str| {
         strings(&["add", key, "/v", name, "/t", "REG_DWORD", "/d", "1", "/f"])
@@ -141,7 +142,7 @@ pub(crate) fn recorded_registry_entries(d: &Path) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// `audit-policy.ps1`'s plan. `--enable`: the data root as `install` makes it, the registry values
+/// The `audit-policy` plan. `--enable`: the data root as `install` makes it, the registry values
 /// recorded once before anything changes, then [`AUDIT_STEPS`]. `--restore <f>`: `auditpol /restore`
 /// and the registry values recorded by install (`install-state.json`) or by an earlier `--enable`
 /// (`audit-policy-state.json`).
@@ -630,6 +631,86 @@ mod tests {
         )
         .unwrap_err();
         assert!(e.0.starts_with("--restore"), "{}", e.0);
+    }
+
+    /// Plan 5's `test_install_refuses_a_data_root_below_a_folder_others_may_rename`,
+    /// `test_existing_data_root_others_may_delete_or_rechmod_is_refused` and
+    /// `test_existing_data_root_with_harmless_extra_rights_is_accepted` ran both dry runs: the
+    /// rules are tested in `acl`; here `install` and `audit-policy --enable` apply them alike, as a
+    /// `--data-root` error that names the folder and the SID, and accept what does no harm.
+    #[test]
+    fn install_and_audit_policy_refuse_a_data_root_others_may_change_alike() {
+        use crate::install::acl::{AUTHENTICATED_USERS, EVERYONE};
+        let plans = |s: &Scratch, d: &Path| {
+            [
+                build_install_plan(
+                    &InstallArgs {
+                        install_dir: Some(s.path().join("i")),
+                        data_root: Some(d.to_path_buf()),
+                        ..Default::default()
+                    },
+                    &FakeHost::new(),
+                ),
+                build_audit_plan(
+                    &AuditArgs {
+                        enable: true,
+                        data_root: Some(d.to_path_buf()),
+                        ..Default::default()
+                    },
+                    &FakeHost::new(),
+                ),
+            ]
+        };
+        // A folder above the data root others may rename; inherit-only rights do not count.
+        let s = Scratch::new();
+        let apps = s.path().join("apps");
+        fs::create_dir(&apps).unwrap();
+        let root = apps.join("MCP Monitor");
+        grant(&apps, "(OI)(CI)M");
+        for p in plans(&s, &root) {
+            let e = p.unwrap_err().0;
+            assert!(
+                e.starts_with("--data-root")
+                    && e.contains(&apps.display().to_string())
+                    && e.contains(AUTHENTICATED_USERS),
+                "{e}"
+            );
+        }
+        icacls(&apps, &["/remove:g", &format!("*{AUTHENTICATED_USERS}")]);
+        grant(&apps, "(OI)(CI)(IO)M");
+        for p in plans(&s, &root) {
+            assert_eq!(
+                step(&p.unwrap(), "secure_data_root").args,
+                [root.display().to_string()]
+            );
+        }
+        // An existing data root others may re-permission: refused, with the advice to delete it.
+        let s = Scratch::new();
+        let root = s.path().join("MCP Monitor");
+        fs::create_dir_all(root.join("data")).unwrap();
+        fs::write(root.join("data/mcp-monitor-data-root.json"), "{}").unwrap();
+        grant(&root, "(WDAC)");
+        for p in plans(&s, &root) {
+            let e = p.unwrap_err().0;
+            assert!(
+                e.starts_with("--data-root")
+                    && e.contains(AUTHENTICATED_USERS)
+                    && e.contains("지우고"),
+                "{e}"
+            );
+        }
+        // Read and execute for others, and inherit-only rights, take nothing over.
+        let s = Scratch::new();
+        let root = s.path().join("MCP Monitor");
+        fs::create_dir(&root).unwrap();
+        grant(&root, "(OI)(CI)RX");
+        icacls(&root, &["/grant", &format!("*{EVERYONE}:(OI)(CI)(IO)RX")]);
+        for p in plans(&s, &root) {
+            assert_eq!(
+                step(&p.unwrap(), "secure_data_root").args,
+                [root.display().to_string()]
+            );
+        }
     }
 
     #[test]
