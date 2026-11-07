@@ -1046,8 +1046,11 @@ mod tests {
         icacls(&log, &["/remove", &format!("*{EVERYONE}")]);
         for item in walk_all(&root) {
             let d = sddl(&item);
+            // The owner by SID: SDDL writes some accounts as aliases (the CI runner's built-in
+            // Administrator is `LA`).
+            let owner = read_security(&item).unwrap().owner;
             assert!(
-                !d.contains("WD)") && d.starts_with(&format!("O:{me}")),
+                !d.contains("WD)") && owner.eq_ignore_ascii_case(&me),
                 "{item:?} {d}"
             );
         }
@@ -1080,8 +1083,9 @@ mod tests {
         assert_eq!(names, ["data", "logs", "scripts"]);
         for folder in [s.path().join("new"), root.clone()] {
             let d = sddl(&folder);
+            let owner = read_security(&folder).unwrap().owner;
             assert!(
-                d.starts_with(&format!("O:{me}"))
+                owner.eq_ignore_ascii_case(&me)
                     && d.contains("D:P")
                     && !d.contains("WD)")
                     && !d.contains("AU)"),
@@ -1441,12 +1445,26 @@ mod tests {
             "(Get-Acl -LiteralPath '{}').GetSecurityDescriptorSddlForm('Owner, Access')",
             f.display()
         ))
+        // Started from PowerShell 7 (the CI shell), Windows PowerShell would otherwise inherit
+        // PowerShell 7's module path and fail to load Get-Acl's module.
+        .env_remove("PSModulePath")
         .output()
         .unwrap();
-        assert!(out.status.success());
+        assert!(
+            out.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
         assert_eq!(sddl(&f), String::from_utf8_lossy(&out.stdout).trim());
         let sec = read_security(&f).unwrap();
-        assert_eq!(sec.owner, me());
+        // A new file's owner is this account (an elevated token may make it Administrators).
+        assert!(
+            sec.owner.eq_ignore_ascii_case(&me())
+                || (crate::winutil::is_elevated() && sec.owner == ADMINISTRATORS),
+            "{}",
+            sec.owner
+        );
         assert!(!sec.protected);
         let au = sec
             .aces
