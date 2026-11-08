@@ -1,0 +1,76 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f8fafc;
+  --fg: #0f172a;
+  --muted: #475569;
+  --accent: #2563eb;
+  --code-bg: #e2e8f0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f172a;
+    --fg: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #60a5fa;
+    --code-bg: #1e293b;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, "Segoe UI", "Malgun Gothic", sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  overflow-x: hidden;
+}
+
+main {
+  max-width: 36rem;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+h1 {
+  margin: 0 0 12px;
+  font-size: 1.5rem;
+  color: var(--accent);
+}
+
+p {
+  margin: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+}
+
+code {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--code-bg);
+  color: var(--fg);
+  font-family: ui-monospace, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+/* No script: the URL fragment picks the state (#stopped). */
+#stopped {
+  display: none;
+}
+
+#stopped:target {
+  display: block;
+}
+
+#stopped:target ~ #waiting {
+  display: none;
+}

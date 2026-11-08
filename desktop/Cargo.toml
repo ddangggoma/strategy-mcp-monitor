@@ -1,0 +1,64 @@
+[package]
+name = "mcp-monitor"
+version = "1.1.0"
+edition = "2024"
+rust-version = "1.99"
+publish = false
+build = "build.rs"
+
+[lib]
+name = "mcp_monitor"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mcp-monitor"
+path = "src/main.rs"
+
+[features]
+default = []
+# Development only (Y24): `app --server-url`, keeps WEBVIEW2_* variables. Never in a release build.
+dev = []
+
+[dependencies]
+tauri = { version = "=2.12.5", features = ["tray-icon", "image-ico", "custom-protocol"] }
+tauri-plugin-single-instance = "=2.5.5"
+webview2-com = "=0.39.1"
+windows = { version = "=0.62.2", features = [
+    "Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem",
+    "Win32_System_Services", "Win32_System_Registry", "Win32_System_Threading", "Win32_System_Console",
+    "Win32_System_LibraryLoader", "Win32_System_RemoteDesktop", "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Com", "Win32_System_Memory", "Win32_System_SystemInformation", "Win32_System_ProcessStatus",
+    "Win32_UI_Accessibility", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell", "Win32_Graphics_Gdi",
+] }
+ureq = { version = "=3.5.1", default-features = false }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+sha2 = "=0.11.1"
+hmac = "=0.13.0"
+hex = "=0.4.3"
+getrandom = "=0.4.3"
+zstd = "=0.13.4"
+tar = "=0.4.46"
+time = { version = "=0.3.55", features = ["formatting", "macros"] }
+regex = "=1.13.1"
+# Ruling F01: payload_pack (lib) walks the payload folder too, not only build.rs.
+walkdir = "=2.5.0"
+
+[build-dependencies]
+tauri-build = { version = "=2.7.4", features = [] }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+sha2 = "=0.11.1"
+hex = "=0.4.3"
+zstd = "=0.13.4"
+tar = "=0.4.46"
+walkdir = "=2.5.0"
+
+[dev-dependencies]
+tempfile = "=3.27.0"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = "symbols"

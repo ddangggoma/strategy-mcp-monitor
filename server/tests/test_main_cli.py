@@ -1,3 +1,5 @@
+import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -161,3 +163,50 @@ def test_agent_flags_reject_other_values(args, capsys):
     with pytest.raises(SystemExit) as e:
         parse_args(args)
     assert e.value.code == 2 and args[0] in capsys.readouterr().err
+
+
+def desktop_bundle(tmp_path, monkeypatch, agent="desktop"):
+    (tmp_path / "bundle.json").write_text(json.dumps({"layout": "pyinstaller", "version": "1.1.0", "agent": agent}), "utf-8")
+    exe = tmp_path / "bin" / "monitor" / "mcp-monitor-server.exe"; exe.parent.mkdir(parents=True); exe.write_bytes(b"")
+    monkeypatch.setattr(sys, "executable", str(exe))
+
+
+def test_agent_dialog_defaults_to_webview_in_a_desktop_bundle(tmp_path, monkeypatch):
+    (tmp_path / "bundle.json").write_text(json.dumps({"layout": "pyinstaller", "version": "1.1.0", "agent": "desktop"}), "utf-8")
+    exe = tmp_path / "bin" / "monitor" / "mcp-monitor-server.exe"; exe.parent.mkdir(parents=True); exe.write_bytes(b"")
+    monkeypatch.setattr(sys, "executable", str(exe))
+    ns = parse_args([])
+    assert ns.agent_dialog == "webview" and ns.agent_command == (str(tmp_path / "mcp-monitor.exe"), "agent")
+    assert parse_args(["--agent-dialog", "print"]).agent_dialog == "print"
+
+
+def test_agent_dialog_help_names_all_three_windows(capsys):
+    with pytest.raises(SystemExit) as e:
+        parse_args(["--help"])
+    out = " ".join(capsys.readouterr().out.split())
+    assert e.value.code == 0
+    assert ("notice window: webview (the desktop agent's WebView2 window; default in a desktop bundle), edge (the "
+            "development agent's Edge app window), or print (DEV/E2E: the agent writes the notice URL to "
+            "<root>/run/agent-<session>.url)") in out
+
+
+def test_webview_needs_the_desktop_agent(capsys):
+    # Preflight F29: the Python agent has no webview window and would exit 2 at every launch (a restart storm).
+    with pytest.raises(SystemExit) as e:
+        parse_args(["--agent-dialog", "webview"])
+    assert e.value.code == 2 and "--agent-dialog webview needs a desktop bundle" in capsys.readouterr().err
+
+
+def test_edge_is_refused_in_a_desktop_bundle(tmp_path, monkeypatch, capsys):
+    # Preflight P05/F29: the desktop agent accepts only --dialog webview or print.
+    desktop_bundle(tmp_path, monkeypatch)
+    with pytest.raises(SystemExit) as e:
+        parse_args(["--agent-dialog", "edge"])
+    assert e.value.code == 2 and "--agent-dialog edge is not available in a desktop bundle" in capsys.readouterr().err
+    assert parse_args(["--agent-dialog", "webview"]).agent_dialog == "webview"
+
+
+def test_a_python_agent_bundle_keeps_edge(tmp_path, monkeypatch):
+    desktop_bundle(tmp_path, monkeypatch, agent="python")
+    ns = parse_args([])
+    assert ns.agent_dialog == "edge" and ns.agent_command == (str(tmp_path / "bin" / "agent" / "mcp-agent.exe"),)

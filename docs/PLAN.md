@@ -1,7 +1,7 @@
 # Strategy MCP Monitor — 하이레벨 개발 계획서
 
-- 버전: **v0.8** (2026-11-07)
-- 상태: 요구사항 확정. P0–P7 구현 완료(Win 11 Pro 실기기 확인 대기: `docs/verification/win11-pro-p4-p5.md`, `win11-pro-p6-p7.md`). 운영 문서 `docs/ops/OPERATIONS.md`, 성능 기록 `docs/verification/perf-p6.md`. 이 문서가 기준이며, 구현에서 달라진 점은 변경 이력에 적습니다.
+- 버전: **v0.9** (2026-11-08)
+- 상태: 요구사항 확정. P0–P7 구현 완료(Win 11 Pro 실기기 확인 대기: `docs/verification/win11-pro-p4-p5.md`, `win11-pro-p6-p7.md`). P8(데스크톱) 구현 완료(실기기 확인 대기: `docs/verification/win11-pro-p8.md`). 운영 문서 `docs/ops/OPERATIONS.md`, 성능 기록 `docs/verification/perf-p6.md`. 이 문서가 기준이며, 구현에서 달라진 점은 변경 이력에 적습니다.
 - 대상: **Windows 11 Pro**에서 실행되는 MCP 관리 + RDP 접속·행동 감사 웹 애플리케이션
 
 ### 변경 이력
@@ -16,6 +16,7 @@
 | v0.7 | 구현 정합 (P4–P5): 에이전트↔서비스는 Named Pipe 대신 Local 채널 HTTP(X-Agent-Token + TCP 피어 → 세션 ID 검증, V4), 고지 창은 pywebview 대신 Edge --app 창(같은 Chromium/WebView2 엔진, V3; 640×600, 화면 중앙 최상위, 확인 전에 닫으면 1초 뒤 다시 표시), WTS 0.5초 폴링 + nudge(V6), 보드 sessions·SSE sessions/tamper, GET /api/sessions/{current,history,collectors}, GET /api/tamper/recent, POST /api/notice/display/{open,ack}(Local, 토큰), /api/agent/*(Local), 마이그레이션 6·7(rdp_connections, rdp_logon_failures, notice_displays), pywin32 312, CLI --session-source/--collect-console/--activity/--agent-launcher/--agent-dialog/--agent-dir. 그 밖에: 고지 표시는 에이전트가 세션 이벤트를 직접 받는 대신 서버 세션 추적기가 연결을 열 때 에이전트에 `show_notice`를 보냄(§5.5, 결과 같음), 수집 스레드 → 루프 큐는 소스별 1만 개 상한에서 오래된 것부터 버리고 `collector.dropped`로 남김(§7 "유실 0"은 이 상한 안의 목표, V11), SSE `tamper`는 로그인한 MCP 개발자 이상에게만, `GET /api/tamper/recent`는 `view_logs`(MCP 개발자 이상), 익명 보드의 접속자 정보에 `connection_id`·`client_build`·`protocol`·`first_seen_ip`·`first_seen_device`도 포함(§4.3 "접속자 정보") |
 | v0.7.1 | Plan 4 전체 리뷰 수정: 에이전트가 **서비스를 검증**함(실행마다 토큰과 함께 받는 서버 키, 요청마다 새 nonce → 응답 `X-Server-Proof` = HMAC-SHA256; 증명 못 하는 상대면 곧바로 종료 코드 5, 창 제목 이벤트는 증명된 응답 뒤에만 보냄(증명 없는 401/403 뒤에는 보내지 않음), `<서버>/notice#…` 주소만 엶), 서비스는 두 포트를 수집기·에이전트 기동 **전에** 독점(`SO_EXCLUSIVEADDRUSE`)으로 엶. 남은 위험: 독점 바인드는 `127.0.0.1:8700`만 막고, 다른 프로세스가 `0.0.0.0:8700`(또는 `[::]:8700`) 와일드카드로 바인드하는 것은 서비스가 떠 있는 동안에도 성공하며 아무 것도 실패·기록되지 않음. 서비스가 죽는 순간 다음 연결은 그 소켓으로 가므로(바인드 경쟁 불필요) 이 경우는 HMAC 증명으로만 막힘: 창을 열지 않고 명령을 받지 않으며 에이전트는 종료 코드 5. 서비스가 죽기 직전에 증명이 통과한 창 제목 이벤트 최대 한 묶음은 새 연결로 그 소켓에 갈 수 있음(같은 연결 증명은 Later). 실기기 P5-5b는 `127.0.0.1`·`0.0.0.0` 점유를 둘 다 시험. 고지 토큰은 로그에 남기지 않음(명령줄·4688·창 제목의 `/notice#…t=` 값 → `<redacted>`). 요청 피어를 찾지 못하면 잠깐 다시 찾고 그래도 없으면 503 `unavailable`(우회 탐지 아님, 에이전트·고지 페이지가 재시도). `agent_impersonation`·`notice_token_misuse`는 같은 키당 1분에 한 번(`suppressed` 개수). 4625 중복 판정 = (source, record_id, 이벤트 시각)(마이그레이션 8, 로그 지운 뒤 재사용된 record_id). WTS 세션 하나를 일시적으로 못 읽으면 이전 상태 유지(로그오프 아님). 이벤트 로그 북마크는 감시 스레드가 읽은 시점에 전진(수집 큐 초과·서버 비정상 종료로 버려진 레코드는 다시 읽지 않음: 최대 한 번 전달, `collector.dropped`로 남음). 고지 페이지는 토큰을 주소창에서 지우지만 창이 닫힐 때까지 `history.state`에 둠(F5 대비; 확인 뒤 토큰은 쓸모없음) |
 | v0.8 | 구현 정합 (P6–P7): data/index.db(FTS5 unicode61 접두사 검색, 분·시간 롤업, 파생 데이터라 스키마가 다르면 다시 만듦), GET /api/logs·/histogram·/users·/status·/export, GET /api/audit[/export], 조회·내보내기 감사(logs_view 60초 제한), 보존 정리 03:30 KST + 보존 기간을 줄이면 즉시(미리보기와 같은 retention_cutoff, 압축은 최소 2일·색인 완료 파일만), DB 표 정리(auth_sessions·otp_*·mcp_actions·mcp_transitions·rdp_*·notice_displays), GET /api/settings/retention/preview delete_events, GET /api/service, 서비스 호스트(service 하위 명령, SESSIONCHANGE→nudge, 종료 코드 3/4/5, data/.lock), 배포 묶음(A: PyInstaller 6.22.3 onedir — Task 13 스파이크에서 서명 없는 exe가 이 PC의 Smart App Control을 통과, bundle.json), install.ps1/uninstall.ps1/audit-policy.ps1(SID·GUID, -DryRun), 버전 1.0.0. 그 밖에: SSE `sessions_changed`(로그인한 스트림만, 내용 없음 — 세션 화면 갱신 신호), `GET /api/service`의 `bundle`(묶음에서 실행 중인지), `python -m app reindex`, MCP 조치·전이 표는 로그 보존 기간을 따름(D3), FAILED·자동 조치 횟수는 서비스 재시작 때 초기화(W17), 우회 탐지 기준값은 data/tamper-baseline.json에 저장(꺼진 동안의 변경은 다음 시작 때 `while_stopped`), 설치는 서비스 시작 유형을 늘 delayed-auto로 만들고 서비스가 웹 설정값으로 맞춤(W25) |
+| v0.9 | Plan 6 데스크톱 앱(설계 docs/design/desktop-app-rust.md, D2–D5): Rust(Tauri 2.12.5) 단일 실행 파일 mcp-monitor.exe — PyInstaller 서버 묶음을 zstd tar로 내장(파일별 SHA-256), 모드 app(127.0.0.1:<LP>만 여는 WebView2 창·트레이·단일 인스턴스·HKCU Run 선택)/install/uninstall/audit-policy(install.ps1·uninstall.ps1·audit-policy.ps1의 규칙을 Rust로 이식, --dry-run, 스테이징 후 폴더 교체 업그레이드, 다운그레이드 거부, 앱 및 기능·시작 메뉴, 설치 폴더 ACL 검사)/agent(Rust 세션 에이전트, 같은 /api/agent/* 규약, 최상위 모달 WebView2 고지 창 — Plan 4 V3 대체 해소), 서버 exe 이름 mcp-monitor-server.exe, bundle.json agent: desktop, --agent-dialog webview, PowerShell 설치기 은퇴, Python 에이전트는 개발·테스트용, 서명은 선택 단계(인증서 없음), 버전 1.1.0 |
 
 ---
 
@@ -83,9 +84,9 @@
 │  └───────────────▲────────────────────────────────────────────────────────┘   │
 │                  │ loopback HTTP (에이전트 토큰 + 세션 ID 검증)               │
 │  ┌───────────────┴──────────────┐                                            │
-│  │ mcp-agent (RDP 사용자 세션)  │                                            │
+│  │ mcp-monitor.exe agent (세션) │                                            │
 │  │ · 연결마다 사전 고지 다이얼로그│                                            │
-│  │   (Edge 앱 창, 같은 디자인)  │                                            │
+│  │   (WebView2 창, 같은 디자인) │                                            │
 │  │ · 포그라운드 창/최소화/제목  │                                            │
 │  │ · 유휴 상태                  │                                            │
 │  └──────────────────────────────┘                                            │
@@ -172,8 +173,9 @@
 
 ## 5. 컴포넌트 상세
 
-### 5.1 Core Service (`mcp-monitor.exe`)
+### 5.1 Core Service (`mcp-monitor-server.exe`)
 - Windows 서비스(LocalSystem)로 동작하며, 실패하면 자동으로 재시작되도록 복구 옵션을 설정합니다.
+- 설치 폴더의 `bin\monitor\mcp-monitor-server.exe`(PyInstaller)입니다. 설치·제거·앱 창·세션 에이전트는 데스크톱 실행 파일 `mcp-monitor.exe`(Rust)가 맡고, 서버 묶음은 그 안에 들어 있습니다(v0.9).
 - 하나의 asyncio 루프에서 웹 서버 2개, 모니터 엔진, 수집기를 함께 돌립니다. 블로킹이 생기는 Windows API 호출은 전용 스레드로 분리합니다.
 - 설정은 `data/config.db`(SQLite, WAL)에 저장합니다.
 
@@ -208,7 +210,7 @@
 
 ### 5.5 행동 감사 사전 고지 다이얼로그
 - **표시 시점:** RDP **연결될 때마다** 표시합니다. 새 로그온과 재연결 모두 해당합니다. 에이전트가 세션 연결 이벤트를 받는 즉시 띄웁니다.
-- **형태:** 화면 중앙의 최상위 모달 창이며, '확인' 버튼 하나만 있는 안내형입니다. Edge 앱 창(WebView2와 같은 엔진)으로 렌더링해서 웹앱과 같은 디자인 토큰과 애니메이션을 씁니다.
+- **형태:** 화면 중앙의 최상위 창(WebView2, 닫기 단추 없음·작업 표시줄 없음·확인 전에는 닫히지 않음)이며, '확인' 버튼 하나만 있는 안내형입니다. 세션 에이전트(`mcp-monitor.exe agent`)가 WebView2로 고지 페이지를 렌더링해서 웹앱과 같은 디자인 토큰과 애니메이션을 씁니다. Windows는 다른 프로세스의 입력을 막는 모달을 허용하지 않으므로, "모달"은 확인 전에는 닫히지 않고 항상 위에 보이는 창을 뜻합니다.
 - **기록:**
   - `notice_shown`: 표시 시각, 연결 종류(로그온/재연결), 문구 버전
   - `notice_acknowledged`: 확인 시각, 확인까지 걸린 시간
@@ -410,13 +412,14 @@
 | 영역 | 선택 |
 |---|---|
 | 웹 서버 | FastAPI + Uvicorn (서버 2개), SSE |
-| Windows 연동 | pywin32(이벤트 로그·WMI·CreateProcessAsUser), ctypes(WTS·세션 ID·SetWinEventHook), Edge --app |
+| Windows 연동 | pywin32(이벤트 로그·WMI·CreateProcessAsUser), ctypes(WTS·세션 ID), 세션 에이전트는 `windows` 크레이트(SetWinEventHook·GetLastInputInfo) |
+| 데스크톱 셸·설치기·에이전트 | Rust 1.99.1 + Tauri 2.12.5(WebView2), `desktop/`의 `mcp-monitor.exe` 하나: app(관리 화면 창·트레이)/install/uninstall/audit-policy/agent, 크레이트는 Cargo.toml에 정확한 버전 고정, `cargo audit` 관문 |
 | 모니터링 | psutil, httpx, icmplib |
 | 인증 | 자체 OTP 구현 (`secrets` 모듈, 상수 시간 비교), SQLite 세션 저장소 |
 | 저장 | SQLite(WAL, FTS5), JSONL |
 | 프런트 | §6.5 |
 | Dummy MCP | 공식 `mcp` Python SDK (FastMCP) |
-| 패키징 | PyInstaller 6.22.3 onedir(Task 13 스파이크: 서명 없는 exe가 Smart App Control을 통과해 A 채택, W26) → 배포 묶음 폴더(`bundle.json`, `bin\monitor\mcp-monitor.exe`, `bin\agent\mcp-agent.exe`, `web\`, `install\`, `docs\OPERATIONS.md`) + zip·sha256, `install\build.ps1`(pip-audit·pnpm audit 통과가 조건) / `install.ps1`·`uninstall.ps1`·`audit-policy.ps1`. 대상 PC의 SAC가 막으면 대안 B = python.org embeddable(PSF 서명) + 묶음 런타임. 코드 서명은 추후 |
+| 패키징 | 서버는 PyInstaller 6.22.3 onedir(W26) → payload 폴더(`bundle.json`, `bin\monitor\mcp-monitor-server.exe`, `web\`, `docs\OPERATIONS.md`), `install\build.ps1`(pip-audit·pnpm audit 통과가 조건). `install\build-desktop.ps1`이 그 폴더를 `mcp-monitor.exe`에 zstd tar로 내장(cargo audit, 릴리스 검사) → `dist\mcp-monitor-<버전>.exe` + `.sha256`. 코드 서명은 `-SignThumbprint`일 때만(인증서 없음, D5). 대상 PC의 SAC가 막으면 서명 또는 1.0.0 방식(PowerShell 설치 묶음, 커밋 c9938d1) |
 
 ---
 
@@ -442,14 +445,16 @@ strategy-mcp-monitor/
 │  ├─ logstore/{writer,reader,files,indexer,index_db,normalize,fts,query,retention}.py
 │  └─ settings/
 ├─ server/tests/
-├─ agent/                      # 세션 에이전트 (창 이벤트, 고지 다이얼로그)
+├─ agent/                      # Python 세션 에이전트 (개발·테스트용; 배포는 desktop의 agent 모드)
+├─ desktop/                    # Rust(Tauri 2) mcp-monitor.exe: src/{cli,payload,install,agent,app}, tests, ui(연결 중 페이지), icons
 ├─ web/src/{board,admin,notice}/
 ├─ web/src/components/{ui,status}/
 ├─ web/src/styles/tokens.css
 ├─ dummy-mcps/{seoul_weather,calculator,seoul_clock,common}/
-├─ install/{build.ps1,install.ps1,uninstall.ps1,audit-policy.ps1,LAYOUT}
-├─ install/pyinstaller/        # mcp-monitor.spec, mcp-agent.spec, 진입 파일
-├─ docs/ops/OPERATIONS.md      # 운영 문서(묶음의 docs\OPERATIONS.md)
+├─ install/build.ps1           # 서버 payload(PyInstaller, web, docs)
+├─ install/build-desktop.ps1   # 릴리스 mcp-monitor.exe(payload 내장, cargo audit, 검사, 선택 서명)
+├─ install/pyinstaller/        # mcp-monitor.spec(→ mcp-monitor-server.exe), 진입 파일
+├─ docs/ops/OPERATIONS.md      # 운영 문서(설치 폴더의 docs\OPERATIONS.md)
 ├─ docs/verification/          # 실기기 점검표, 성능 기록
 ├─ scripts/                    # 런타임: MCP별 스크립트
 ├─ logs/                       # 런타임: YYYY-MM-DD.jsonl
@@ -470,6 +475,7 @@ strategy-mcp-monitor/
 | **P5 행동 로그 + 고지** | 프로세스 명령줄·PowerShell 수집, 에이전트(창 이벤트), **연결마다 고지 다이얼로그**와 편집 UI, 우회 탐지 | 재연결 때도 고지가 표시되고 확인이 기록됨, 에이전트를 종료하면 재기동되고 그 사실이 기록됨 |
 | **P6 로그 조회 + 보존** | 시간대·사용자 필터, 히스토그램 드래그 필터, 사용자 타임라인, FTS, 내보내기, **보존 기간 설정 UI와 정리 작업** | 100만 건 기준 필터 < 300ms, 보존 기간 변경 시 미리보기 후 정리 동작 |
 | **P7 배포·하드닝** | PyInstaller, `install.ps1`(서비스, 감사 정책, ACL, `-OpenFirewall` 옵션), 운영 문서 | 깨끗한 Win 11 Pro에서 설치 스크립트 한 번으로 전체 동작 |
+| **P8 데스크톱 앱** | Rust(Tauri 2) 단일 실행 파일 `mcp-monitor.exe`: 서버 묶음 내장, 설치·업그레이드·제거·감사 정책 이식, 앱 창·트레이, Rust 세션 에이전트와 WebView2 고지 창(v0.9) | 깨끗한 Win 11 Pro에서 exe 더블클릭 한 번으로 설치되고 앱 창이 열림, 연결마다 최상위 고지(`win11-pro-p8.md`) |
 
 ---
 

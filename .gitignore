@@ -20,3 +20,7 @@ web/playwright-report/
 web/e2e/.state.json
 web/e2e/.auth/
 web/.vite/
+
+# desktop (Rust)
+desktop/target/
+desktop/gen/

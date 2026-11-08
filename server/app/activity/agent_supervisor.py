@@ -28,8 +28,9 @@ session was forgotten, dropped or the supervisor stopped is killed at once; ``st
 tick's launch in flight, so none outlives it.
 
 The command line and environment come from ``agent_argv`` / ``agent_env``: a deployment bundle's
-``AgentOptions.command`` (``mcp-agent.exe`` or ``runtime\\python.exe -m mcp_agent``, Plan 5
-Task 9), else the base interpreter with ``PYTHONPATH`` = ``agent_dir`` (development).
+``AgentOptions.command`` (``mcp-monitor.exe agent`` in a desktop bundle, Plan 6 Task 2;
+``mcp-agent.exe`` or ``runtime\\python.exe -m mcp_agent``, Plan 5 Task 9), else the base
+interpreter with ``PYTHONPATH`` = ``agent_dir`` (development).
 """
 
 from __future__ import annotations
@@ -65,7 +66,9 @@ def _agent_python() -> str:
 
 @dataclass(frozen=True)
 class AgentOptions:
-    dialog: Literal["edge", "print"] = "edge"
+    dialog: Literal["edge", "print", "webview"] = "edge"
+    """The notice window: ``webview`` (the desktop agent, ``mcp-monitor.exe agent``), ``edge`` (the
+    Python agent) or ``print`` (either agent writes the URL to a file, DEV/E2E)."""
     agent_dir: Path = _REPO / "agent"
     """The agent's working folder; without ``command`` also its ``PYTHONPATH``."""
     python: str = field(default_factory=_agent_python)

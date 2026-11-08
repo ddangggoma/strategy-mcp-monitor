@@ -1,10 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 846" width="1200" height="846" font-family="'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif" role="img" aria-labelledby="t d">
 <title id="t">MCP Monitor 구성도</title>
-<desc id="d">브라우저는 External 채널 0.0.0.0:8701 또는 Local 채널 127.0.0.1:8700으로 Windows 서비스 mcp-monitor의 FastAPI 라우터에 닿는다. 모니터 엔진과 스크립트 실행기가 MCP 서버를 감시하고 조치하며, 수집기와 우회 탐지의 이벤트는 LogWriter가 logs 폴더의 JSONL로 기록하고 LogIndex가 index.db에 색인한다. 에이전트 감독이 사용자 세션마다 mcp-agent를 띄우고, 에이전트는 토큰과 HMAC 증명으로 Local 채널과 통신하며 Edge 고지 창을 연다.</desc>
+<desc id="d">실행 파일 mcp-monitor.exe(Rust, Tauri 2)가 서버 묶음을 품고 app, install, uninstall, audit-policy, agent 모드로 동작한다. 다른 PC의 브라우저는 External 채널 0.0.0.0:8701로, 이 PC의 앱 창과 브라우저는 Local 채널 127.0.0.1:8700으로 Windows 서비스 mcp-monitor(mcp-monitor-server.exe)의 FastAPI 라우터에 닿는다. 모니터 엔진과 스크립트 실행기가 MCP 서버를 감시하고 조치하며, 수집기와 우회 탐지의 이벤트는 LogWriter가 logs 폴더의 JSONL로 기록하고 LogIndex가 index.db에 색인한다. 에이전트 감독이 사용자 세션마다 mcp-monitor.exe agent를 띄우고, 에이전트는 토큰과 HMAC 증명으로 Local 채널과 통신하며 맨 위에 뜨는 WebView2 고지 창을 연다.</desc>
 <defs><marker id="a-blue" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1.5L8.5 5 1 8.5z" fill="#1a83db"/></marker><marker id="a-teal" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1.5L8.5 5 1 8.5z" fill="#0aa99b"/></marker><marker id="a-violet" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1.5L8.5 5 1 8.5z" fill="#9065d0"/></marker><marker id="a-magenta" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1.5L8.5 5 1 8.5z" fill="#c65085"/></marker><marker id="a-olive" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1.5L8.5 5 1 8.5z" fill="#7e8904"/></marker><marker id="a-steel" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1.5L8.5 5 1 8.5z" fill="#bfc5cd"/></marker></defs>
 <rect width="1200" height="846" rx="20" fill="#14171d"/>
 <text x="24" y="44" font-size="20" font-weight="700" fill="#f4f6f8">MCP Monitor 구성도</text>
 <text x="24" y="66" font-size="12.5" fill="#a3aab3">Windows 11 Pro 한 대 안에서 서비스, 세션 에이전트, 저장소가 주고받는 것</text>
+<rect x="700" y="16" width="476" height="70" rx="12" fill="#22272d" stroke="#3c434c" stroke-width="1" stroke-dasharray="4 4"/>
+<rect x="716" y="30" width="28" height="28" rx="8" fill="#34393f"/>
+<g transform="translate(722 36) scale(1)" fill="none" stroke="#bfc5cd" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5l6 3v7l-6 3-6-3v-7z"/><path d="M2 4.5l6 3 6-3M8 7.5v7"/></g>
+<text x="756" y="40" font-size="14" font-weight="600" fill="#f4f6f8" font-family="'Cascadia Mono', Consolas, 'D2Coding', monospace">mcp-monitor.exe</text>
+<text x="900" y="40" font-size="11.5" fill="#a3aab3">Rust · Tauri 2, 서버 묶음을 품은 실행 파일 하나</text>
+<text x="756" y="58" font-size="11" fill="#a3aab3" font-family="'Cascadia Mono', Consolas, 'D2Coding', monospace">app · install · uninstall · audit-policy · agent</text>
+<text x="756" y="75" font-size="11" fill="#a3aab3">앱 창·트레이, 설치·업그레이드·제거, 세션마다 에이전트</text>
 <rect x="24" y="104" width="188" height="242" rx="16" fill="#1a1e24" stroke="#2b3138" stroke-width="1.2"/>
 <rect x="40" y="120" width="28" height="28" rx="8" fill="#1a2e41"/>
 <g transform="translate(46 126) scale(1)" fill="none" stroke="#1a83db" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M1.5 6h13"/><circle cx="4" cy="4.3" r=".4"/></g>
@@ -14,7 +21,7 @@
 <rect x="300" y="120" width="28" height="28" rx="8" fill="#34393f"/>
 <g transform="translate(306 126) scale(1)" fill="none" stroke="#bfc5cd" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="12" height="5" rx="1.5"/><rect x="2" y="9" width="12" height="5" rx="1.5"/><path d="M5 4.5h.01M5 11.5h.01"/></g>
 <text x="338" y="133" font-size="14" font-weight="600" fill="#f4f6f8">Windows 서비스 mcp-monitor</text>
-<text x="338" y="149" font-size="11.5" fill="#a3aab3">LocalSystem, 부팅 시 자동 시작, asyncio 루프 하나</text>
+<text x="338" y="149" font-size="11.5" fill="#a3aab3">mcp-monitor-server.exe · LocalSystem · 부팅 시 자동 시작</text>
 <rect x="980" y="104" width="196" height="424" rx="16" fill="#1a1e24" stroke="#2b3138" stroke-width="1.2"/>
 <rect x="996" y="120" width="28" height="28" rx="8" fill="#173437"/>
 <g transform="translate(1002 126) scale(1)" fill="none" stroke="#0aa99b" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 1.5v3.5M10.5 1.5v3.5"/><rect x="3" y="5" width="10" height="4.5" rx="1.5"/><path d="M8 9.5v5"/></g>
@@ -37,7 +44,7 @@
 <rect x="40" y="262" width="156" height="64" rx="10" fill="#22272d" stroke="#3c434c" stroke-width="1"/>
 <g transform="translate(52 275) scale(1)" fill="none" stroke="#1a83db" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M1.5 6h13"/><circle cx="4" cy="4.3" r=".4"/></g>
 <text x="76" y="288" font-size="13" font-weight="600" fill="#f4f6f8">이 PC</text>
-<text x="76" y="306" font-size="11.5" fill="#a3aab3">admin · board</text>
+<text x="76" y="306" font-size="11.5" fill="#a3aab3">앱 창 · 브라우저</text>
 <rect x="300" y="166" width="150" height="64" rx="10" fill="#213242" stroke="#1a83db" stroke-width="1.4"/>
 <text x="314" y="188" font-size="11.5" font-weight="600" fill="#a3aab3">External 채널</text>
 <text x="314" y="209" font-size="15" font-weight="700" fill="#f4f6f8" font-family="'Cascadia Mono', Consolas, 'D2Coding', monospace">0.0.0.0:8701</text>
@@ -97,13 +104,13 @@
 <text x="1078" y="430" font-size="10.5" text-anchor="middle" fill="#79818b">위 3개는 시험용 dummy</text>
 <rect x="40" y="630" width="240" height="96" rx="10" fill="#22272d" stroke="#3c434c" stroke-width="1"/>
 <g transform="translate(52 643) scale(1)" fill="none" stroke="#9065d0" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M1.5 6h13M5.5 9.7l1.6 1.6 3.4-3.4"/></g>
-<text x="76" y="656" font-size="13" font-weight="600" fill="#f4f6f8">고지 창 (Edge --app)</text>
+<text x="76" y="656" font-size="13" font-weight="600" fill="#f4f6f8">고지 창 (WebView2)</text>
 <text x="76" y="674" font-size="11.5" fill="#a3aab3">연결될 때마다 '확인' 하나</text>
-<text x="76" y="690" font-size="11.5" fill="#a3aab3">닫으면 1초 뒤 다시 표시</text>
+<text x="76" y="690" font-size="11.5" fill="#a3aab3">맨 위, 닫기 단추 없음</text>
 <text x="76" y="706" font-size="11.5" fill="#a3aab3">notice 번들, /notice</text>
 <rect x="324" y="630" width="244" height="96" rx="10" fill="#22272d" stroke="#3c434c" stroke-width="1"/>
 <g transform="translate(336 643) scale(1)" fill="none" stroke="#9065d0" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="5" r="3"/><path d="M2.5 14.5c0-3.2 2.5-5 5.5-5s5.5 1.8 5.5 5"/></g>
-<text x="360" y="656" font-size="13" font-weight="600" fill="#f4f6f8">mcp-agent</text>
+<text x="360" y="656" font-size="13" font-weight="600" fill="#f4f6f8">mcp-monitor.exe agent</text>
 <text x="360" y="674" font-size="11.5" fill="#a3aab3">포그라운드 창, 제목, 유휴 상태</text>
 <text x="360" y="690" font-size="11.5" fill="#a3aab3">요청마다 새 nonce</text>
 <text x="360" y="706" font-size="11.5" fill="#a3aab3">증명 못 하는 상대면 종료</text>

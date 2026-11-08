@@ -1,8 +1,9 @@
 # server/tests/test_bundle.py
-"""Smoke tests of a built deployment bundle (``install/build.ps1``, Plan 5 Task 13).
+"""Smoke tests of a built payload (``install/build.ps1``; Plan 5 Task 13, Plan 6 Task 2).
 
-Run with ``MCPMON_BUNDLE=<bundle folder> uv run python -m pytest -m bundle -v``. The install
-scripts are asserted here since Task 14; ``docs/OPERATIONS.md`` is asserted by Task 16 (preflight F02).
+Run with ``MCPMON_BUNDLE=<repo>\\dist\\payload uv run python -m pytest -m bundle -v``. The payload is
+what ``mcp-monitor.exe`` embeds (Plan 6): the server, the web app and the operations guide. The
+desktop agent is ``mcp-monitor.exe agent`` itself, tested with ``-m desktop`` (Task 13).
 """
 
 import json
@@ -15,8 +16,7 @@ import httpx
 import pytest
 
 from app import __version__
-from tests.live import free_port
-from tests.test_install_scripts import ps, scratch_path  # noqa: F401 (the tmp_path fixture: a scratch folder a data root may sit in)
+from tests.live import free_port, scratch_path  # noqa: F401 (the tmp_path fixture: a scratch folder a data root may sit in)
 
 pytestmark = pytest.mark.bundle
 B = Path(os.environ.get("MCPMON_BUNDLE", "missing"))
@@ -27,47 +27,23 @@ def meta():
 
 
 def monitor_cmd():
-    return [str(B / "bin" / "monitor" / "mcp-monitor.exe")] if meta()["layout"] == "pyinstaller" \
-        else [str(B / "runtime" / "python.exe"), "-m", "app"]
-
-
-def agent_cmd():
-    return [str(B / "bin" / "agent" / "mcp-agent.exe")] if meta()["layout"] == "pyinstaller" \
-        else [str(B / "runtime" / "python.exe"), "-m", "mcp_agent"]
+    return [str(B / "bin" / "monitor" / "mcp-monitor-server.exe")]
 
 
 def test_bundle_metadata_and_files():
+    raw = (B / "bundle.json").read_bytes()
+    assert not raw.startswith(b"\xef\xbb\xbf")  # UTF-8 without a BOM
     m = meta()
-    assert set(m) == {"layout", "version", "python", "built_at", "commit"} and m["version"] == __version__
-    assert m["layout"] in ("pyinstaller", "runtime") and m["python"].startswith("3.15.")
-    for rel in ("web/board.html", "web/admin.html"):
+    assert set(m) == {"layout", "version", "python", "built_at", "commit", "agent"} and m["version"] == __version__
+    assert (m["layout"], m["agent"]) == ("pyinstaller", "desktop") and m["python"].startswith("3.15.")
+    for rel in ("web/board.html", "web/admin.html", "web/notice.html", "bin/monitor/mcp-monitor-server.exe"):
         assert (B / rel).is_file(), rel
     assert not (B / "web" / ".vite").exists()
-    for name in ("install.ps1", "uninstall.ps1", "audit-policy.ps1"):
-        assert (B / "install" / name).read_bytes().startswith(b"\xef\xbb\xbf"), name  # UTF-8 with BOM (PowerShell 5.1)
-    # The operations guide ships as the repo has it (a stale bundle fails here: rebuild it).
+    assert not (B / "install").exists() and not (B / "bin" / "agent").exists()
+    assert not (B / ".partial").exists() and not (B / "bin" / "monitor" / "mcp-monitor.exe").exists()
+    # The operations guide ships as the repo has it (a stale payload fails here: rebuild it).
     ops = Path(__file__).resolve().parents[2] / "docs" / "ops" / "OPERATIONS.md"
     assert (B / "docs" / "OPERATIONS.md").read_bytes() == ops.read_bytes()
-
-
-def test_bundle_install_scripts_plan_from_the_bundle(tmp_path):
-    # Run from the bundle with no -Source: the bundle is the script's parent folder (DryRun only, no admin).
-    inst, data = tmp_path / "i", tmp_path / "d"
-    p = ps("-File", str(B / "install" / "install.ps1"), "-DryRun", "-InstallDir", str(inst), "-DataRoot", str(data))
-    assert p.returncode == 0, p.stdout + p.stderr
-    plan = json.loads(p.stdout)
-    assert (plan["layout"], plan["version"]) == (meta()["layout"], __version__)
-    steps = {s["id"]: s for s in plan["steps"]}
-    assert steps["copy_bundle"]["args"][:2] == [str(B.resolve()), str(inst)]
-    svc = steps["service_install"]["args"]
-    program = svc[svc.index("binPath=") + 1].split('"')[1]
-    # The service runs the bundle's own monitor program, copied to the same place under the install folder.
-    assert program.startswith(str(inst) + "\\") and (B / Path(program).relative_to(inst)).is_file()
-    assert svc[svc.index("binPath=") + 1].endswith(f'service --root "{data}" --local-port 8700 --external-port 8701')
-    for script, args in (("uninstall.ps1", ["-InstallDir", str(inst), "-DataRoot", str(data)]), ("audit-policy.ps1", ["-Enable", "-DataRoot", str(data)])):
-        p = ps("-File", str(B / "install" / script), "-DryRun", *args)
-        assert p.returncode == 0 and json.loads(p.stdout)["steps"][0]["id"] == "require_admin", p.stdout + p.stderr
-    assert json.loads(p.stdout)["version"] == __version__  # audit-policy.ps1 reads the bundle it sits in
 
 
 def test_bundle_version():
@@ -96,28 +72,25 @@ def test_bundle_serves_the_built_board(tmp_path):
         p.terminate(); p.wait(15)
 
 
-def test_bundle_agent_starts():
-    p = subprocess.run([*agent_cmd(), "--help"], capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
-    assert p.returncode == 0 and "--server" in p.stdout
+def test_bundle_server_picks_the_desktop_agent():
+    # The frozen server reads its own bundle.json: the agent is mcp-monitor.exe agent, the notice a WebView2 window.
+    p = subprocess.run([*monitor_cmd(), "--agent-dialog", "edge"], capture_output=True, text=True, timeout=60,
+                       stdin=subprocess.DEVNULL)
+    assert p.returncode == 2 and "--agent-dialog edge is not available in a desktop bundle" in p.stderr
+    h = subprocess.run([*monitor_cmd(), "--help"], capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+    assert h.returncode == 0 and "webview" in h.stdout
 
 
 def test_bundle_ignores_pythonpath(tmp_path):
-    if meta()["layout"] == "runtime":
-        env = {**os.environ, "PYTHONPATH": str(tmp_path / "evil")}
-        p = subprocess.run([str(B / "runtime" / "python.exe"), "-c", "import sys; print(sys.path)"], capture_output=True,
-                           text=True, timeout=60, env=env, stdin=subprocess.DEVNULL)
-        assert p.returncode == 0 and "evil" not in p.stdout and "server" in p.stdout
-    else:
-        assert (B / "bin" / "monitor" / "_internal").is_dir() and (B / "bin" / "agent" / "_internal").is_dir()
-        # W28: the frozen programs (SYSTEM for the monitor) never load code from PYTHONPATH or the cwd.
-        evil = tmp_path / "evil"
-        for pkg in ("app", "mcp_agent"):
-            (evil / pkg).mkdir(parents=True)
-            (evil / pkg / "__init__.py").write_text("raise SystemExit('EVIL package imported')", "utf-8")
-        env = {**os.environ, "PYTHONPATH": str(evil)}
-        for cmd, needle in (([*monitor_cmd(), "--version"], f"mcp-monitor {__version__}"), ([*agent_cmd(), "--help"], "--server")):
-            p = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=env, cwd=evil, stdin=subprocess.DEVNULL)
-            assert p.returncode == 0 and needle in p.stdout and "EVIL" not in p.stdout + p.stderr, cmd
+    assert (B / "bin" / "monitor" / "_internal").is_dir()
+    # W28: the frozen server (SYSTEM) never loads code from PYTHONPATH or the cwd.
+    evil = tmp_path / "evil"
+    (evil / "app").mkdir(parents=True)
+    (evil / "app" / "__init__.py").write_text("raise SystemExit('EVIL package imported')", "utf-8")
+    env = {**os.environ, "PYTHONPATH": str(evil)}
+    p = subprocess.run([*monitor_cmd(), "--version"], capture_output=True, text=True, timeout=60, env=env, cwd=evil,
+                       stdin=subprocess.DEVNULL)
+    assert p.returncode == 0 and f"mcp-monitor {__version__}" in p.stdout and "EVIL" not in p.stdout + p.stderr
 
 
 def test_bundle_service_mode_needs_the_scm():

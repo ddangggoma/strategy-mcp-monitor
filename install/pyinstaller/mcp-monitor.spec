@@ -1,6 +1,7 @@
 # PyInstaller spec: the monitor server (console; also the Windows service host via `service`).
 # Built by install/build.ps1 from server/: python -m PyInstaller ..\install\pyinstaller\mcp-monitor.spec
-# Output: <bundle>\bin\monitor\mcp-monitor.exe (onedir, W26/W27).
+# Output: <payload>\bin\monitor\mcp-monitor-server.exe (onedir, W26/W27; renamed in Plan 6, Y6, so that
+# mcp-monitor.exe is only the desktop app that embeds the payload).
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_submodules
@@ -31,7 +32,7 @@ exe = EXE(  # noqa: F821
     a.scripts,
     [],
     exclude_binaries=True,
-    name="mcp-monitor",
+    name="mcp-monitor-server",
     console=True,
     upx=False,
 )

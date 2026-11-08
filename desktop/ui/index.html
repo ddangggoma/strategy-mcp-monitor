@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>MCP Monitor</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <h1>MCP Monitor</h1>
+    <section id="stopped" role="alert">
+      <p>서비스가 응답하지 않습니다. 관리자 PowerShell에서 <code>sc.exe start mcp-monitor</code>로 서비스를 시작하세요. 이 창은 5초마다 다시 연결합니다.</p>
+    </section>
+    <section id="waiting" role="status">
+      <p>MCP Monitor 서비스에 연결하는 중입니다…</p>
+    </section>
+  </main>
+</body>
+</html>

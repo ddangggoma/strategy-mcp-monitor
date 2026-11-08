@@ -1,9 +1,13 @@
 """Real-agent scenarios: the Local app on a loopback port in this process, the real peer resolver,
-the real local launcher and ``python -m mcp_agent --dialog print`` (the agent runs in this Windows
-session, so the TCP-peer → session check really runs), sessions from a JSON file.
+the real local launcher and a real agent with ``--dialog print`` (the agent runs in this Windows
+session, so the TCP-peer → session check really runs), sessions from a JSON file. Every scenario
+runs with both agents: ``[python]`` = ``python -m mcp_agent``, ``[desktop]`` = the Rust
+``mcp-monitor.exe agent`` (Plan 6 Task 11; skipped unless ``MCPMON_DESKTOP_EXE`` names the built exe).
 
 Run explicitly (excluded from the default run):
     uv run python -m pytest -m integration tests/test_integration_agent.py -v
+and with MCPMON_DESKTOP_EXE = <repo>/desktop/target/debug/mcp-monitor.exe (after ``cargo build``)
+the ``[desktop]`` half runs too.
 """
 import asyncio
 import json
@@ -40,6 +44,24 @@ pytestmark = [
 ]
 REPO = Path(__file__).resolve().parents[2]
 SERVER_DIR = REPO / "server"
+DESKTOP_EXE = os.environ.get("MCPMON_DESKTOP_EXE")
+AGENTS = ["python", "desktop"]
+
+
+def desktop_exe() -> str:
+    if not DESKTOP_EXE:
+        pytest.skip("set MCPMON_DESKTOP_EXE to the built mcp-monitor.exe")
+    if not Path(DESKTOP_EXE).is_file():
+        pytest.fail(f"MCPMON_DESKTOP_EXE={DESKTOP_EXE} is not a file")
+    return DESKTOP_EXE
+
+
+def agent_options(kind: str, run: Path) -> AgentOptions:
+    common = dict(dialog="print", url_dir=run, backoff=(0.5, 1, 2), exit_grace_sec=1.0, tick_sec=0.2)
+    if kind == "desktop":
+        exe = desktop_exe()
+        return AgentOptions(command=(exe, "agent"), agent_dir=Path(exe).parent, **common)
+    return AgentOptions(agent_dir=REPO / "agent", **common)
 
 
 def write_sessions(path, *sessions):
@@ -75,25 +97,48 @@ async def events(svc, cat):
     return out
 
 
+def is_agent(cmdline: list[str]) -> bool:
+    """An agent's own command line: ``<python> -m mcp_agent …`` or ``…/mcp-monitor.exe agent …``
+    (F02: never a substring — the repo folder ``strategy-mcp-monitor`` is in the server's paths)."""
+    if cmdline[1:3] == ["-m", "mcp_agent"]:
+        return True
+    return len(cmdline) > 1 and Path(cmdline[0]).name.lower() == "mcp-monitor.exe" and cmdline[1] == "agent"
+
+
 def agents_of(root: Path) -> list[psutil.Process]:
-    """Live ``mcp_agent`` processes started for this data root (their ``--url-file`` is under it)."""
+    """Live agent processes started for this data root (their ``--url-file`` is under it)."""
     found = []
     for p in psutil.process_iter(["cmdline"]):
-        cmd = " ".join(p.info["cmdline"] or [])
-        if "mcp_agent" in cmd and str(root) in cmd:
+        cmdline = p.info["cmdline"] or []
+        if is_agent(cmdline) and any(str(root) in arg for arg in cmdline):
             found.append(p)
     return found
 
 
-@pytest.fixture
-async def stack(tmp_path):
+def test_agents_are_told_apart_by_their_own_command_line():
+    base = r"C:\work\strategy-mcp-monitor"
+    assert is_agent([r"C:\py\python.exe", "-m", "mcp_agent", "--server", "http://127.0.0.1:1"])
+    assert is_agent([rf"{base}\desktop\target\debug\MCP-Monitor.exe", "agent", "--dialog", "print"])
+    for other in (
+        [rf"{base}\server\.venv\Scripts\python.exe", "-m", "app", "--root", rf"{base}\tmp"],
+        [r"C:\py\python.exe", "-m", "tests.desktop_bundle_main", rf"{base}\mcp-monitor.exe", "--root", "x"],
+        [rf"{base}\mcp-monitor.exe", "app"],
+        [rf"{base}\mcp-monitor-server.exe", "agent"],
+        [r"C:\py\python.exe", "-c", "import mcp_agent"],
+        [rf"{base}\mcp-monitor.exe"],
+        [],
+    ):
+        assert not is_agent(other), other
+
+
+@pytest.fixture(params=AGENTS)
+async def stack(request, tmp_path):
     sessions = tmp_path / "sessions.json"
     write_sessions(sessions)
     run = tmp_path / "run"
     run.mkdir()
     cfg = CollectorConfig(wts=JsonFileWtsSource(sessions, SystemClock()), poll_interval_sec=0.2, launcher=LocalLauncher(),
-                          agent=AgentOptions(dialog="print", url_dir=run, agent_dir=REPO / "agent", backoff=(0.5, 1, 2),
-                                             exit_grace_sec=1.0, tick_sec=0.2))
+                          agent=agent_options(request.param, run))
     svc = build_services(tmp_path, collectors=cfg, peer_resolver=PsutilPeerResolver())
     await svc.log.start()
     await svc.monitor.start(run_loops=False)
@@ -165,10 +210,16 @@ def _answers(port: int) -> bool:
         return False
 
 
-def test_service_stop_tells_the_agent_to_exit_and_closes_its_notice(tmp_path):
+@pytest.mark.parametrize("kind", AGENTS)
+def test_service_stop_tells_the_agent_to_exit_and_closes_its_notice(tmp_path, kind):
     """Task 15 carry: ``serve()`` keeps the Local server answering while the collectors stop, so the
     supervisor's ``exit`` reaches the agent, which closes its notice window and exits by itself
-    (before the fix the servers were gone first: no CLOSE line, the agent was killed after 2 s)."""
+    (before the fix the servers were gone first: no CLOSE line, the agent was killed after 2 s).
+    ``[desktop]``: the server runs as from a desktop bundle, so its agent is ``mcp-monitor.exe agent``
+    (F02/F09: the Rust agent's exit, final event flush included, fits the 2 s grace)."""
+    server = [sys.executable, "-m", "app"]
+    if kind == "desktop":
+        server = [sys.executable, "-m", "tests.desktop_bundle_main", desktop_exe()]
     sessions = tmp_path / "sessions.json"
     write_sessions(sessions, rdp())
     url_file = tmp_path / "run" / f"agent-{current_session_id()}.url"
@@ -176,7 +227,7 @@ def test_service_stop_tells_the_agent_to_exit_and_closes_its_notice(tmp_path):
     out_path = tmp_path / "server-output.txt"
     with out_path.open("wb") as out:
         p = subprocess.Popen(
-            [sys.executable, "-m", "app", "--root", str(tmp_path), "--local-port", str(lp), "--external-port", str(ep),
+            [*server, "--root", str(tmp_path), "--local-port", str(lp), "--external-port", str(ep),
              "--session-source", f"json:{sessions}", "--agent-launcher", "local", "--agent-dialog", "print",
              "--activity", "off"],
             cwd=SERVER_DIR, stdout=out, stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,

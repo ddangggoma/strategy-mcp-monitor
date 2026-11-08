@@ -1,0 +1,7 @@
+# Pinned to the installed stable toolchain (rustc/cargo 1.99.1, 2026-10-13) — Ruling F05:
+# "stable" avoids downloading a second copy of 1.99.1; Cargo.toml `rust-version` keeps the floor.
+[toolchain]
+channel = "stable"
+profile = "minimal"
+components = ["rustfmt", "clippy"]
+targets = ["x86_64-pc-windows-msvc"]
