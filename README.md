@@ -93,7 +93,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File install\build-desktop.ps1   
 
 ## ✨ 주요 기능
 
-- 📺 **상태 보드(익명):** 로그인 없이 MCP 상태 배지, 지연 스파크라인, 24시간 가동률, 조치까지 남은 시간, RDP 접속 여부와 접속자 정보(**IP 전체 표시**)를 봅니다. SSE로 변경분만 받습니다.
+- 📺 **상태 보드(익명):** 로그인 없이 MCP 상태 배지, 지연 스파크라인, 24시간 가동률, 조치까지 남은 시간, RDP 접속 여부와 접속자 정보(**IP 전체 표시**)를 봅니다. SSE로 변경분만 받습니다. 위쪽 요약 타일(상태 분포·평균 지연·점검 성공률·평균 가동률)과 **서버 PC 리소스 패널**(CPU·메모리·**GPU**·디스크·네트워크, 지표마다 다른 색)이 붙어 있고, 숫자는 굴러가며 바뀝니다(`prefers-reduced-motion`이면 멈춤).
+- 🏷️ **MCP 아이콘:** MCP마다 **이모지 하나** 또는 **실제 로고 이미지**(PNG·JPEG·WebP·GIF·ICO·SVG, 256 KiB, 16–1024 px)를 붙입니다. 이미지 → 이모지 → 기본 아이콘 순으로 보드·목록·상세·대시보드에 나옵니다. SVG는 스크립트·이벤트 속성·외부 참조를 거절하고, 이미지는 `nosniff` + 샌드박스 CSP로 내보냅니다.
+- 💡 **도움말 툴팁:** 뜻이 바로 안 보이는 라벨·필드·상태 옆에 ⓘ 툴팁(약 65곳, [목록](docs/design/help-tips.md)). 키보드 포커스로도 열립니다.
 - 🩺 **MCP 감시·자동 조치:** 프로브 `mcp_ping`/`tcp`/`icmp`와 포트 점유 프로세스 검사. `HEALTHY → SUSPECT → ACTION → RECOVERING`, 한도를 넘기면 `FAILED`, 수동 종료는 `MAINTENANCE`. 프로세스가 없으면 start, 응답이 없으면 restart.
 - 📜 **스크립트:** `start`·`stop`(필수)과 `restart`(선택), `.ps1`/`.bat`/`.cmd`. 항상 자식 프로세스로 돌리고 **120초 타임아웃**, 결과 `ok`/`failed`/`timeout`/`error`, 출력 각 1 MB, 동시 4개, 실행 직전 해시 검사. 편집기(CodeMirror)와 버전 이력·diff·되돌리기.
 - 🔑 **인증·권한:** 이메일 + 6자리 OTP(5분, 1회용). 역할은 **익명 / MCP 개발자 / Admin**. Local·External 두 채널로 기능을 나누고, 모든 판단은 `can(user, action, channel, owner_id)` 하나에서 합니다([권한 매트릭스](docs/PLAN.md#43-권한-매트릭스)).
@@ -102,7 +104,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File install\build-desktop.ps1   
 - 📢 **사전 고지:** RDP **연결될 때마다** 화면 가운데 맨 위에 '확인' 버튼 하나뿐인 WebView2 창. 닫기 단추도, 작업 표시줄 자리도, Alt+F4도 통하지 않습니다(그래도 다른 앱의 입력까지 막지는 않습니다 — Windows가 허락하지 않아서요). 표시·확인을 기록하고, 문구는 Local Admin이 미리보기와 버전 이력으로 편집합니다.
 - 🕵️ **우회 탐지:** 에이전트 종료, 감사 정책 변경, 이벤트 로그 삭제, 감사 레지스트리 변경, 스크립트·로그 파일 변경을 `tamper`로 남기고 대시보드와 실시간 알림에 띄웁니다. 막지는 못하고, 대신 **절대 모른 척하지 않습니다.**
 - 🔎 **로그 조회·감사·보존:** JSONL 원본 + SQLite FTS5 색인. 히스토그램 드래그 필터, 여러 사용자 선택, 키워드, 가상 스크롤 표·사용자 타임라인, CSV·JSONL 내보내기. 조회·내보내기도 감사로 남습니다. 보존 기본 180일, 매일 03:30 KST 정리.
-- 🚀 **배포·서비스:** Rust(Tauri 2)로 만든 `mcp-monitor.exe` 하나가 설치기·업그레이드·제거·앱 창·트레이·세션 에이전트를 모두 맡고, PyInstaller 서버 묶음을 해시째 품고 다닙니다. 앱 및 기능·시작 메뉴에 등록되고, 서비스 시작 유형은 웹 설정이 기준입니다.
+- 🚀 **배포·서비스:** Rust(Tauri 2)로 만든 `mcp-monitor.exe` 하나가 설치기·업그레이드·제거·앱 창·트레이·세션 에이전트를 모두 맡고, PyInstaller 서버 묶음을 해시째 품고 다닙니다. 앱 및 기능·시작 메뉴에 등록되고, 서비스 시작 유형은 웹 설정이 기준입니다. 앱 창은 **상태 보드로 열리고**, 위쪽 단추 하나로 관리 화면과 오갑니다.
+- 👥 **사용자·소유권 관리:** Admin이 사용자 추가·역할 변경·비활성화와 MCP 소유자 이전을 합니다. 활성 Admin이 한 명뿐이면 그 사람의 역할 변경·비활성화는 막고, 화면이 이유와 Admin 수를 알려 줍니다.
 
 ---
 
@@ -479,6 +482,19 @@ uv run python -m seoul_weather --chaos
 
 - 공통 옵션: `--host`(기본 `127.0.0.1`), `--port`, `--pid-file`, `--chaos`(`/chaos/crash`, `/chaos/hang?sec=N`, `/chaos/slow?ms=N`로 일부러 넘어뜨리기 — 자동 복구 시연용).
 - `dummy-mcps/examples/{start,stop,restart}.ps1`은 모니터에 그대로 등록할 수 있는 조치 스크립트 예시입니다(`MCP_ID`, `MCP_NAME`, `MCP_HOST`, `MCP_PORT`, `DUMMY_MCPS_DIR`, 선택 `DUMMY_MCP_CHAOS`).
+
+### 데모 데이터 한 번에 넣기 🎬
+
+설치한 PC에서 시험·시연할 때(운영 PC 금지):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\seed-demo.ps1          # 넣기 (UAC 한 번)
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\seed-demo.ps1 -Revert  # 개발용 OTP 인자 되돌리기
+```
+
+- 사용자 `dev1@example.com`·`dev2@example.com`(Developer), `ops@example.com`(Admin)과 실제로 도는 더미 MCP 3개(☀️ `seoul-weather` · 🧮 `calculator` · ⏰ `seoul-clock`)를 만듭니다. 이미 있는 것은 건드리지 않습니다.
+- 서비스에 `--dev-otp-code 123456`을 붙여 **모든 계정의 OTP가 `123456`**이 됩니다(외부 채널도 `127.0.0.1`로만 엽니다). 끝나면 `-Revert`로 되돌리세요.
+- LocalSystem 서비스가 사용자 프로필 안의 Python(MSIX로 가상화된 `AppData`)을 못 보는 경우를 위해 `dummy-mcps\.python`에 인터프리터를 복사하고 venv를 다시 만듭니다. 자세한 내용은 [OPERATIONS](docs/ops/OPERATIONS.md)의 데모 데이터 항목.
 
 ---
 
