@@ -170,7 +170,7 @@ function RecentActivity({ items }: { items: ReadonlyMap<number, BoardItem> }) {
             </TableCell>
             <TableCell>
               <span className="inline-flex items-center gap-2 whitespace-nowrap">
-                <McpIcon icon={items.get(r.mcpId)?.icon} size="sm" />
+                <McpIcon icon={items.get(r.mcpId)?.icon} image={items.get(r.mcpId)?.icon_image} size="sm" />
                 <Link
                   to="/admin/mcps/$mcpId"
                   params={{ mcpId: String(r.mcpId) }}

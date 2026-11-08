@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { WithReason } from "@/components/app/WithReason";
@@ -10,8 +10,9 @@ import { ApiError } from "@/lib/api";
 import type { McpConfig, McpDetail } from "@/lib/api-types";
 import { denyReason } from "@/lib/permissions";
 import { useSession } from "@/lib/session";
-import { useUpdateMcp } from "../queries";
+import { useMcpIconImage, useUpdateMcp } from "../queries";
 import { McpConfigFields } from "./McpConfigFields";
+import { iconImageErrorMessage, type IconImageProps } from "./McpIconPicker";
 import { dirtyPatch, mcpConfigSchema, type McpFormValues } from "./mcp-schema";
 
 /** The server's config as form values (an absent process name is an empty input). */
@@ -45,6 +46,8 @@ export function SettingsTab({ mcp, onDirtyChange }: { mcp: McpDetail; onDirtyCha
   const me = useSession();
   const reason = denyReason(me, "edit_mcp_settings");
   const update = useUpdateMcp(mcp.id);
+  const iconImage = useMcpIconImage(mcp.id);
+  const [imageError, setImageError] = useState<string | null>(null);
 
   // the detail object changes with every live board event; the config only when a setting does
   const serverKey = JSON.stringify(toValues(mcp));
@@ -93,6 +96,23 @@ export function SettingsTab({ mcp, onDirtyChange }: { mcp: McpDetail; onDirtyCha
     }
   };
 
+  // the logo is saved at once, apart from the form (it is not a config field)
+  const saveImage = (file: Blob | null) => {
+    setImageError(null);
+    iconImage.mutate(file, {
+      onSuccess: () => toast.success(copy.common.saved),
+      onError: (err) => setImageError(iconImageErrorMessage(err)),
+    });
+  };
+  const image: IconImageProps = {
+    src: mcp.icon_image,
+    busy: iconImage.isPending,
+    reason,
+    error: imageError,
+    onPick: saveImage,
+    onRemove: () => saveImage(null),
+  };
+
   const submit = form.handleSubmit(onValid);
   const serverError = errors.root?.server?.message;
 
@@ -112,7 +132,7 @@ export function SettingsTab({ mcp, onDirtyChange }: { mcp: McpDetail; onDirtyCha
       >
         <p className="text-sm text-fg-muted">{copy.mcp.liveNote}</p>
 
-        <McpConfigFields control={form.control} readOnly={readOnly} nameError={errors.name !== undefined} />
+        <McpConfigFields control={form.control} readOnly={readOnly} nameError={errors.name !== undefined} iconImage={image} />
 
         {serverError ? (
           <p role="alert" className="text-sm text-danger">

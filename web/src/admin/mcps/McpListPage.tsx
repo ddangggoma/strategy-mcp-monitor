@@ -59,7 +59,7 @@ const columns = helper.columns([
     sortFn: byNameRow,
     cell: ({ row: { original: m } }) => (
       <span className="inline-flex items-center gap-2">
-        <McpIcon icon={m.icon} size="sm" />
+        <McpIcon icon={m.icon} image={m.icon_image} size="sm" />
         <Link
           to="/admin/mcps/$mcpId"
           params={{ mcpId: String(m.id) }}

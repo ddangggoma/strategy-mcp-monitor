@@ -93,6 +93,58 @@ it("posts the chosen emoji icon (null by default) and keeps it in the draft", as
   await waitFor(() => expect(posted()?.icon).toBe("📁"));
 });
 
+describe("an icon image picked before the MCP exists", () => {
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+  async function pickAndCreate(answer: () => Response) {
+    capturePost();
+    const puts: string[] = [];
+    server.use(
+      http.put("/api/mcps/:id/icon-image", ({ params, request }) => {
+        puts.push(`${String(params.id)} ${request.headers.get("Content-Type")}`);
+        return answer();
+      }),
+    );
+    const r = await renderCreate();
+    await fillConfig();
+    await userEvent.upload(screen.getByTestId("mcp-icon-file"), new File([PNG], "logo.png", { type: "image/png" }));
+    // previewed from the file itself (a data: URL: the page CSP allows no blob: images)
+    const preview = within(screen.getByTestId("mcp-icon-preview")).getByTestId("mcp-icon");
+    await waitFor(() => expect(preview).toHaveAttribute("data-icon", "image"));
+    expect(preview.querySelector("img")?.getAttribute("src")).toMatch(/^data:image\/png;base64,/);
+    expect(puts).toEqual([]); // nothing is uploaded before the MCP exists
+    await typeScript("start", "a");
+    await typeScript("stop", "b");
+    await userEvent.click(submit());
+    return { ...r, puts };
+  }
+
+  it("is uploaded right after the MCP is created", async () => {
+    const { router, puts } = await pickAndCreate(() =>
+      HttpResponse.json(mcpDetailFixture({ id: 3, name: "files", icon_image: "/api/mcps/3/icon-image?v=0123456789ab", live: null })),
+    );
+    await waitFor(() => expect(router.state.location.pathname).toBe("/admin/mcps/3"));
+    expect(puts).toEqual(["3 image/png"]);
+    expect(screen.queryByText(copy.mcp.icon.imageAfterCreateFailed)).toBeNull();
+  });
+
+  it("a failed upload does not undo the MCP: it says to set the image in the settings and goes on", async () => {
+    const { router, puts } = await pickAndCreate(() => HttpResponse.json({ error: "validation" }, { status: 422 }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/admin/mcps/3"));
+    expect(puts).toEqual(["3 image/png"]);
+    expect(await screen.findByText(copy.mcp.icon.imageAfterCreateFailed)).toBeInTheDocument();
+    expect(await screen.findByText(copy.mcp.created("files"))).toBeInTheDocument();
+  });
+
+  it("can be removed again before creating", async () => {
+    capturePost();
+    await renderCreate();
+    await userEvent.upload(screen.getByTestId("mcp-icon-file"), new File([PNG], "logo.png", { type: "image/png" }));
+    await userEvent.click(await screen.findByRole("button", { name: copy.mcp.icon.imageRemove }));
+    expect(within(screen.getByTestId("mcp-icon-preview")).getByTestId("mcp-icon")).toHaveAttribute("data-icon", "default");
+  });
+});
+
 it("drops a stored draft whose icon is not one emoji", async () => {
   const empty = { ext: ".ps1", content: "" };
   saveDraft("mcp-create", { name: "x", icon: "<svg onload=alert(1)>", scripts: { start: empty, stop: empty, restart: empty } });

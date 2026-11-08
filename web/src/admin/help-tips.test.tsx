@@ -113,12 +113,13 @@ it("MCP detail: the current state, owner, actions and every non-obvious setting"
   await expectTip(f.maintenance, h.maintenance);
   await expectTip(f.autostart_on_boot, h.autostart_on_boot);
   await expectTip(copy.mcp.icon.legend, copy.help.mcp.icon);
+  await expectTip(copy.mcp.icon.image, copy.help.mcp.iconImage);
   // the tips stand beside the labels: fields and groups keep their own names
   expect(screen.getByRole("spinbutton", { name: f.action_delay_sec })).toBeInTheDocument();
   expect(screen.getByRole("switch", { name: f.auto_recovery })).toBeInTheDocument();
   expect(screen.getByRole("group", { name: copy.mcp.groups.recovery })).toBeInTheDocument();
   expect(screen.getByRole("group", { name: copy.mcp.icon.legend })).toBeInTheDocument();
-}, 15_000); // nineteen tips over the whole settings form (with the emoji picker): slow under a loaded full run
+}, 15_000); // twenty tips over the whole settings form (with the icon picker): slow under a loaded full run
 
 it("MCP history: the chart and the action log", async () => {
   renderWithProviders(null, { route: "/admin/mcps/1?tab=history", me: ADMIN });

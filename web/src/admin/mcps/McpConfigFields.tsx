@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { copy } from "@/copy/ko";
 import type { McpConfig } from "@/lib/api-types";
-import { McpIconPicker } from "./McpIconPicker";
+import { McpIconPicker, type IconImageProps } from "./McpIconPicker";
 import { RANGES, type McpFormValues } from "./mcp-schema";
 
 type NumberKey = keyof typeof RANGES;
@@ -24,11 +24,14 @@ export function McpConfigFields({
   control,
   readOnly,
   nameError,
+  iconImage,
 }: {
   control: Control<McpFormValues, unknown, McpConfig>;
   readOnly: boolean;
   /** The name field shows its error instead of the naming rule. */
   nameError: boolean;
+  /** The uploaded logo (not a form field: its owner saves it). */
+  iconImage?: IconImageProps;
 }) {
   return (
     <>
@@ -69,7 +72,7 @@ export function McpConfigFields({
       </Group>
 
       <Group legend={copy.mcp.icon.legend} tip={copy.help.mcp.icon}>
-        <McpIconPicker control={control} readOnly={readOnly} />
+        <McpIconPicker control={control} readOnly={readOnly} image={iconImage} />
       </Group>
 
       <Group legend={copy.mcp.groups.recovery} tip={copy.help.mcp.recoveryGroup} tipLabel={copy.help.mcp.recoveryGroupLabel}>

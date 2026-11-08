@@ -30,6 +30,8 @@ export interface BoardItem {
   name: string;
   /** One emoji (lib/mcp-emoji.ts); null = the default MCP icon. */
   icon: string | null;
+  /** The uploaded logo: a relative URL with its version (`/api/mcps/{id}/icon-image?v=…`); drawn instead of `icon` when set. */
+  icon_image: string | null;
   state: McpState;
   issue: Issue | null;
   latency_ms: number | null;
@@ -213,6 +215,8 @@ export interface McpConfig {
 export interface McpDetail extends McpConfig {
   id: number;
   config_error: boolean;
+  /** The uploaded logo URL, or null. Not a config field: PUT / DELETE /api/mcps/{id}/icon-image change it. */
+  icon_image: string | null;
   owner: UserSummary | null;
   created_at: string;
   live: BoardItem | null;

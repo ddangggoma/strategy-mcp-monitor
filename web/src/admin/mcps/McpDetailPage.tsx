@@ -88,7 +88,7 @@ function Detail({ mcp }: { mcp: McpDetail }) {
         <div className="flex min-w-0 flex-col gap-1.5">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="inline-flex min-w-0 items-center gap-3">
-              <McpIcon icon={mcp.icon} size="lg" />
+              <McpIcon icon={mcp.icon} image={mcp.icon_image} size="lg" />
               <h1 className="text-xl font-semibold break-all text-fg">{mcp.name}</h1>
             </span>
             {mcp.config_error ? (

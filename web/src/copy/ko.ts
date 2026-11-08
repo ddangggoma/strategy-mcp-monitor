@@ -680,6 +680,16 @@ export const copy = {
       pasteHint: "목록에 없는 이모지는 여기에 하나만 붙여 넣으세요. Windows에서는 Windows 키 + 마침표(.)로 이모지 창을 열 수 있어요.",
       invalid: "이모지 하나만 넣을 수 있어요. 글자, 숫자, 공백은 쓸 수 없어요.",
       custom: (emoji: string) => `붙여 넣은 이모지 ${emoji}`,
+      // the uploaded logo (PUT /api/mcps/{id}/icon-image): shown before the emoji
+      // kept short: the board bundle loads all of this file (200 KB budget)
+      image: "이미지",
+      imageUpload: "이미지 올리기",
+      imageRemove: "이미지 제거",
+      imageHint: "PNG·JPEG·WebP·GIF·ICO·SVG, 256KB 이하",
+      imageWrongType: "이 형식은 쓸 수 없어요.",
+      imageTooLarge: "256KB를 넘어요.",
+      imageRejected: "쓸 수 없는 이미지예요.",
+      imageAfterCreateFailed: "이미지는 올리지 못했어요. 설정 탭에서 다시 올리세요.",
       groups: { tech: "기술·AI", data: "데이터·문서", talk: "소통", daily: "일상", status: "상태·보안" },
       names: {
         "🤖": "로봇",
@@ -1049,7 +1059,9 @@ export const copy = {
       },
       owner:
         "소유자만 이 MCP의 스크립트를 편집할 수 있고, MCP 개발자는 자기가 소유한 MCP만 삭제할 수 있어요. 설정 변경과 직접 조치는 로그인한 사용자 누구나 할 수 있고, 소유권은 Admin이 이전해요.",
-      icon: "MCP를 한눈에 알아보게 하는 표시예요. 감시와 자동 복구에는 영향이 없어요. 이모지 하나만 쓸 수 있고, 로그인 없이 보는 현황판에도 보여요.",
+      icon: "MCP를 한눈에 알아보게 하는 표시예요. 감시와 자동 복구에는 영향이 없어요. 이모지나 로고 이미지를 쓸 수 있고, 로그인 없이 보는 현황판에도 보여요.",
+      iconImage:
+        "가로세로 16~1024px(SVG 제외), 스크립트·외부 링크 없는 SVG만 받아요. 이모지보다 먼저 보여요. 설정에서는 바로 저장되고, 새 MCP는 등록 뒤 올려요.",
       recoveryGroupLabel: "자동 복구 동작",
       recoveryGroup:
         "이상이 조치 대기 시간보다 오래 이어지면 스크립트를 실행하고, 시작 유예 시간이 지나면 다시 확인해요. 집계 구간 안에서 최대 횟수를 넘기면 종료 스크립트를 실행하고 실패 상태로 멈춰요.",

@@ -66,7 +66,7 @@ export function McpCard({ item, receivedAt }: { item: BoardItem; receivedAt: num
       <header className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2.5">
           {/* the chosen icon, or the default MCP icon; decorative (the name is the label) */}
-          <McpIcon icon={item.icon} />
+          <McpIcon icon={item.icon} image={item.icon_image} />
           <h2 id={nameId} className="min-w-0 text-lg leading-tight font-semibold break-words">
             {item.name}
           </h2>

@@ -34,6 +34,22 @@ it("adds X-CSRF-Token on unsafe methods only", async () => {
   ]);
 });
 
+it("sends a blob as raw bytes with its own type (the icon image), the CSRF header included", async () => {
+  session.csrf = "tok-2";
+  let got: number[] = [];
+  let headers: [string | null, string | null] = [null, null];
+  server.use(
+    http.put("/api/mcps/:id/icon-image", async ({ request }) => {
+      got = [...new Uint8Array(await request.arrayBuffer())];
+      headers = [request.headers.get("Content-Type"), request.headers.get("X-CSRF-Token")];
+      return HttpResponse.json({ id: 7 });
+    }),
+  );
+  await endpoints.putIconImage(7, new Blob([new Uint8Array([1, 2, 3])], { type: "image/webp" }));
+  expect(got).toEqual([1, 2, 3]);
+  expect(headers).toEqual(["image/webp", "tok-2"]);
+});
+
 it("sends JSON bodies and same-origin credentials", async () => {
   let got: unknown = null;
   let type: string | null = null;
@@ -252,6 +268,8 @@ it("every endpoint calls its Appendix B method and path", async () => {
     [() => endpoints.audit({ ...LQ, kind: "auth" }), `GET /api/audit?${LQS}&kind=auth&limit=200`],
     [() => endpoints.serviceStatus(), "GET /api/service"],
     [() => endpoints.updateMcp(2, { maintenance: true }), "PUT /api/mcps/2"],
+    [() => endpoints.putIconImage(2, new Blob(["x"], { type: "image/png" })), "PUT /api/mcps/2/icon-image"],
+    [() => endpoints.deleteIconImage(2), "DELETE /api/mcps/2/icon-image"],
     [() => endpoints.manualAction(2, "restart"), "POST /api/mcps/2/actions/restart"],
     [
       () => endpoints.createMcp({ name: "n", host: "127.0.0.1", port: 9000, scripts: { start: { ext: ".ps1", content: "x" } } }),

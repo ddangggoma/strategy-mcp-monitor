@@ -15,13 +15,14 @@ import { copy, messageForError } from "@/copy/ko";
 import { ApiError } from "@/lib/api";
 import type { McpConfig, McpCreate, ScriptExt, ScriptKind, ScriptUpload } from "@/lib/api-types";
 import { clearDraft, loadDraft, saveDraft } from "@/lib/draft";
-import { createMcp } from "@/lib/endpoints";
+import { createMcp, putIconImage } from "@/lib/endpoints";
 import { isMcpEmoji } from "@/lib/mcp-emoji";
 import { denyReason } from "@/lib/permissions";
 import { useSession } from "@/lib/session";
 import { qk } from "../query-keys";
 import type { CodeEditorHandle } from "../scripts/ScriptEditor";
 import { McpConfigFields } from "./McpConfigFields";
+import type { IconImageProps } from "./McpIconPicker";
 import { mcpConfigSchema, type McpFormValues } from "./mcp-schema";
 
 // the editor chunk (CodeMirror) is shared with the scripts tab and loads after the page
@@ -185,6 +186,8 @@ function CreateForm() {
   const [scripts, setScripts] = useState<Scripts>(draft?.scripts ?? EMPTY_SCRIPTS);
   const [scriptErrors, setScriptErrors] = useState<ScriptErrors>({});
   const [restored, setRestored] = useState(draft !== null);
+  // the logo picked before the MCP exists: uploaded right after it is created (not kept in the draft)
+  const [heldImage, setHeldImage] = useState<{ file: Blob; src: string } | null>(null);
   const finished = useRef(false);
   const editors = {
     start: useRef<CodeEditorHandle>(null),
@@ -210,6 +213,7 @@ function CreateForm() {
 
   const discardDraft = () => {
     clearDraft(DRAFT_KEY);
+    setHeldImage(null);
     form.reset(DEFAULTS);
     setScripts(EMPTY_SCRIPTS);
     setScriptErrors({});
@@ -232,9 +236,17 @@ function CreateForm() {
       },
     };
     try {
-      const detail = await createMcp(body);
+      let detail = await createMcp(body);
       finished.current = true;
       clearDraft(DRAFT_KEY);
+      if (heldImage) {
+        try {
+          detail = await putIconImage(detail.id, heldImage.file);
+        } catch {
+          // the MCP exists: say so and point at the settings, without blocking the way there
+          toast.error(copy.mcp.icon.imageAfterCreateFailed);
+        }
+      }
       qc.setQueryData(qk.mcp(detail.id), detail);
       void qc.invalidateQueries({ queryKey: qk.mcps });
       toast.success(copy.mcp.created(detail.name));
@@ -252,6 +264,22 @@ function CreateForm() {
         form.setError("root.server", { type: "server", message: messageForError(code) });
       }
     }
+  };
+
+  const image: IconImageProps = {
+    src: heldImage?.src ?? null,
+    busy: false,
+    reason: null,
+    error: null,
+    onPick: (file) => {
+      const reader = new FileReader();
+      // a data: URL for the preview (the page CSP allows data: images, not blob:)
+      reader.onload = () => {
+        if (typeof reader.result === "string") setHeldImage({ file, src: reader.result });
+      };
+      reader.readAsDataURL(file);
+    },
+    onRemove: () => setHeldImage(null),
   };
 
   const onSubmit = (e: FormEvent<HTMLFormElement>) => {
@@ -285,7 +313,7 @@ function CreateForm() {
       <Form {...form}>
         <form noValidate onSubmit={onSubmit} className="flex min-w-0 flex-col gap-6" aria-busy={isSubmitting || undefined}>
           <div className="flex max-w-(--size-prose) flex-col gap-6">
-            <McpConfigFields control={form.control} readOnly={isSubmitting} nameError={errors.name !== undefined} />
+            <McpConfigFields control={form.control} readOnly={isSubmitting} nameError={errors.name !== undefined} iconImage={image} />
           </div>
 
           <fieldset className="flex min-w-0 max-w-5xl flex-col gap-5 border-t border-border pt-4">

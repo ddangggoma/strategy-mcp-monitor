@@ -57,6 +57,10 @@ export const handlers = [
     return HttpResponse.json(mcpDetailFixture({ id: id(params.id), ...patch }));
   }),
   http.delete("/api/mcps/:id", noContent),
+  http.put("/api/mcps/:id/icon-image", ({ params }) =>
+    HttpResponse.json(mcpDetailFixture({ id: id(params.id), icon_image: `/api/mcps/${id(params.id)}/icon-image?v=0123456789ab` })),
+  ),
+  http.delete("/api/mcps/:id/icon-image", ({ params }) => HttpResponse.json(mcpDetailFixture({ id: id(params.id) }))),
   http.get("/api/mcps/:id/history", () => HttpResponse.json(historyFixture())),
   http.get("/api/mcps/:id/actions/:aid", ({ params }) => HttpResponse.json(actionDetailFixture({ id: id(params.aid) }))),
   http.post("/api/mcps/:id/actions/:kind", () => HttpResponse.json({ run_id: "run-1" }, { status: 202 })),

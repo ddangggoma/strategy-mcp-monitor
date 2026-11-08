@@ -151,6 +151,7 @@ export interface AdminApi {
   get(path: string): Promise<APIResponse>;
   post(path: string, data?: unknown): Promise<APIResponse>;
   put(path: string, data: unknown): Promise<APIResponse>;
+  delete(path: string): Promise<APIResponse>;
 }
 
 /** Calls the Local API as `who` with the session and CSRF token globalSetup saved (no login). */
@@ -161,5 +162,6 @@ export async function adminApi(request: APIRequestContext, s: BackendState, who:
     get: (path) => request.get(`${s.localUrl}${path}`, { headers }),
     post: (path, data) => request.post(`${s.localUrl}${path}`, { headers, data }),
     put: (path, data) => request.put(`${s.localUrl}${path}`, { headers, data }),
+    delete: (path) => request.delete(`${s.localUrl}${path}`, { headers }),
   };
 }
