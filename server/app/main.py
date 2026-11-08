@@ -373,6 +373,7 @@ async def _serve_started(
     collectors, servers."""
     await services.monitor.start()
     try:
+        await services.system.start()
         await services.collectors.start()
         shutdown: ShutdownSequence | None = None
         try:
@@ -417,5 +418,6 @@ async def _serve_started(
             finally:
                 await services.collectors.stop()  # a no-op after the sequence stopped them
     finally:
+        await services.system.stop()
         await services.monitor.stop(kill_abandoned=kill_scripts_on_stop)
         await services.log.flush()  # monitor.stop{killed} before the retention and index stops

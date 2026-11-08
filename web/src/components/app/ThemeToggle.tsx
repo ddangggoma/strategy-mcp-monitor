@@ -13,7 +13,7 @@ import {
 import { copy } from "@/copy/ko";
 import { getThemePref, setThemePref, type ThemePref } from "@/lib/theme";
 
-const ORDER: readonly ThemePref[] = ["system", "dark", "light"];
+const ORDER: readonly ThemePref[] = ["light", "dark", "system"];
 
 const ICONS: Record<ThemePref, React.ReactElement> = {
   system: <MonitorIcon aria-hidden="true" />,
@@ -25,7 +25,7 @@ function isThemePref(v: string): v is ThemePref {
   return (ORDER as readonly string[]).includes(v);
 }
 
-/** Top-bar theme menu: follow the OS (default), or pin dark / light. Infrequent, so a menu. */
+/** Top-bar theme menu: light (default), dark, or follow the OS. Infrequent, so a menu. */
 export function ThemeToggle() {
   const [pref, setPref] = useState<ThemePref>(getThemePref);
 

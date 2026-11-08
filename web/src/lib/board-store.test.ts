@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { item, rdpSession, tamperFixture } from "../../tests/msw/fixtures";
+import { item, rdpSession, systemFixture, tamperFixture } from "../../tests/msw/fixtures";
 import type { ActionEvent } from "./api-types";
 import { BoardStore, STATE_SEVERITY, sortBoard, useBoard } from "./board-store";
 
@@ -28,6 +28,22 @@ it("a board snapshot replaces items, keeps sessions when absent and replaces the
   expect(s.getSnapshot().sessions).toEqual(sessions);
   s.apply({ event: "board", data: JSON.stringify({ now: "t3", mcps: [], sessions: [] }) });
   expect(s.getSnapshot().sessions).toEqual([]);
+});
+
+it("takes the PC's resources from the board snapshot and from system events, ignoring malformed ones", () => {
+  const s = new BoardStore();
+  expect(s.getSnapshot().system).toBeUndefined();
+  const first = systemFixture();
+  s.apply({ event: "board", data: JSON.stringify({ now: "t1", mcps: [], system: first }) });
+  expect(s.getSnapshot().system).toEqual(first);
+  s.apply({ event: "board", data: JSON.stringify({ now: "t2", mcps: [] }) }); // absent: kept
+  expect(s.getSnapshot().system).toEqual(first);
+  const next = systemFixture({ cpu: { percent: 99, cores: 8 } });
+  s.apply({ event: "system", data: JSON.stringify(next) });
+  expect(s.getSnapshot().system).toEqual(next);
+  const before = s.getSnapshot();
+  s.apply({ event: "system", data: '{"cpu":1}' });
+  expect(s.getSnapshot()).toBe(before);
 });
 
 it("records performance.now() at receipt per item", () => {

@@ -108,14 +108,19 @@ async def board(
 
 
 def board_snapshot(services: Services) -> dict[str, Any]:
-    """The board (GET /api/board, the first SSE event): MCPs, plus ``sessions`` once collected.
+    """The board (GET /api/board, the first SSE event): MCPs, plus ``sessions`` once collected and
+    this PC's resources (``system``) once read.
 
-    ``sessions`` is absent before the first WTS snapshot and when session collection is off (V7).
+    ``sessions`` is absent before the first WTS snapshot and when session collection is off (V7);
+    ``system`` is absent before the first reading (later ones arrive as SSE ``system`` events).
     """
     snapshot = services.monitor.board_snapshot()
     sessions = services.rdp.board_sessions()
     if sessions is not None:
         snapshot["sessions"] = sessions
+    system = services.system.latest
+    if system is not None:
+        snapshot["system"] = system
     return snapshot
 
 

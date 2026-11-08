@@ -29,6 +29,7 @@ from app.monitor.runner import ScriptRunner
 from app.monitor.scripts import ScriptStore
 from app.monitor.store import McpStore
 from app.monitor.supervisor import Monitor, ProberLike, ScriptRunnerLike
+from app.monitor.system import SystemSampler
 from app.notice.displays import NoticeDisplays
 from app.notice.store import NoticeStore
 from app.paths import AppPaths
@@ -89,6 +90,9 @@ class Services:
     retention: RetentionJob
     """The daily log retention job (W14); ``serve()`` starts it after the log index and stops it
     first. Fixtures do not start it (tests call ``run_once``)."""
+    system: SystemSampler
+    """This PC's CPU, memory, disks and network for the board; ``serve()`` starts it after the
+    monitor and stops it before. Fixtures do not start it (tests call ``record``)."""
     start_type: StartTypeManager
     """The ``mcp-monitor`` service's start type vs the ``service_start_type`` setting (Task 8)."""
 
@@ -270,6 +274,7 @@ def _wire(
         tamper_scanner=tamper_scanner,
         log_index=log_index,
         retention=retention,
+        system=SystemSampler(bus, clock),
         start_type=StartTypeManager(
             service_configurator if service_configurator is not None else default_configurator(),
             settings,

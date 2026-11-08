@@ -11,7 +11,8 @@
  */
 @layer tokens {
   :root {
-    color-scheme: light dark;
+    /* light first (the default theme); base.css opens it to the OS for data-theme="system" */
+    color-scheme: light;
 
     /* ── Primitives: steel neutral, hue 255 ───────────────────────────── */
     --steel-0: oklch(0.995 0.002 255);
@@ -189,6 +190,12 @@
     --shadow-sm: 0 1px 2px var(--shadow-color);
     --shadow-md: 0 6px 16px -4px var(--shadow-color), 0 2px 4px -2px var(--shadow-color);
     --shadow-lg: 0 20px 48px -12px var(--shadow-color), 0 8px 16px -8px var(--shadow-color);
+    /* board panels: in light a soft, wide lift off the page (white on pale steel); in dark the
+       colour is transparent, so the hairline border keeps doing the work there */
+    --shadow-panel-color: light-dark(oklch(0.35 0.03 255 / 0.07), transparent);
+    --shadow-panel: 0 1px 2px var(--shadow-panel-color), 0 8px 24px -8px var(--shadow-panel-color);
+    /* the panel's hairline: quieter in light, where the shadow carries the edge */
+    --color-border-panel: light-dark(color-mix(in oklch, var(--steel-200) 75%, transparent), var(--steel-800));
 
     /* ── Layers ───────────────────────────────────────────────────────── */
     --z-sticky: 10;
