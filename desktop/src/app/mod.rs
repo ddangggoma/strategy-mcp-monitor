@@ -464,7 +464,51 @@ fn build_main_window(
         let _ = window.destroy();
         return Err(e.to_string());
     }
+    set_taskbar_icon(&window);
     Ok(window)
+}
+
+/// Gives the window a big icon (`WM_SETICON`/`ICON_BIG`) from this exe's own icon, at the
+/// window's DPI. Tauri sets only the small one (the title bar); without a big one the taskbar
+/// draws the shell's cached icon of the exe path, which can still be an older build's.
+fn set_taskbar_icon(window: &WebviewWindow) {
+    use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+    use windows::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
+    use windows::Win32::UI::Shell::SHDefExtractIconW;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        HICON, ICON_BIG, SM_CXICON, SendMessageW, WM_SETICON,
+    };
+    let (Ok(raw), Ok(exe)) = (window.hwnd(), std::env::current_exe()) else {
+        return;
+    };
+    let hwnd = HWND(raw.0 as *mut _);
+    // SAFETY: a live window of this thread's app.
+    let px = unsafe { GetSystemMetricsForDpi(SM_CXICON, GetDpiForWindow(hwnd)) }.clamp(32, 256);
+    let mut big = HICON::default();
+    // SAFETY: a NUL-terminated path that outlives the call; one out pointer, no small icon.
+    let got = unsafe {
+        SHDefExtractIconW(
+            &windows::core::HSTRING::from(exe.as_path()),
+            0,
+            0,
+            Some(&mut big),
+            None,
+            px as u32,
+        )
+    };
+    if got.is_err() || big.is_invalid() {
+        eprintln!("taskbar icon: {got:?}");
+        return;
+    }
+    // SAFETY: the window keeps the icon for its lifetime; it is not destroyed here.
+    unsafe {
+        SendMessageW(
+            hwnd,
+            WM_SETICON,
+            Some(WPARAM(ICON_BIG as usize)),
+            Some(LPARAM(big.0 as isize)),
+        );
+    }
 }
 
 fn window_error(e: &str) -> String {
