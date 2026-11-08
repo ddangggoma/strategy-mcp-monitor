@@ -61,8 +61,8 @@ pub trait Host {
     /// `OpenSCManager(SC_MANAGER_CONNECT)` + `OpenService(SERVICE_QUERY_STATUS)`.
     fn service_exists(&self) -> bool;
     /// The service's command line (`QueryServiceConfigW`, no admin needed); `None` without a service.
-    /// A 1.0.0 install made with `-InstallDir`/`-DataRoot` has nothing else that names its folders
-    /// (ruling F13).
+    /// An earlier PowerShell install made with `-InstallDir`/`-DataRoot` has nothing else that
+    /// names its folders (ruling F13).
     fn service_bin_path(&self) -> Option<String>;
     /// True when the service is gone or `STOPPED` (the wait after `stop_existing`).
     fn service_stopped(&self) -> bool;
@@ -288,7 +288,7 @@ impl Host for SystemHost {
 }
 
 /// A PC for tests: no administrator, no service, nothing installed, empty registry, this
-/// process's folder variables and volumes, this account, the 1.1.0 release payload.
+/// process's folder variables and volumes, this account, the 1.0.0 release payload.
 #[cfg(test)]
 pub struct FakeHost {
     pub admin: bool,
@@ -323,7 +323,7 @@ impl FakeHost {
             letters: SystemVolumes.local_fixed_letters(),
             sid: crate::install::testutil::me(),
             payload: PayloadInfo {
-                version: "1.1.0".into(),
+                version: "1.0.0".into(),
                 layout: "pyinstaller".into(),
                 kind: "release".into(),
                 size_kb: 60000,
@@ -399,7 +399,7 @@ mod tests {
         let p = h.payload();
         assert_eq!(
             (p.version.as_str(), p.layout.as_str(), p.kind.as_str()),
-            ("1.1.0", "pyinstaller", crate::payload::KIND)
+            ("1.0.0", "pyinstaller", crate::payload::KIND)
         );
         assert!(p.size_kb > 0);
         // A DWORD every Windows has; a missing one and a non-HKLM name read as None.

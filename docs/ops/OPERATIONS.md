@@ -1,6 +1,6 @@
-# MCP Monitor 운영 문서 (v1.1.0)
+# MCP Monitor 운영 문서 (v1.0.0)
 
-이 문서는 설치 폴더의 `docs\OPERATIONS.md`로도 함께 나갑니다. 기준 스펙은 `docs/PLAN.md` v0.9입니다(설치 폴더에는 없음). 1.1.0부터 MCP Monitor는 **실행 파일 하나**(`mcp-monitor-1.1.0.exe`)로 설치·업그레이드·제거·실행합니다. 1.0.0의 PowerShell 스크립트(`install.ps1` 등)는 없습니다.
+이 문서는 설치 폴더의 `docs\OPERATIONS.md`로도 함께 나갑니다. 기준 스펙은 `docs/PLAN.md` v0.9입니다(설치 폴더에는 없음). MCP Monitor는 **실행 파일 하나**(`mcp-monitor-1.0.0.exe`)로 설치·업그레이드·제거·실행합니다. 데스크톱 exe 이전의 PowerShell 스크립트(`install.ps1` 등)는 없습니다.
 
 따로 적지 않으면 경로는 기본값입니다.
 
@@ -14,11 +14,11 @@
 **명령줄에서 결과를 기다리는 법.** `mcp-monitor.exe`는 창 프로그램(GUI 서브시스템)이라, PowerShell은 그냥 실행하면 기다리지 않고 다음 프롬프트로 돌아갑니다. 출력과 종료 코드를 받으려면 **파이프라인 안에서** 실행합니다.
 
 ```powershell
-& .\mcp-monitor-1.1.0.exe install --dry-run | Write-Output
+& .\mcp-monitor-1.0.0.exe install --dry-run | Write-Output
 $LASTEXITCODE
 ```
 
-`$out = & .\mcp-monitor-1.1.0.exe …`처럼 변수에만 받으면 출력이 비고 `$LASTEXITCODE`도 바뀌지 않습니다. 이 문서의 명령은 모두 `| Write-Output` 형태로 적습니다.
+`$out = & .\mcp-monitor-1.0.0.exe …`처럼 변수에만 받으면 출력이 비고 `$LASTEXITCODE`도 바뀌지 않습니다. 이 문서의 명령은 모두 `| Write-Output` 형태로 적습니다.
 
 ## ① 구성 요약
 
@@ -36,7 +36,7 @@ $LASTEXITCODE
   보조 명령: `autostart on|off`(로그인할 때 트레이 시작), `verify-payload <빈 폴더>`(내장 묶음 검사), `--version`.
 - **서비스:** 이름 `mcp-monitor`, 표시 이름 `MCP Monitor`, 계정 `LocalSystem`, 시작 유형 `delayed-auto`.
   - Windows에 원래 있는 Microsoft 서비스 `McpManagementService`와는 **다른 서비스**입니다. 그 서비스는 건드리지 않습니다.
-  - 서비스는 `"<server>" service --root "<D>" --local-port 8700 --external-port 8701`로 실행됩니다. 1.0.0의 `bin\monitor\mcp-monitor.exe`는 1.1.0에서 `mcp-monitor-server.exe`로 이름이 바뀌었습니다(같은 이름의 exe가 둘이 되지 않게).
+  - 서비스는 `"<server>" service --root "<D>" --local-port 8700 --external-port 8701`로 실행됩니다. 이전 PowerShell 설치의 `bin\monitor\mcp-monitor.exe`는 데스크톱 exe에서 `mcp-monitor-server.exe`로 이름이 바뀌었습니다(같은 이름의 exe가 둘이 되지 않게).
 - **두 포트:**
 
   | 채널 | 주소 | 쓰임 |
@@ -56,7 +56,7 @@ $LASTEXITCODE
   | `bundle.json` | 버전·빌드 정보, `agent: "desktop"`(서버가 세션 에이전트로 `mcp-monitor.exe agent`를 띄움) |
   | `install.json` | 버전, 포트, 데이터 루트. 관리자가 아닌 앱 모드가 포트를 알려고 읽습니다 |
 
-  Program Files의 기본 권한을 그대로 씁니다. 사용자는 읽고 실행만 할 수 있습니다. 업그레이드는 새 폴더를 통째로 바꿔 끼우므로, 1.0.0의 `bin\agent\`와 `install\`은 사라집니다.
+  Program Files의 기본 권한을 그대로 씁니다. 사용자는 읽고 실행만 할 수 있습니다. 업그레이드는 새 폴더를 통째로 바꿔 끼우므로, 이전 PowerShell 설치의 `bin\agent\`와 `install\`은 사라집니다.
 - **그 밖에 설치가 만드는 것:**
 
   | 위치 | 내용 |
@@ -85,17 +85,17 @@ $LASTEXITCODE
 
 **준비**
 
-1. 받은 파일을 확인합니다. `Get-FileHash -Algorithm SHA256 .\mcp-monitor-1.1.0.exe`의 값이 `mcp-monitor-1.1.0.exe.sha256`의 값과 같아야 합니다.
+1. 받은 파일을 확인합니다. `Get-FileHash -Algorithm SHA256 .\mcp-monitor-1.0.0.exe`의 값이 `mcp-monitor-1.0.0.exe.sha256`의 값과 같아야 합니다.
 2. **Smart App Control(SAC)과 서명.** 이 exe와 안의 서버 exe에는 **코드 서명이 없습니다**(인증서 없음, D5).
    - 대상 PC의 SAC 상태: `(Get-MpComputerStatus).SmartAppControlState`(`On` / `Evaluation` / `Off`).
-   - SAC는 파일마다 평판으로 판단합니다. 개발 PC(SAC 켜짐)에서는 릴리스 exe와 서버 exe가 막히지 않았지만, 다른 PC에서는 다를 수 있습니다. 설치 전에 `& .\mcp-monitor-1.1.0.exe --version | Write-Output`이 `mcp-monitor 1.1.0 (payload <12자리>, release)`를 출력하는지 봅니다.
+   - SAC는 파일마다 평판으로 판단합니다. 개발 PC(SAC 켜짐)에서는 릴리스 exe와 서버 exe가 막히지 않았지만, 다른 PC에서는 다를 수 있습니다. 설치 전에 `& .\mcp-monitor-1.0.0.exe --version | Write-Output`이 `mcp-monitor 1.0.0 (payload <12자리>, release)`를 출력하는지 봅니다.
    - 막히면: "이 앱의 일부가 차단되었습니다" 알림, 아무 반응 없음, 또는 설치 중 `[실패] service_start`. 이벤트 뷰어 `응용 프로그램 및 서비스 로그 → Microsoft → Windows → CodeIntegrity → Operational`에 차단 기록(3076/3077)이 남습니다.
-   - 막혔을 때: SAC를 끄지 말고 개발팀에 알립니다. 정해 둔 대안은 (a) 코드 서명 인증서로 서명한 빌드(`install\build-desktop.ps1 -SignThumbprint …`), (b) 1.0.0 방식(PowerShell 설치 묶음, 커밋 c9938d1)입니다. SAC를 끄는 것은 기기 소유자의 보안 결정입니다.
+   - 막혔을 때: SAC를 끄지 말고 개발팀에 알립니다. 정해 둔 대안은 (a) 코드 서명 인증서로 서명한 빌드(`install\build-desktop.ps1 -SignThumbprint …`), (b) 이전 PowerShell 설치 방식(설치 묶음, 커밋 c9938d1)입니다. SAC를 끄는 것은 기기 소유자의 보안 결정입니다.
 3. **WebView2 런타임.** Windows 11에는 기본으로 있습니다(Evergreen, 업데이트는 Windows가 함). 확인: `Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' -Name pv`(없으면 `WOW6432Node` 없는 같은 키). 두 키 모두에 버전이 없으면 설치의 `check_os`가 `경고: 이 PC에 설치된 WebView2 런타임을 확인하지 못했습니다 …`를 내고 설치는 계속합니다. 사용자별로만 설치된 런타임은 이 검사가 보지 못하므로, 그때는 경고가 나와도 창이 열립니다. 런타임이 정말 없으면 앱 창이 열리지 않고(오류 상자), 고지는 기본 브라우저로 엽니다(⑨).
 
 **방법 A — 더블클릭(보통은 이것)**
 
-1. 관리자 계정이든 표준 사용자든 `mcp-monitor-1.1.0.exe`를 더블클릭합니다.
+1. 관리자 계정이든 표준 사용자든 `mcp-monitor-1.0.0.exe`를 더블클릭합니다.
 2. "MCP Monitor가 이 PC에 설치되어 있지 않습니다. 지금 설치할까요?" 상자에 설치 위치와 데이터 위치가 보입니다. **예**를 누릅니다.
 3. UAC 창에서 승인합니다(표준 사용자면 관리자 자격 증명). 아니요를 누르면 아무것도 바뀌지 않습니다.
 4. 설치가 끝나면 "설치 완료: http://127.0.0.1:8700/admin/setup 에서 첫 Admin 계정을 만드세요." 상자가 뜨고, **설치된** `<exe>`가 앱 창을 엽니다. 창은 상태 보드를 보여 주고, Admin이 아직 없으면 보드 위의 **초기 설정 시작** 링크로 첫 Admin 만들기 화면에 갑니다. 받은 exe는 그 뒤 끝나므로 지워도 됩니다.
@@ -106,8 +106,8 @@ $LASTEXITCODE
 관리자 PowerShell에서:
 
 ```powershell
-& .\mcp-monitor-1.1.0.exe install --dry-run | Write-Output    # 단계 목록(JSON)만, 관리자 불필요
-& .\mcp-monitor-1.1.0.exe install --open-firewall | Write-Output
+& .\mcp-monitor-1.0.0.exe install --dry-run | Write-Output    # 단계 목록(JSON)만, 관리자 불필요
+& .\mcp-monitor-1.0.0.exe install --open-firewall | Write-Output
 $LASTEXITCODE
 ```
 
@@ -184,8 +184,8 @@ $LASTEXITCODE
 
 ## ③ 업그레이드
 
-1. 새 버전의 `mcp-monitor-<버전>.exe`를 더블클릭합니다. "설치된 MCP Monitor 1.1.0을(를) 1.1.1(으)로 업그레이드할까요?" 상자에서 **예** → UAC → 진행 → 결과 상자 → 앱 창.
-   - 명령줄: 관리자 PowerShell에서 `& .\mcp-monitor-1.1.1.exe install | Write-Output`(또는 관리자 아닌 셸에서 `install --interactive`). 옵션을 주지 않으면 이전 설치 폴더·데이터 루트·포트·방화벽을 그대로 씁니다.
+1. 새 버전의 `mcp-monitor-<버전>.exe`를 더블클릭합니다. "설치된 MCP Monitor 1.0.0을(를) 1.0.1(으)로 업그레이드할까요?" 상자에서 **예** → UAC → 진행 → 결과 상자 → 앱 창.
+   - 명령줄: 관리자 PowerShell에서 `& .\mcp-monitor-1.0.1.exe install | Write-Output`(또는 관리자 아닌 셸에서 `install --interactive`). 옵션을 주지 않으면 이전 설치 폴더·데이터 루트·포트·방화벽을 그대로 씁니다.
 2. 설치기가 하는 일(②의 단계표 순서):
    1. 새 묶음을 `<I>.staging`에 풀고 검사합니다. 이때까지 서비스는 그대로 동작합니다.
    2. 서비스를 멈춥니다(최대 60초). 정지 순서는 ⑤와 같습니다(에이전트는 `exit`를 받고 고지 창을 닫음).
@@ -194,14 +194,14 @@ $LASTEXITCODE
    5. 데이터 루트·감사 정책·서비스 설정을 다시 맞추고, 서비스를 시작해 `/api/channel` 응답을 확인한 뒤 `<I>.old`를 지웁니다.
    - **서비스를 멈춘 뒤, 다시 시작하기 전에 실패하면** 설치기가 `[실패]` 줄 다음에 `[복구] …` 한 줄을 냅니다(더블클릭이면 결과 상자에도 보임).
      - 폴더를 바꾸기 전(`stop_existing`이 서비스 정지를 요청했지만 60초 안에 멈추지 않은 경우, `stop_apps`, `swap_install_dir`)이면 이전 설치가 그대로이므로 이전 버전의 서비스를 다시 시작합니다: `[복구] 이전 버전의 서비스를 다시 시작했습니다(sc.exe start mcp-monitor).` 다시 시작하지 못하면 `[복구] 이전 버전의 서비스를 다시 시작하지 못했습니다(종료 코드 N). …`이 나오고, 원인을 고친 뒤 `sc.exe start mcp-monitor` 또는 같은 exe로 다시 설치합니다.
-     - 폴더를 바꾼 뒤(`secure_data_root`, 감사 단계, `service_install` … `start_menu_shortcut`)면 `[복구] 서비스가 멈춰 있습니다. 원인을 고친 뒤 같은 mcp-monitor.exe를 관리자 권한으로 다시 실행하세요(복구 설치). 이전 설치는 <I>.old 에 있습니다.` 이때는 `sc.exe start mcp-monitor`로 켜지 않습니다: **1.0.0에서 올라오는 중이면 서비스 binPath가 아직 `<I>\bin\monitor\mcp-monitor.exe`(이제 `<I>.old` 안)를 가리켜 시작이 실패합니다**(1053/2). 같은 새 exe로 다시 설치하면 binPath를 고치고 서비스를 시작합니다. 1.0.0으로 돌아가야 하면 5의 3을 따릅니다.
+     - 폴더를 바꾼 뒤(`secure_data_root`, 감사 단계, `service_install` … `start_menu_shortcut`)면 `[복구] 서비스가 멈춰 있습니다. 원인을 고친 뒤 같은 mcp-monitor.exe를 관리자 권한으로 다시 실행하세요(복구 설치). 이전 설치는 <I>.old 에 있습니다.` 이때는 `sc.exe start mcp-monitor`로 켜지 않습니다: **PowerShell 설치에서 올라오는 중이면 서비스 binPath가 아직 `<I>\bin\monitor\mcp-monitor.exe`(이제 `<I>.old` 안)를 가리켜 시작이 실패합니다**(1053/2). 같은 새 exe로 다시 설치하면 binPath를 고치고 서비스를 시작합니다. PowerShell 설치로 돌아가야 하면 5의 3을 따릅니다.
 3. 그대로 남는 것: 데이터 루트(로그, 설정, 사용자, 스크립트), 감사 정책 백업(`auditpol-backup.csv`)과 바꾸기 전 레지스트리 값(`registry_before`)은 **첫 설치 때 것**, 포트와 방화벽 규칙.
 4. **낮은 버전으로는 설치하지 않습니다**(다운그레이드 거부). `install`은 `오류: --install-dir: 설치된 버전 …이 이 실행 파일(…)보다 새롭습니다 …`와 종료 코드 2. 더블클릭하면 "설치된 MCP Monitor(…)가 이 실행 파일(…)보다 새롭습니다" 안내 뒤 설치된 쪽의 앱 창을 엽니다. 같은 버전의 `install`은 **복구 설치**입니다(파일을 다시 풀고 설정을 다시 맞춤).
 5. **서비스 시작 뒤에 실패하면**(`[실패] service_start` 또는 `wait_ready`) `<I>.old`가 남고, 설치기는 자동으로 되돌리지 않습니다. 새 버전이 이미 `config.db`를 마이그레이션했을 수 있어서, 옛 버전으로 바꿔 끼우면 그 버전이 DB를 열지 못하기 때문입니다(종료 코드 5). 복구:
    1. 원인을 봅니다: ⑤ 오류를 보는 곳, `sc.exe query mcp-monitor`.
    2. 원인을 고칠 수 있으면 고친 뒤 **같은 새 exe로 다시 설치**합니다(복구 설치). 이때 남은 `<I>.old`는 지워지므로, 보관하려면 먼저 다른 이름으로 옮겨 둡니다.
-   3. 이전 버전으로 돌아가야 하면: `sc.exe stop mcp-monitor` → `<I>`를 `<I>.failed`로, `<I>.old`를 `<I>`로 이름 바꾸기 → 서비스가 종료 코드 5로 끝나면 업그레이드 전 ⑦ 백업을 복원 → `sc.exe start mcp-monitor`. 1.0.0으로 돌아갈 때는 서버 exe 이름이 달라 binPath도 고칩니다: `sc.exe config mcp-monitor binPath= "\"C:\Program Files\MCP Monitor\bin\monitor\mcp-monitor.exe\" service --root \"C:\ProgramData\MCP Monitor\" --local-port 8700 --external-port 8701"`.
-6. **1.0.0(PowerShell 설치)에서 올라오기:** 1.0.0에는 앱 및 기능 항목이 없지만, 설치기가 서비스 binPath와 `<I>\bundle.json`으로 찾아 업그레이드로 다룹니다. 데이터·설정·스크립트·감사 백업은 그대로이고, `<I>\bin\agent`와 `<I>\install`은 사라지며, binPath는 `mcp-monitor-server.exe`로, 세션 에이전트는 `mcp-monitor.exe agent`로 바뀝니다. 그 뒤에는 앱 및 기능과 시작 메뉴 항목이 생깁니다.
+   3. 이전 버전으로 돌아가야 하면: `sc.exe stop mcp-monitor` → `<I>`를 `<I>.failed`로, `<I>.old`를 `<I>`로 이름 바꾸기 → 서비스가 종료 코드 5로 끝나면 업그레이드 전 ⑦ 백업을 복원 → `sc.exe start mcp-monitor`. PowerShell 설치로 돌아갈 때는 서버 exe 이름이 달라 binPath도 고칩니다: `sc.exe config mcp-monitor binPath= "\"C:\Program Files\MCP Monitor\bin\monitor\mcp-monitor.exe\" service --root \"C:\ProgramData\MCP Monitor\" --local-port 8700 --external-port 8701"`.
+6. **이전 PowerShell 설치에서 올라오기:** 데스크톱 exe 이전의 PowerShell 설치에는 앱 및 기능 항목이 없지만, 설치기가 서비스 binPath와 `<I>\bundle.json`으로 찾아 업그레이드로 다룹니다. 데이터·설정·스크립트·감사 백업은 그대로이고, `<I>\bin\agent`와 `<I>\install`은 사라지며, binPath는 `mcp-monitor-server.exe`로, 세션 에이전트는 `mcp-monitor.exe agent`로 바뀝니다. 그 뒤에는 앱 및 기능과 시작 메뉴 항목이 생깁니다.
 7. 업그레이드가 끝낸 **다른 사용자 세션의 트레이**는 그 사용자가 다음에 로그인할 때(로그인할 때 시작을 켰다면) 또는 시작 메뉴로 다시 뜹니다. 고지 창은 서비스가 다시 띄운 에이전트가 다시 보여 줍니다.
 8. 업그레이드한 뒤 처음 시작할 때:
    - 새 버전이 `config.db` 마이그레이션을 적용합니다.
@@ -220,13 +220,13 @@ $LASTEXITCODE
   & "C:\Program Files\MCP Monitor\mcp-monitor.exe" uninstall --remove-data --restore-audit-policy | Write-Output
   ```
 
-  설치 폴더 안의 exe로 실행해도 되고, 받은 `mcp-monitor-1.1.0.exe`로 실행해도 됩니다.
+  설치 폴더 안의 exe로 실행해도 되고, 받은 `mcp-monitor-1.0.0.exe`로 실행해도 됩니다.
 
 | 옵션 | 기본값 | 설명 |
 |---|---|---|
 | `--install-dir <폴더>` | 앱 및 기능의 설치 위치 → 서비스 binPath → `%ProgramFiles%\MCP Monitor` | 지울 설치 폴더. `bundle.json`이 있을 때만 지웁니다. 경로 규칙은 `install`의 `--install-dir`와 같습니다(어긋나면 종료 코드 2) |
 | `--data-root <폴더>` | `<I>\install.json` → 서비스 binPath → `%ProgramData%\MCP Monitor` | 데이터 루트. `--remove-data`는 우리 표시(`data\mcp-monitor-data-root.json` 또는 `install-state.json`)가 있을 때만 지우고, 드라이브 루트·시스템 폴더와 경로 규칙에 어긋나는 경로(장치·UNC·subst 경로, 경로 안의 정션·심볼릭 링크)는 거부합니다(종료 코드 2). 데이터 루트가 설치 폴더 안이면 `--remove-data` 없이는 거부합니다 |
-| `--remove-data` | 꺼짐 | 데이터 루트 전체(로그, `config.db`, 스크립트, `collector-state.json`, `tamper-baseline.json`)와 모든 사용자의 `C:\Users\*\AppData\Local\mcp-monitor`(앱 창·고지 창 WebView2 프로필, 1.0.0의 Edge 고지 프로필)를 지웁니다. **되살릴 수 없습니다** |
+| `--remove-data` | 꺼짐 | 데이터 루트 전체(로그, `config.db`, 스크립트, `collector-state.json`, `tamper-baseline.json`)와 모든 사용자의 `C:\Users\*\AppData\Local\mcp-monitor`(앱 창·고지 창 WebView2 프로필, 이전 PowerShell 설치의 Edge 고지 프로필)를 지웁니다. **되살릴 수 없습니다** |
 | `--restore-audit-policy` | 꺼짐 | 첫 설치 때의 `auditpol` 백업과 레지스트리 값으로 되돌립니다 |
 | `--dry-run` | 꺼짐 | 단계만 출력합니다(관리자 불필요) |
 | `--interactive` | 꺼짐 | 관리자가 아니면 UAC로 승격하고, 결과를 상자로 보여 줍니다 |
@@ -241,8 +241,8 @@ $LASTEXITCODE
 - **실행 중인 자신:** 제거를 실행한 exe가 설치 폴더 안에 있으면 지울 수 없으므로 `mcp-monitor.exe.uninstalled`로 이름을 바꾸고, 그 파일과 설치 폴더는 **다음에 PC를 다시 시작할 때** 지워지도록 예약합니다("설치 폴더의 남은 파일은 다시 시작할 때 지워집니다."). 공유 `%TEMP%`로 자신을 복사하지 않습니다.
 - **다시 시작하기 전에 같은 폴더로 다시 설치하면 거부됩니다**: 남은 `mcp-monitor.exe.uninstalled` 때문에 `오류: --install-dir: … 이(가) 비어 있지 않고 MCP Monitor 설치 폴더(bundle.json)도 아닙니다.`(종료 코드 2). PC를 다시 시작한 뒤 설치합니다.
 - **로그인 때 트레이 시작(`HKCU\…\Run\MCPMonitor`):** 제거는 지금 로그인해 있는 사용자의 값만 지웁니다. 로그온하지 않은 사용자의 값은 남을 수 있습니다(무해: 가리키는 exe가 없으면 아무것도 실행되지 않고, "시작 앱" 목록에 이름만 보입니다). 그 사용자가 설정 → 앱 → 시작 프로그램에서 지울 수 있습니다.
-- **1.0.0(PowerShell 설치)의 제거**도 이 exe의 `uninstall`로 합니다(binPath로 찾음).
-- **방화벽:** 1.1.0부터는 다른 `--external-port`로 다시 설치하면 옛 규칙을 지웁니다(이전 설치가 방화벽을 열었을 때). 1.0.0 시절 다른 포트로 다시 설치하며 남은 옛 규칙은 그대로 남으므로 `netsh advfirewall firewall show rule name=all | findstr "MCP Monitor"`로 확인하고 지웁니다.
+- **이전 PowerShell 설치의 제거**도 이 exe의 `uninstall`로 합니다(binPath로 찾음).
+- **방화벽:** 데스크톱 exe는 다른 `--external-port`로 다시 설치하면 옛 규칙을 지웁니다(이전 설치가 방화벽을 열었을 때). PowerShell 설치 시절 다른 포트로 다시 설치하며 남은 옛 규칙은 그대로 남으므로 `netsh advfirewall firewall show rule name=all | findstr "MCP Monitor"`로 확인하고 지웁니다.
 
 ## ⑤ 서비스 운영
 
@@ -377,7 +377,7 @@ $LASTEXITCODE
 - **고지 창**은 화면 가운데의 WebView2 창입니다: 640×600(작업 영역에 맞춰 줄임), 항상 위, 닫기 단추 비활성, 최소화·최대화·크기 조절 없음, 작업 표시줄에 없음, Alt+F4·닫기 요청 무시, '확인'에만 반응합니다. 확인하면 닫히고 `notice_acknowledged`가 남습니다.
   - **다른 앱의 입력을 막지는 않습니다.** Windows는 다른 프로세스의 입력을 막는 모달 창을 허용하지 않으므로, 여기서 "모달"은 "확인 전에는 닫히지 않고 항상 위에 보이는 창"을 뜻합니다(Y10). 2초마다 다시 맨 위로 올리지만 초점을 빼앗지는 않고, 처음 한 번 앞으로 가져오기를 시도합니다(Windows가 허락하지 않으면 창을 깜빡여 알림).
   - 고지 창의 WebView2 프로세스가 죽으면(사용자가 작업 관리자에서 `msedgewebview2.exe`를 끝낸 경우 포함) "사용자가 닫음"으로 한 번 보고하고, 빈 창이 된 고지 창을 닫습니다. 서버가 곧 다시 보내면 새 창이 뜹니다(`notice_unacknowledged`). 알아차리는 길은 셋입니다: WebView2의 `ProcessFailed`, `BrowserProcessExited`, 그리고 에이전트가 2초 안팎마다 브라우저 프로세스가 살아 있는지 직접 보는 것(앞의 둘이 오지 않을 때). 에이전트 로그(표준 오류)에 `notice window: …` 줄로 어느 쪽이 알렸는지 남습니다.
-  - **고지 창 자체의 창 이벤트는 `activity.window`에 남지 않습니다.** 에이전트는 자기 프로세스의 창 이벤트를 받지 않는데(`WINEVENT_SKIPOWNPROCESS`), 1.1.0부터 고지 창이 에이전트 프로세스 안에 있기 때문입니다(1.0.0에서는 `msedge.exe`의 창으로 남았음). 고지가 보이고 확인된 사실은 `notice` `notice_shown`·`notice_acknowledged`가 대신 남깁니다.
+  - **고지 창 자체의 창 이벤트는 `activity.window`에 남지 않습니다.** 에이전트는 자기 프로세스의 창 이벤트를 받지 않는데(`WINEVENT_SKIPOWNPROCESS`), 고지 창이 에이전트 프로세스 안에 있기 때문입니다(이전 PowerShell 설치에서는 `msedge.exe`의 창으로 남았음). 고지가 보이고 확인된 사실은 `notice` `notice_shown`·`notice_acknowledged`가 대신 남깁니다.
   - **WebView2 런타임이 없으면** 고지를 기본 브라우저 탭으로 엽니다(최상위가 아님). 이때 고지 주소(토큰 포함)가 브라우저 명령줄에 남고, 서버 로그의 `<redacted>` 가림으로만 보호됩니다. 이 방식에서는 **탭을 닫아도 알 수 없어 다시 보여 주지 않습니다**: 고지는 확인될 때까지 "보임, 미확인"으로 남습니다. WebView2 런타임을 다시 설치하는 것이 조치입니다.
   - 에이전트(`agent --dialog webview`)가 자기 세션 번호를 알 수 없으면 창을 열지 않고 종료 코드 1로 끝납니다(서비스가 다시 띄움). 다른 종료 코드는 0(`exit` 받음), 2(인자·비밀 값 오류), 3(토큰 거부), 4(서버 응답 없음), 5(서버 증명 실패)입니다.
 - **세션 에이전트의 유휴 상태:** 5초마다 마지막 입력 시각(`GetLastInputInfo`)을 읽어 300초(서버가 정함) 넘게 입력이 없으면 `activity.idle` `idle`, 입력이 돌아오면 `active`를 보냅니다. 창 이벤트는 0.3초/1초 단위로 합쳐 묶음(최대 200개)으로 보내고, 서비스가 응답하지 않는 동안 최대 2,000개를 버퍼에 두며 넘친 수를 `dropped`로 알립니다. 창 제목은 서비스의 증명(HMAC)을 확인한 연결로만 보냅니다.
@@ -399,7 +399,7 @@ $LASTEXITCODE
   - 남는 것: `cmd.exe` 실행과 인자, `cmd /c …`, 배치 파일 실행, cmd에서 실행한 외부 프로그램.
   - PowerShell 명령은 스크립트 블록 로깅(4104)으로 남습니다.
 - **로그인 코드(Dummy OTP):**
-  - 1.1.0에도 실제 메일·문자 발송 공급자가 없습니다.
+  - 1.0.0에는 실제 메일·문자 발송 공급자가 없습니다.
   - 로그인 코드는 `<D>\data\dev\otp-outbox.log`에 `<시각> <이메일> <코드>` 줄로 쌓이고, PC 관리자만 읽을 수 있습니다.
   - 다른 PC에서 로그인하는 사람에게는 관리자가 코드를 전달해야 합니다. 실제 공급자는 추후입니다.
 - **데모 데이터(테스트·시연 전용, 운영 PC에서 쓰지 않습니다):** 저장소 체크아웃의 `tools\seed-demo.ps1`이 이 PC의 설치에 시험용 사용자와 실제로 도는 더미 MCP를 넣습니다.
@@ -423,7 +423,7 @@ $LASTEXITCODE
 | `[실패] stage_payload: …`(해시가 다름, 매니페스트에 없음 등) | `Get-FileHash`와 `.sha256` | exe가 손상되었습니다(받다가 잘림 등). 다시 받아 해시를 확인합니다 |
 | `[실패] stop_apps: …` | 작업 관리자 세부 정보의 `mcp-monitor.exe`, `msedgewebview2.exe` | 설치 폴더의 exe로 도는 프로세스를 끝내지 못했습니다. 그 프로세스를 끝내거나 사용자를 로그아웃시킨 뒤 다시 실행합니다 |
 | `[실패] swap_install_dir: …` | 설치 폴더를 연 탐색기 창, 명령 프롬프트의 현재 폴더, 바이러스 검사 | 파일 잠금으로 폴더를 바꾸지 못했습니다. 이전 설치로 되돌렸고, 다음 줄 `[복구] …`가 이전 버전의 서비스를 다시 시작했는지 알려 줍니다. 잠근 것을 닫고 다시 실행합니다. 트리 권한 오류면 메시지의 항목 권한을 Program Files 기본으로 되돌립니다 |
-| `[복구] 서비스가 멈춰 있습니다 …` | 바로 위의 `[실패]` 줄 | 폴더를 바꾼 뒤의 단계가 실패했습니다. 원인을 고친 뒤 같은 exe로 다시 설치합니다. `sc.exe start`는 1.0.0에서 올라오는 중이면 실패합니다(③ 2) |
+| `[복구] 서비스가 멈춰 있습니다 …` | 바로 위의 `[실패]` 줄 | 폴더를 바꾼 뒤의 단계가 실패했습니다. 원인을 고친 뒤 같은 exe로 다시 설치합니다. `sc.exe start`는 PowerShell 설치에서 올라오는 중이면 실패합니다(③ 2) |
 | "관리자 권한으로 실행 중이라 MCP Monitor 창을 열지 않습니다 …" | 실행 방법 | "관리자 권한으로 실행"이나 관리자 셸로 연 것입니다. 시작 메뉴의 **MCP Monitor**로 엽니다 |
 | 설치 폴더의 `mcp-monitor.exe`가 "… 다운로드한 mcp-monitor-<버전>.exe로 실행하세요" | 서비스 상태(`sc.exe query mcp-monitor`) | 서비스가 없어 설치가 필요한데, 설치된 exe로는 설치 폴더를 바꿀 수 없습니다. 받은 exe로 실행합니다(복구 설치) |
 | `[실패] service_start`, 또는 `wait_ready` 30초 초과 | `sc.exe query mcp-monitor`, ⑤ 오류를 보는 곳, CodeIntegrity 로그 | 종료 코드 3/4/5는 ⑤ 표를 봅니다. SAC 차단은 ②를 봅니다. 업그레이드였다면 `<I>.old`가 남아 있습니다(③ 5) |

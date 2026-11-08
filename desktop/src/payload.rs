@@ -207,7 +207,7 @@ mod tests {
         }
         fs::write(
             dir.join("bundle.json"),
-            r#"{"layout":"pyinstaller","version":"1.1.0","python":"3.15.2","built_at":"x","commit":"y","agent":"desktop"}"#,
+            r#"{"layout":"pyinstaller","version":"1.0.0","python":"3.15.2","built_at":"x","commit":"y","agent":"desktop"}"#,
         )
         .unwrap();
         fs::write(
@@ -583,7 +583,7 @@ mod tests {
     #[test]
     fn release_layout_needs_the_server_web_and_matching_version() {
         let (src, a) = packed();
-        check_release_layout(&a.manifest, "1.1.0").unwrap();
+        check_release_layout(&a.manifest, "1.0.0").unwrap();
         assert!(
             check_release_layout(&a.manifest, "1.2.0")
                 .unwrap_err()
@@ -591,25 +591,25 @@ mod tests {
         );
         fs::remove_file(src.path().join("web/notice.html")).unwrap();
         assert!(
-            check_release_layout(&pack_dir(src.path(), 3).unwrap().manifest, "1.1.0")
+            check_release_layout(&pack_dir(src.path(), 3).unwrap().manifest, "1.0.0")
                 .unwrap_err()
                 .contains("web/notice.html")
         );
         sample(src.path());
         fs::write(src.path().join("mcp-monitor.exe"), b"x").unwrap();
         assert!(
-            check_release_layout(&pack_dir(src.path(), 3).unwrap().manifest, "1.1.0")
+            check_release_layout(&pack_dir(src.path(), 3).unwrap().manifest, "1.0.0")
                 .unwrap_err()
                 .contains("mcp-monitor.exe")
         );
         fs::remove_file(src.path().join("mcp-monitor.exe")).unwrap();
         fs::write(
             src.path().join("bundle.json"),
-            r#"{"layout":"pyinstaller","version":"1.1.0","agent":"python"}"#,
+            r#"{"layout":"pyinstaller","version":"1.0.0","agent":"python"}"#,
         )
         .unwrap();
         assert!(
-            check_release_layout(&pack_dir(src.path(), 3).unwrap().manifest, "1.1.0")
+            check_release_layout(&pack_dir(src.path(), 3).unwrap().manifest, "1.0.0")
                 .unwrap_err()
                 .contains("agent")
         );

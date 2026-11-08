@@ -404,7 +404,7 @@ mod tests {
             .display()
             .to_string()
             .replace('/', "\\");
-        fs::write(data.join("data/install-state.json"), json!({"version": "1.1.0", "layout": "pyinstaller", "external_port": 9701, "firewall": true,
+        fs::write(data.join("data/install-state.json"), json!({"version": "1.0.0", "layout": "pyinstaller", "external_port": 9701, "firewall": true,
             "registry_before": {AUDIT_VALUE: null, PS_VALUE: 0}, "audit_backup": &backup}).to_string()).unwrap();
         let p = build_uninstall_plan(
             &UninstallArgs {
@@ -417,7 +417,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             (p.version.as_deref(), p.layout.as_deref()),
-            (Some("1.1.0"), Some("pyinstaller"))
+            (Some("1.0.0"), Some("pyinstaller"))
         );
         assert_eq!(
             step(&p, "firewall_delete").args[4],
@@ -438,7 +438,7 @@ mod tests {
         let s = Scratch::new();
         let mut h = FakeHost::new();
         h.installed = Some(Installed {
-            version: "1.1.0".into(),
+            version: "1.0.0".into(),
             install_location: s.path().join("elsewhere"),
         });
         let p = build_uninstall_plan(
@@ -662,7 +662,7 @@ mod tests {
         fs::create_dir_all(d0.join("data")).unwrap();
         fs::write(
             d0.join("data/install-state.json"),
-            json!({"install_dir": &inst, "version": "1.0.0", "external_port": 1111}).to_string(),
+            json!({"install_dir": &inst, "version": "0.9.0", "external_port": 1111}).to_string(),
         )
         .unwrap();
         fs::create_dir_all(&inst).unwrap();
@@ -674,7 +674,7 @@ mod tests {
         fs::create_dir_all(d.join("data")).unwrap();
         fs::write(
             d.join("data/install-state.json"),
-            json!({"version": "1.1.0", "external_port": 9701}).to_string(),
+            json!({"version": "1.0.0", "external_port": 9701}).to_string(),
         )
         .unwrap();
         let p = build_uninstall_plan(
@@ -719,7 +719,7 @@ mod tests {
             (
                 Some(inst.display().to_string().as_str()),
                 Some(d.display().to_string().as_str()),
-                Some("1.1.0")
+                Some("1.0.0")
             )
         );
         assert_eq!(
@@ -728,7 +728,7 @@ mod tests {
         );
         // Apps & features wins over the state; the service's binPath over the defaults.
         h.installed = Some(Installed {
-            version: "1.1.0".into(),
+            version: "1.0.0".into(),
             install_location: s.path().join("arp"),
         });
         assert_eq!(

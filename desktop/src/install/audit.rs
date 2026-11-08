@@ -527,7 +527,7 @@ mod tests {
                 p.install_dir.as_deref(),
                 p.service_mode.as_deref()
             ),
-            (Some("1.1.0"), Some("pyinstaller"), None, None)
+            (Some("1.0.0"), Some("pyinstaller"), None, None)
         );
         assert_eq!(p.data_root, Some(s.path().join("d").display().to_string()));
         assert!(p.notes.is_empty());

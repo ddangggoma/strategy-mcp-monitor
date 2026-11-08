@@ -166,13 +166,13 @@ def test_agent_flags_reject_other_values(args, capsys):
 
 
 def desktop_bundle(tmp_path, monkeypatch, agent="desktop"):
-    (tmp_path / "bundle.json").write_text(json.dumps({"layout": "pyinstaller", "version": "1.1.0", "agent": agent}), "utf-8")
+    (tmp_path / "bundle.json").write_text(json.dumps({"layout": "pyinstaller", "version": "1.0.0", "agent": agent}), "utf-8")
     exe = tmp_path / "bin" / "monitor" / "mcp-monitor-server.exe"; exe.parent.mkdir(parents=True); exe.write_bytes(b"")
     monkeypatch.setattr(sys, "executable", str(exe))
 
 
 def test_agent_dialog_defaults_to_webview_in_a_desktop_bundle(tmp_path, monkeypatch):
-    (tmp_path / "bundle.json").write_text(json.dumps({"layout": "pyinstaller", "version": "1.1.0", "agent": "desktop"}), "utf-8")
+    (tmp_path / "bundle.json").write_text(json.dumps({"layout": "pyinstaller", "version": "1.0.0", "agent": "desktop"}), "utf-8")
     exe = tmp_path / "bin" / "monitor" / "mcp-monitor-server.exe"; exe.parent.mkdir(parents=True); exe.write_bytes(b"")
     monkeypatch.setattr(sys, "executable", str(exe))
     ns = parse_args([])

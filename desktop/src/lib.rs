@@ -463,7 +463,7 @@ mod tests {
                 elevated,
                 parent_is_same_exe: false,
                 answer,
-                exe: PathBuf::from(r"C:\Users\u\Downloads\mcp-monitor-1.1.0.exe"),
+                exe: PathBuf::from(r"C:\Users\u\Downloads\mcp-monitor-1.0.0.exe"),
                 installed: RefCell::new(None),
                 installs_to: None,
                 service: false,
@@ -606,7 +606,7 @@ mod tests {
         assert_eq!(launched.len(), 1);
         assert_eq!(
             launched[0].0,
-            PathBuf::from(r"C:\Users\u\Downloads\mcp-monitor-1.1.0.exe")
+            PathBuf::from(r"C:\Users\u\Downloads\mcp-monitor-1.0.0.exe")
         );
         assert_eq!(
             launched[0].1,
@@ -895,7 +895,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(
             d.path().join("install.json"),
-            r#"{"version":"1.1.0","local_port":9700,"external_port":9701,"data_root":"D:\\MCP"}"#,
+            r#"{"version":"1.0.0","local_port":9700,"external_port":9701,"data_root":"D:\\MCP"}"#,
         )
         .unwrap();
         if exe {
@@ -935,7 +935,7 @@ mod tests {
         let dir = install_folder(true);
         let mut f = FakeElevator::new(false, Ok(0));
         f.yes = true;
-        f.installs_to = Some(entry("1.1.0", dir.path()));
+        f.installs_to = Some(entry("1.0.0", dir.path()));
         assert_eq!(run_with(args(&[]), &f), 0);
         assert_eq!(
             *f.launched.borrow(),
@@ -951,7 +951,7 @@ mod tests {
         let dir = install_folder(false);
         let mut f = FakeElevator::new(false, Ok(0));
         f.yes = true;
-        f.installs_to = Some(entry("1.1.0", dir.path()));
+        f.installs_to = Some(entry("1.0.0", dir.path()));
         assert_eq!(run_with(args(&[]), &f), 0);
         assert!(f.started.borrow().is_empty());
         let windows = f.windows.borrow();
@@ -983,15 +983,15 @@ mod tests {
     fn auto_upgrades_an_older_install_in_its_own_folder() {
         let dir = install_folder(true);
         let mut f = FakeElevator::new(false, Ok(0));
-        *f.installed.borrow_mut() = Some(entry("1.0.0", dir.path()));
+        *f.installed.borrow_mut() = Some(entry("0.9.0", dir.path()));
         f.service = true;
         f.yes = true;
-        f.installs_to = Some(entry("1.1.0", dir.path()));
+        f.installs_to = Some(entry("1.0.0", dir.path()));
         assert_eq!(run_with(args(&[]), &f), 0);
         assert_eq!(
             *f.asked.borrow(),
             [app::upgrade_prompt(
-                Some(version::Version(1, 0, 0)),
+                Some(version::Version(0, 9, 0)),
                 version::product()
             )]
         );
@@ -1005,9 +1005,10 @@ mod tests {
 
     #[test]
     fn auto_upgrades_a_powershell_install_found_through_its_service() {
-        // 1.0.0: no Apps & features entry, the version in bundle.json, the folder in the binPath.
+        // The earlier PowerShell install: no Apps & features entry, the version in bundle.json,
+        // the folder in the binPath.
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("bundle.json"), r#"{"version":"1.0.0"}"#).unwrap();
+        std::fs::write(dir.path().join("bundle.json"), r#"{"version":"0.9.0"}"#).unwrap();
         let mut f = FakeElevator::new(false, Ok(0));
         f.service = true;
         f.bin_path = Some(format!(
@@ -1015,7 +1016,7 @@ mod tests {
             dir.path().display()
         ));
         assert_eq!(run_with(args(&[]), &f), 0, "no: nothing happens");
-        assert!(f.asked.borrow()[0].starts_with("설치된 MCP Monitor 1.0.0을(를) "));
+        assert!(f.asked.borrow()[0].starts_with("설치된 MCP Monitor 0.9.0을(를) "));
         assert!(f.launched.borrow().is_empty());
         f.yes = true;
         run_with(args(&[]), &f);
@@ -1030,7 +1031,7 @@ mod tests {
     fn auto_with_the_same_version_opens_the_installed_window_without_asking() {
         let dir = install_folder(true);
         let mut f = FakeElevator::new(false, Ok(0));
-        *f.installed.borrow_mut() = Some(entry("1.1.0", dir.path()));
+        *f.installed.borrow_mut() = Some(entry("1.0.0", dir.path()));
         f.service = true;
         // from a download: the installed copy is started
         assert_eq!(run_with(args(&[]), &f), 0);
@@ -1066,7 +1067,7 @@ mod tests {
     fn auto_offers_a_repair_install_when_the_service_is_gone() {
         let dir = install_folder(true);
         let f = FakeElevator::new(false, Ok(0));
-        *f.installed.borrow_mut() = Some(entry("1.1.0", dir.path()));
+        *f.installed.borrow_mut() = Some(entry("1.0.0", dir.path()));
         assert_eq!(run_with(args(&[]), &f), 0);
         assert_eq!(
             *f.asked.borrow(),
@@ -1086,7 +1087,7 @@ mod tests {
 
         let dir = install_folder(true);
         let f = FakeElevator::new(false, Ok(0));
-        *f.installed.borrow_mut() = Some(entry("1.1.0", dir.path()));
+        *f.installed.borrow_mut() = Some(entry("1.0.0", dir.path()));
         assert_eq!(run_with(args(&["app", "--background"]), &f), 0);
         {
             let windows = f.windows.borrow();
@@ -1115,14 +1116,14 @@ mod tests {
     fn the_installed_copy_does_not_offer_an_install_it_cannot_do() {
         let dir = install_folder(true);
         let mut f = FakeElevator::new(false, Ok(0));
-        *f.installed.borrow_mut() = Some(entry("1.1.0", dir.path()));
+        *f.installed.borrow_mut() = Some(entry("1.0.0", dir.path()));
         f.exe = dir.path().join("mcp-monitor.exe");
         f.yes = true;
         assert_eq!(run_with(args(&[]), &f), 1);
         assert!(f.asked.borrow().is_empty() && f.launched.borrow().is_empty());
         let boxes = f.boxes.borrow();
         assert!(
-            boxes.len() == 1 && boxes[0].contains("다운로드한 mcp-monitor-1.1.0.exe로 실행하세요"),
+            boxes.len() == 1 && boxes[0].contains("다운로드한 mcp-monitor-1.0.0.exe로 실행하세요"),
             "{boxes:?}"
         );
     }
@@ -1135,7 +1136,7 @@ mod tests {
         let dir = install_folder(true);
         for a in [&["app"][..], &["app", "--background"][..], &[][..]] {
             let mut f = FakeElevator::new(true, Ok(0));
-            *f.installed.borrow_mut() = Some(entry("1.1.0", dir.path()));
+            *f.installed.borrow_mut() = Some(entry("1.0.0", dir.path()));
             f.service = true;
             assert_eq!(run_with(args(a), &f), 1, "{a:?}");
             assert!(
@@ -1146,12 +1147,12 @@ mod tests {
         }
         // Re-review minor 2: an elevated install or upgrade that succeeds opens nothing either,
         // but ends with an information box and 0, never the error box and 1.
-        for before in [None, Some("1.0.0")] {
+        for before in [None, Some("0.9.0")] {
             let mut f = FakeElevator::new(true, Ok(0));
             *f.installed.borrow_mut() = before.map(|v| entry(v, dir.path()));
             f.service = before.is_some();
             f.yes = true;
-            f.installs_to = Some(entry("1.1.0", dir.path()));
+            f.installs_to = Some(entry("1.0.0", dir.path()));
             assert_eq!(run_with(args(&[]), &f), 0, "{before:?}");
             assert_eq!(f.launched.borrow().len(), 1, "{before:?}");
             assert!(
@@ -1175,7 +1176,7 @@ mod tests {
         ] {
             let mut f = FakeElevator::new(true, answer.clone());
             f.yes = true;
-            f.installs_to = Some(entry("1.1.0", dir.path()));
+            f.installs_to = Some(entry("1.0.0", dir.path()));
             assert_eq!(run_with(args(&[]), &f), code, "{answer:?}");
             assert!(
                 f.windows.borrow().is_empty() && f.started.borrow().is_empty(),
@@ -1207,7 +1208,7 @@ mod tests {
 
         let dir = Path::new(r"C:\Program Files\MCP Monitor");
         let f = FakeElevator::new(false, Ok(0));
-        *f.installed.borrow_mut() = Some(entry("1.1.0", dir));
+        *f.installed.borrow_mut() = Some(entry("1.0.0", dir));
         assert_eq!(run_with(args(&["autostart", "on"]), &f), 0);
         assert_eq!(run_with(args(&["autostart", "off"]), &f), 0);
         assert_eq!(
@@ -1217,7 +1218,7 @@ mod tests {
         assert!(f.launched.borrow().is_empty());
 
         let mut f = FakeElevator::new(false, Ok(0));
-        *f.installed.borrow_mut() = Some(entry("1.1.0", dir));
+        *f.installed.borrow_mut() = Some(entry("1.0.0", dir));
         f.autostart_fails = true;
         assert_eq!(run_with(args(&["autostart", "off"]), &f), 1);
     }

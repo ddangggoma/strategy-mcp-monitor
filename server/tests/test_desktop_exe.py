@@ -1,6 +1,6 @@
 """The release mcp-monitor.exe built by install/build-desktop.ps1 (Plan 6 Task 13).
 
-Run with ``$env:MCPMON_DESKTOP_EXE = "<repo>\\dist\\mcp-monitor-1.1.0.exe"; uv run python -m pytest -m desktop -v``.
+Run with ``$env:MCPMON_DESKTOP_EXE = "<repo>\\dist\\mcp-monitor-1.0.0.exe"; uv run python -m pytest -m desktop -v``.
 Nothing here needs admin rights or changes this PC (install without admin stops at require_admin). On an elevated
 shell (the GitHub runner) the real install would run, so that test skips there with its reason.
 """

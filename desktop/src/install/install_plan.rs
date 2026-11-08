@@ -117,7 +117,7 @@ pub fn is_newer(a: &str, b: &str) -> bool {
 }
 
 /// What the service's binPath says about an earlier install (ruling F13): only when it runs one
-/// of our programs (`<I>\bin\monitor\mcp-monitor-server.exe`, 1.0.0's
+/// of our programs (`<I>\bin\monitor\mcp-monitor-server.exe`, the PowerShell install's
 /// `<I>\bin\monitor\mcp-monitor.exe`, or `<I>\runtime\python.exe`).
 #[derive(Debug, Default, PartialEq)]
 pub struct ServiceFolders {
@@ -255,7 +255,8 @@ pub fn build_install_plan(a: &InstallArgs, h: &dyn Host) -> Result<Plan, ArgErro
     let inst = i.display().to_string();
     let (staging, old) = (format!("{inst}.staging"), format!("{inst}.old"));
 
-    // 1.0.0 (PowerShell) installs have no Apps & features entry: their bundle.json tells.
+    // Earlier PowerShell installs (before the desktop exe) have no Apps & features entry: their
+    // bundle.json tells.
     let bundle = read_json(&i.join("bundle.json"));
     let installed_version = installed.as_ref().map(|x| x.version.clone()).or_else(|| {
         bundle
@@ -628,7 +629,7 @@ mod tests {
             ),
             (
                 "install",
-                Some("1.1.0"),
+                Some("1.0.0"),
                 Some("pyinstaller"),
                 Some("create")
             )
@@ -808,7 +809,7 @@ mod tests {
         o.remove("installed_at");
         assert_eq!(
             v,
-            json!({"version": "1.1.0", "layout": "pyinstaller", "install_dir": &inst, "data_root": &data,
+            json!({"version": "1.0.0", "layout": "pyinstaller", "install_dir": &inst, "data_root": &data,
                               "local_port": 8700, "external_port": 8701, "firewall": false, "skip_audit_policy": false,
                               "audit_backup": format!(r"{data}\data\auditpol-backup.csv"), "installer": "desktop"})
         );
@@ -819,7 +820,7 @@ mod tests {
         );
         assert_eq!(
             serde_json::from_str::<Value>(&info.args[1]).unwrap(),
-            json!({"version": "1.1.0", "local_port": 8700, "external_port": 8701, "data_root": &data})
+            json!({"version": "1.0.0", "local_port": 8700, "external_port": 8701, "data_root": &data})
         );
         let un = step(&p, "uninstall_entry");
         assert_eq!(
@@ -828,7 +829,7 @@ mod tests {
         );
         for want in [
             "DisplayName=REG_SZ:MCP Monitor".to_string(),
-            "DisplayVersion=REG_SZ:1.1.0".into(),
+            "DisplayVersion=REG_SZ:1.0.0".into(),
             "Publisher=REG_SZ:MCP Monitor".into(),
             format!("InstallLocation=REG_SZ:{inst}"),
             format!(r#"DisplayIcon=REG_SZ:"{inst}\mcp-monitor.exe",0"#),
@@ -1004,9 +1005,9 @@ mod tests {
             install_location: s.path().join("inst"),
         });
         let e = build_install_plan(&args(&s), &h).unwrap_err();
-        assert!(e.0.contains("1.2.0") && e.0.contains("1.1.0"), "{}", e.0);
+        assert!(e.0.contains("1.2.0") && e.0.contains("1.0.0"), "{}", e.0);
         h.installed = Some(Installed {
-            version: "1.1.0".into(),
+            version: "1.0.0".into(),
             install_location: s.path().join("inst"),
         });
         assert!(build_install_plan(&args(&s), &h).is_ok()); // the same version: a repair
@@ -1016,7 +1017,7 @@ mod tests {
         let (_, data) = dirs(s);
         fs::create_dir_all(s.path().join("inst")).unwrap();
         fs::write(s.path().join("inst/bundle.json"), "{}").unwrap();
-        fs::write(s.path().join("inst/install.json"), json!({"version": "1.1.0", "local_port": 9700, "external_port": 9701, "data_root": data}).to_string()).unwrap();
+        fs::write(s.path().join("inst/install.json"), json!({"version": "1.0.0", "local_port": 9700, "external_port": 9701, "data_root": data}).to_string()).unwrap();
         fs::create_dir_all(s.path().join("data/data")).unwrap();
         fs::write(s.path().join("data/data/mcp-monitor-data-root.json"), "{}").unwrap();
         fs::write(
@@ -1031,7 +1032,7 @@ mod tests {
         let s = Scratch::new();
         earlier_install(
             &s,
-            json!({"version": "1.1.0", "local_port": 9700, "external_port": 9701, "firewall": true, "registry_before": {}, "audit_backup": null}),
+            json!({"version": "1.0.0", "local_port": 9700, "external_port": 9701, "firewall": true, "registry_before": {}, "audit_backup": null}),
         );
         let a = InstallArgs {
             install_dir: Some(s.path().join("inst")),
@@ -1066,7 +1067,7 @@ mod tests {
         let s = Scratch::new();
         earlier_install(
             &s,
-            json!({"version": "1.1.0", "local_port": 9700, "external_port": 9701, "firewall": true, "registry_before": {}, "audit_backup": null}),
+            json!({"version": "1.0.0", "local_port": 9700, "external_port": 9701, "firewall": true, "registry_before": {}, "audit_backup": null}),
         );
         let a = InstallArgs {
             install_dir: Some(s.path().join("inst")),
@@ -1110,7 +1111,7 @@ mod tests {
         fs::write(data.join("data/auditpol-backup.csv"), "x").unwrap();
         fs::write(data.join("data/mcp-monitor-data-root.json"), "{}").unwrap();
         fs::write(data.join("data/install-state.json"), json!({"registry_before": {AUDIT_VALUE: null, PS_VALUE: 0},
-            "audit_backup": data.join("data/auditpol-backup.csv"), "version": "1.0.0", "external_port": 8701}).to_string()).unwrap();
+            "audit_backup": data.join("data/auditpol-backup.csv"), "version": "0.9.0", "external_port": 8701}).to_string()).unwrap();
         let mut h = FakeHost::new();
         h.dwords.insert(AUDIT_VALUE.into(), 1); // our own values by now
         h.dwords.insert(PS_VALUE.into(), 1);
@@ -1130,18 +1131,18 @@ mod tests {
         let s = Scratch::new();
         let (inst, data) = dirs(&s);
         fs::create_dir_all(s.path().join("inst/bin/agent")).unwrap();
-        fs::write(s.path().join("inst/bundle.json"), r#"{"layout":"pyinstaller","version":"1.0.0","python":"3.15.2","built_at":"x","commit":"y"}"#).unwrap();
+        fs::write(s.path().join("inst/bundle.json"), r#"{"layout":"pyinstaller","version":"0.9.0","python":"3.15.2","built_at":"x","commit":"y"}"#).unwrap();
         fs::create_dir_all(s.path().join("data/data")).unwrap();
         fs::write(
             s.path().join("data/data/mcp-monitor-data-root.json"),
             r#"{"product":"mcp-monitor","created_by":"install"}"#,
         )
         .unwrap();
-        fs::write(s.path().join("data/data/install-state.json"), json!({"installed_at": "2026-11-07T10:00:00+09:00", "version": "1.0.0",
+        fs::write(s.path().join("data/data/install-state.json"), json!({"installed_at": "2026-11-07T10:00:00+09:00", "version": "0.9.0",
             "layout": "pyinstaller", "install_dir": &inst, "data_root": &data, "local_port": 8800, "external_port": 8801, "firewall": false,
             "registry_before": {AUDIT_VALUE: null, PS_VALUE: null}, "audit_backup": format!(r"{data}\data\auditpol-backup.csv")}).to_string()).unwrap();
         let mut h = FakeHost::new();
-        h.service = true; // 1.0.0 had no Apps & features entry
+        h.service = true; // the PowerShell install had no Apps & features entry
         let p = build_install_plan(&args(&s), &h).unwrap();
         assert_eq!(p.service_mode.as_deref(), Some("update"));
         assert!(
@@ -1368,8 +1369,8 @@ mod tests {
         );
     }
 
-    /// F13 (a): a 1.0.0 install made with -InstallDir/-DataRoot has no Apps & features entry and no
-    /// install.json: its folders and ports come from the service's binPath, not the defaults.
+    /// F13 (a): an earlier PowerShell install made with -InstallDir/-DataRoot has no Apps & features
+    /// entry and no install.json: its folders and ports come from the service's binPath, not the defaults.
     #[test]
     fn folders_and_ports_come_from_the_service_of_an_earlier_install() {
         let s = Scratch::new();
@@ -1377,7 +1378,7 @@ mod tests {
         fs::create_dir_all(s.path().join("inst")).unwrap();
         fs::write(
             s.path().join("inst/bundle.json"),
-            r#"{"layout":"pyinstaller","version":"1.0.0"}"#,
+            r#"{"layout":"pyinstaller","version":"0.9.0"}"#,
         )
         .unwrap();
         let mut h = FakeHost::new();

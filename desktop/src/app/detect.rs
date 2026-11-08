@@ -1,7 +1,7 @@
 //! What the exe finds on this PC when it starts without arguments (Y12), and where the app window
 //! goes: `<I>\install.json` (ports and data root, readable by every user, Y6), the installed
-//! version (Apps & features `DisplayVersion`, else a 1.0.0 PowerShell install's `bundle.json`) and
-//! the decision between installing, upgrading and opening the window.
+//! version (Apps & features `DisplayVersion`, else the earlier PowerShell install's
+//! `bundle.json`) and the decision between installing, upgrading and opening the window.
 
 use crate::version::Version;
 use serde::Deserialize;
@@ -24,7 +24,7 @@ pub fn read_install_info(install_dir: &Path) -> Option<InstallInfo> {
 }
 
 /// The installed version: the Apps & features `DisplayVersion` (`registry`), else the `version`
-/// of `<install_dir>\bundle.json` (a 1.0.0 PowerShell install has no Apps & features entry).
+/// of `<install_dir>\bundle.json` (the earlier PowerShell install has no Apps & features entry).
 pub fn installed_version(registry: Option<String>, install_dir: &Path) -> Option<Version> {
     registry.as_deref().and_then(Version::parse).or_else(|| {
         let text = std::fs::read_to_string(install_dir.join("bundle.json")).ok()?;
@@ -76,10 +76,10 @@ mod tests {
 
     #[test]
     fn auto_mode_decisions() {
-        let own = Version(1, 1, 0);
+        let own = Version(1, 0, 0);
         assert_eq!(decide(None, false, own), AutoAction::Install);
         assert_eq!(
-            decide(Some(Version(1, 1, 0)), false, own),
+            decide(Some(Version(1, 0, 0)), false, own),
             AutoAction::Install
         ); // entry left, service gone: repair
         assert_eq!(
@@ -87,12 +87,12 @@ mod tests {
             AutoAction::Upgrade { installed: None }
         );
         assert_eq!(
-            decide(Some(Version(1, 0, 0)), true, own),
+            decide(Some(Version(0, 9, 0)), true, own),
             AutoAction::Upgrade {
-                installed: Some(Version(1, 0, 0))
+                installed: Some(Version(0, 9, 0))
             }
         );
-        assert_eq!(decide(Some(Version(1, 1, 0)), true, own), AutoAction::App);
+        assert_eq!(decide(Some(Version(1, 0, 0)), true, own), AutoAction::App);
         assert_eq!(
             decide(Some(Version(1, 2, 0)), true, own),
             AutoAction::OlderThanInstalled {
@@ -112,21 +112,21 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         fs::write(
             d.path().join("bundle.json"),
-            r#"{"layout":"pyinstaller","version":"1.0.0"}"#,
+            r#"{"layout":"pyinstaller","version":"0.9.0"}"#,
         )
         .unwrap();
         assert_eq!(
-            installed_version(Some("1.1.0".into()), d.path()),
-            Some(Version(1, 1, 0))
+            installed_version(Some("1.0.0".into()), d.path()),
+            Some(Version(1, 0, 0))
         );
-        assert_eq!(installed_version(None, d.path()), Some(Version(1, 0, 0)));
+        assert_eq!(installed_version(None, d.path()), Some(Version(0, 9, 0)));
         assert_eq!(installed_version(None, &d.path().join("missing")), None);
         // an Apps & features value that is no version does not hide the bundle's
         assert_eq!(
             installed_version(Some("1.1".into()), d.path()),
-            Some(Version(1, 0, 0))
+            Some(Version(0, 9, 0))
         );
-        fs::write(d.path().join("bundle.json"), r#"{"version":"1.0.0-rc1"}"#).unwrap();
+        fs::write(d.path().join("bundle.json"), r#"{"version":"0.9.0-rc1"}"#).unwrap();
         assert_eq!(installed_version(None, d.path()), None);
     }
 
@@ -135,7 +135,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         fs::write(
             d.path().join("install.json"),
-            r#"{"version":"1.1.0","local_port":9700,"external_port":9701,"data_root":"D:\\MCP"}"#,
+            r#"{"version":"1.0.0","local_port":9700,"external_port":9701,"data_root":"D:\\MCP"}"#,
         )
         .unwrap();
         let info = read_install_info(d.path()).unwrap();
@@ -156,10 +156,10 @@ mod tests {
     fn install_info_needs_every_field_and_a_real_port() {
         let d = tempfile::tempdir().unwrap();
         for bad in [
-            r#"{"version":"1.1.0","local_port":0,"external_port":9701,"data_root":"D:\\MCP"}"#,
-            r#"{"version":"1.1.0","local_port":70000,"external_port":9701,"data_root":"D:\\MCP"}"#,
-            r#"{"version":"1.1.0","external_port":9701,"data_root":"D:\\MCP"}"#,
-            r#"{"version":"1.1.0","local_port":"9700","external_port":9701,"data_root":"D:\\MCP"}"#,
+            r#"{"version":"1.0.0","local_port":0,"external_port":9701,"data_root":"D:\\MCP"}"#,
+            r#"{"version":"1.0.0","local_port":70000,"external_port":9701,"data_root":"D:\\MCP"}"#,
+            r#"{"version":"1.0.0","external_port":9701,"data_root":"D:\\MCP"}"#,
+            r#"{"version":"1.0.0","local_port":"9700","external_port":9701,"data_root":"D:\\MCP"}"#,
         ] {
             fs::write(d.path().join("install.json"), bad).unwrap();
             assert!(read_install_info(d.path()).is_none(), "{bad}");

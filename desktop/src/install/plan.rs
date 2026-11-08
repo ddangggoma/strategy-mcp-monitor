@@ -138,8 +138,8 @@ pub fn run_plan(plan: &Plan, ex: &mut dyn Executor, out: &mut dyn Write) -> i32 
 /// Review item 4: an install that stopped the running service (`stop_existing`) and then failed
 /// before `service_start` must not leave it down without a word. Before `swap_install_dir` the
 /// earlier install is whole, so its service is started again (`sc.exe start mcp-monitor`); after
-/// it, the earlier binPath may name a file that moved to `<I>.old` (an upgrade from 1.0.0), so
-/// the line says how to recover instead. Each outcome is one `[복구] …` line after `[실패]`.
+/// it, the earlier binPath may name a file that moved to `<I>.old` (an upgrade from the earlier
+/// PowerShell install), so the line says how to recover instead. Each outcome is one `[복구] …` line after `[실패]`.
 /// `stop_sent`: `stop_existing` itself failed after `sc stop` was sent (its wait for the stop did
 /// not end in time), which counts as a stopped service too (re-review nit 4).
 fn recover_install(
@@ -217,7 +217,7 @@ mod tests {
     fn plan(steps: Vec<Step>) -> Plan {
         Plan {
             script: "install".into(),
-            version: Some("1.1.0".into()),
+            version: Some("1.0.0".into()),
             layout: Some("pyinstaller".into()),
             install_dir: None,
             data_root: None,
@@ -317,7 +317,7 @@ mod tests {
         assert_eq!(print_dry_run(&p, &mut out, &mut err), 0);
         let text = String::from_utf8(out).unwrap();
         assert_eq!(text.matches('\n').count(), 1);
-        assert!(text.starts_with(r#"{"script":"install","version":"1.1.0","layout":"pyinstaller","install_dir":null,"data_root":null,"service_mode":"create","steps":[{"id":"require_admin","cmd":"(admin)","args":[],"ok":[0],"when":null}],"notes":["n1"]}"#), "{text}");
+        assert!(text.starts_with(r#"{"script":"install","version":"1.0.0","layout":"pyinstaller","install_dir":null,"data_root":null,"service_mode":"create","steps":[{"id":"require_admin","cmd":"(admin)","args":[],"ok":[0],"when":null}],"notes":["n1"]}"#), "{text}");
         assert_eq!(String::from_utf8(err).unwrap(), "참고: n1\n");
     }
 
@@ -545,8 +545,8 @@ mod tests {
         );
     }
 
-    /// After the swap the earlier binPath may name a file that moved to `<I>.old` (a 1.0.0
-    /// upgrade): no restart, but the way back.
+    /// After the swap the earlier binPath may name a file that moved to `<I>.old` (an upgrade
+    /// from the earlier PowerShell install): no restart, but the way back.
     #[test]
     fn a_failed_upgrade_after_the_swap_says_how_to_recover() {
         let (code, lines, log) = run_failing(&upgrade(), "secure_data_root", 0);

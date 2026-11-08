@@ -268,7 +268,7 @@ mod tests {
         fs::create_dir_all(src.join("bin/monitor")).unwrap();
         fs::write(
             src.join("bundle.json"),
-            r#"{"layout":"pyinstaller","version":"1.1.0","agent":"desktop"}"#,
+            r#"{"layout":"pyinstaller","version":"1.0.0","agent":"desktop"}"#,
         )
         .unwrap();
         fs::write(src.join("bin/monitor/mcp-monitor-server.exe"), b"MZ server").unwrap();
@@ -282,7 +282,7 @@ mod tests {
     }
 
     fn self_exe(s: &Scratch) -> PathBuf {
-        let p = s.path().join("downloads").join("mcp-monitor-1.1.0.exe");
+        let p = s.path().join("downloads").join("mcp-monitor-1.0.0.exe");
         fs::create_dir_all(p.parent().unwrap()).unwrap();
         fs::write(&p, b"MZ self").unwrap();
         p
@@ -360,18 +360,18 @@ mod tests {
             r"C:\Program Files\MCP Monitor.old\mcp-monitor.exe",
             r"C:\Program Files\MCP Monitor.staging\mcp-monitor.exe",
         ] {
-            let e = running_inside_problem(Path::new(exe), inst, "1.1.0").expect(exe);
+            let e = running_inside_problem(Path::new(exe), inst, "1.0.0").expect(exe);
             assert!(
-                e.contains("다운로드한 mcp-monitor-1.1.0.exe로 실행하세요"),
+                e.contains("다운로드한 mcp-monitor-1.0.0.exe로 실행하세요"),
                 "{e}"
             );
         }
         for exe in [
-            r"C:\Users\a\Downloads\mcp-monitor-1.1.0.exe",
+            r"C:\Users\a\Downloads\mcp-monitor-1.0.0.exe",
             r"C:\Program Files\MCP Monitor Other\mcp-monitor.exe",
         ] {
             assert_eq!(
-                running_inside_problem(Path::new(exe), inst, "1.1.0"),
+                running_inside_problem(Path::new(exe), inst, "1.0.0"),
                 None,
                 "{exe}"
             );

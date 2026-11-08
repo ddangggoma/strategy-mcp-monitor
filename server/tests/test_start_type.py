@@ -75,7 +75,7 @@ def test_status_says_whether_this_is_a_deployment_bundle(services, monkeypatch, 
     from app import bundle
     from app.winsvc import start_type as st_mod
     assert StartTypeManager(NullConfigurator(), services.settings, ListLog()).status()["bundle"] is False
-    monkeypatch.setattr(st_mod, "find_bundle", lambda: bundle.Bundle(tmp_path, "runtime", "1.0.0"))
+    monkeypatch.setattr(st_mod, "find_bundle", lambda: bundle.Bundle(tmp_path, "runtime", "0.9.0"))
     m = StartTypeManager(NullConfigurator(), services.settings, ListLog())
     assert m.status()["bundle"] is True and m.bundled is True
 
