@@ -969,13 +969,13 @@ mod tests {
         fs::create_dir_all(s.path().join("inst")).unwrap();
         fs::write(
             s.path().join("inst/bundle.json"),
-            r#"{"layout":"pyinstaller","version":"1.0.9","agent":"desktop"}"#,
+            r#"{"layout":"pyinstaller","version":"0.9.9","agent":"desktop"}"#,
         )
         .unwrap();
         let mut h = FakeHost::new();
         h.service = true;
         h.installed = Some(Installed {
-            version: "1.0.9".into(),
+            version: "0.9.9".into(),
             install_location: s.path().join("inst"),
         });
         let p = build_install_plan(&args(&s), &h).unwrap();
