@@ -1,4 +1,4 @@
-<img src="docs/assets/brand/icon.svg" width="96" alt="MCP Monitor 아이콘. 어두운 판 위의 흰 AX(AI Transformation) 글자에서 A의 가로획은 초록 심박 파형, X의 교차점은 초록 점입니다.">
+<img src="docs/assets/brand/icon.svg" width="96" alt="MCP Monitor 아이콘. 짙은 청록 유리 타일 위의 흰 에이전트 로봇 얼굴로, AI를 뜻하는 금색 반짝이 안테나와 MCP 커넥터 핀 귀가 있고, 화면에는 위로 솟는 초록 실시간 심박이 흐릅니다.">
 
 # 🛰️ MCP Monitor
 
@@ -316,7 +316,7 @@ strategy-mcp-monitor/
 ├─ dummy-mcps/    # 시험용 MCP 3종 (seoul_weather, calculator, seoul_clock) + examples/ 조치 스크립트
 ├─ install/       # build.ps1(서버 payload), build-desktop.ps1(릴리스 exe), pyinstaller/
 ├─ .github/       # workflows/desktop.yml — Rust 테스트·릴리스 빌드(Windows 러너)
-├─ docs/          # PLAN.md, ops/, verification/, design/, assets/(구성도 SVG, brand/ AX 아이콘 원본), superpowers/plans/
+├─ docs/          # PLAN.md, ops/, verification/, design/, assets/(구성도 SVG, brand/ 에이전트 펄스 봇 아이콘 원본), superpowers/plans/
 ├─ build/         # (git 제외) PyInstaller 작업 폴더
 └─ dist/          # (git 제외) payload/, mcp-monitor-<버전>.exe, .exe.sha256
 ```
