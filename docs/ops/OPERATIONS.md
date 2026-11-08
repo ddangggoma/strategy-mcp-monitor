@@ -404,6 +404,7 @@ $LASTEXITCODE
   - 다른 PC에서 로그인하는 사람에게는 관리자가 코드를 전달해야 합니다. 실제 공급자는 추후입니다.
 - **데모 데이터(테스트·시연 전용, 운영 PC에서 쓰지 않습니다):** 저장소 체크아웃의 `tools\seed-demo.ps1`이 이 PC의 설치에 시험용 사용자와 실제로 도는 더미 MCP를 넣습니다.
   - 실행: 일반 PowerShell에서 `powershell -ExecutionPolicy Bypass -File tools\seed-demo.ps1`. `dummy-mcps\.venv`가 없으면 먼저 현재 사용자로 `uv sync`를 돌리고, UAC로 한 번 권한을 올립니다.
+  - `dummy-mcps\.venv`의 Python이 사용자 프로필 안(예: `%APPDATA%\uv\python`)에 있으면, 권한을 올리기 전에 그 Python을 `dummy-mcps\.python`으로 복사하고 venv를 다시 만듭니다. 서비스(LocalSystem)는 패키지 앱(MSIX) 안에서 설치된 Python의 비공개 AppData 복사본을 볼 수 없어서, MCP 시작 스크립트가 `did not find executable`로 실패합니다.
   - 하는 일: 서비스를 멈추고 `<server> seed-demo --root <D> --dummy-mcps-dir <체크아웃>\dummy-mcps`를 실행합니다. 사용자 `dev1@example.com`·`dev2@example.com`(Developer), `ops@example.com`(Admin)과 MCP `seoul-weather`(9101)·`calculator`(9102)·`seoul-clock`(9103)를 만들고(`admin.audit`, `actor` `seed-demo`), 이미 있는 것은 건드리지 않습니다. MCP의 시작·정지·재시작 스크립트는 `dummy-mcps\examples\*.ps1`을 부르고, 실행 기록은 `<D>\data\demo-run`에 둡니다.
   - 기본으로 서비스 binPath 끝에 `--external-host 127.0.0.1 --dev-otp-code 123456`을 붙여 모든 사용자가 고정 코드로 로그인합니다(외부 채널은 이 PC에서만 열림). `-NoDevOtp`는 binPath를 그대로 두고, `-DevOtpCode <6자리>`로 코드를 바꿉니다. 그 뒤 서비스를 시작하고 `http://127.0.0.1:8700/api/channel` 응답을 기다립니다.
   - 되돌리기: `-Revert`가 붙인 인자를 빼고 서비스를 다시 시작합니다. 데모 사용자·MCP는 관리 화면에서 비활성화·삭제합니다. 진행 기록은 `%LOCALAPPDATA%\mcp-monitor-demo\`에 남습니다.

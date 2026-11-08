@@ -134,6 +134,49 @@ function Initialize-DummyVenv {
     }
 }
 
+# True when $Path is inside the user's profile folder (case-insensitive). The service runs as LocalSystem
+# and may not see such a path: a Python installed by uv from inside a packaged (MSIX) app lands in the
+# app's private copy of AppData, visible to that app only (seen 2026-11-08: "did not find executable").
+function Test-InUserProfile([string]$Path, [string]$UserProfile) {
+    if (-not $Path -or -not $UserProfile) { return $false }
+    $p = [IO.Path]::GetFullPath($Path).TrimEnd('\') + '\'
+    $u = [IO.Path]::GetFullPath($UserProfile).TrimEnd('\') + '\'
+    return $p.StartsWith($u, [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Get-VenvHome([string]$VenvDir) {
+    $cfg = Join-Path $VenvDir 'pyvenv.cfg'
+    if (-not (Test-Path -LiteralPath $cfg)) { return $null }
+    foreach ($line in Get-Content -LiteralPath $cfg -Encoding UTF8) {
+        if ($line -match '^\s*home\s*=\s*(.+?)\s*$') { return $Matches[1] }
+    }
+    return $null
+}
+
+# Rebuilds dummy-mcps\.venv on a copy of its interpreter under dummy-mcps\.python when the interpreter
+# lives in the user profile, so the LocalSystem service can run the dummy MCPs.
+function Repair-DummyVenvForService {
+    $venv = Join-Path $DummyDir '.venv'
+    $venvHome = Get-VenvHome $venv
+    if (-not $venvHome -or -not (Test-InUserProfile $venvHome $env:USERPROFILE)) { return }
+    $uv = Get-Command uv -ErrorAction SilentlyContinue
+    if ($null -eq $uv) {
+        Stop-WithError ("dummy-mcps\.venv 의 Python($venvHome)이 사용자 프로필 안에 있어 서비스(LocalSystem)가 실행하지 못할 수 있습니다. " +
+            "uv 를 PATH 에 두고 다시 실행하세요.")
+    }
+    $target = Join-Path (Join-Path $DummyDir '.python') (Split-Path -Leaf $venvHome)
+    Write-Log "서비스가 볼 수 있도록 Python 을 복사합니다: $venvHome -> $target"
+    $null = & robocopy.exe $venvHome $target /E /NFL /NDL /NJH /NJS /NP
+    if ($LASTEXITCODE -ge 8) { Stop-WithError "Python 복사가 실패했습니다(robocopy $LASTEXITCODE)." }
+    $python = Join-Path $target 'python.exe'
+    Push-Location -LiteralPath $DummyDir
+    try {
+        $code = Invoke-Logged $uv.Source @('venv', '--clear', '--python', $python, '.venv')
+        if ($code -eq 0) { $code = Invoke-Logged $uv.Source @('sync', '--python', $python) }
+    } finally { Pop-Location }
+    if ($code -ne 0) { Stop-WithError "dummy-mcps\.venv 를 다시 만들지 못했습니다(종료 코드 $code)." }
+}
+
 function Invoke-SelfElevated {
     Write-Log '서비스를 다루려면 관리자 권한이 필요합니다. UAC 창에서 허용하세요.'
     try {
@@ -260,7 +303,7 @@ function Invoke-Main {
     Write-Log "MCP Monitor seed-demo (테스트 전용) $(if ($Revert) { '-Revert' } else { '' })"
     if (-not (Test-Admin)) {
         if ($Elevated) { Stop-WithError '관리자 권한으로 다시 실행했지만 권한이 없습니다.' }
-        if (-not $Revert) { Initialize-DummyVenv }  # as the invoking user, before elevating
+        if (-not $Revert) { Initialize-DummyVenv; Repair-DummyVenvForService }  # as the invoking user, before elevating
         $printed = 0
         if (Test-Path -LiteralPath $LogFile) { $printed = @(Get-Content -LiteralPath $LogFile -Encoding UTF8).Count }
         $code = Invoke-SelfElevated

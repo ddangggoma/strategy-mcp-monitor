@@ -115,3 +115,37 @@ def test_the_dev_code_arguments_are_accepted_by_the_server_parser():
     ns = parse_args(["--root", "C:\\x", "--local-port", "8700", "--external-port", "8701",
                      "--external-host", "127.0.0.1", "--dev-otp-code", "123456"])
     assert (ns.external_host, ns.dev_otp_code) == ("127.0.0.1", "123456")
+
+
+def test_python_in_the_user_profile_is_moved_for_the_service(tmp_path):
+    # A uv Python installed from inside a packaged (MSIX) app lives in that app's private AppData copy,
+    # which the LocalSystem service cannot see: the venv must be rebuilt on a copy outside the profile.
+    venv = tmp_path / ".venv"
+    venv.mkdir()
+    (venv / "pyvenv.cfg").write_text(
+        r"home = C:\Users\someone\AppData\Roaming\uv\python\cpython-3.15.2-windows-x86_64-none" "\n"
+        "implementation = CPython\n",
+        encoding="utf-8",
+    )
+    out = _ps(
+        f". '{SCRIPT}'; "
+        f"$h = Get-VenvHome '{venv}'; "
+        "@{ home = $h; "
+        r"in_profile = (Test-InUserProfile $h 'c:\users\SOMEONE'); "
+        r"other_user = (Test-InUserProfile $h 'C:\Users\someone-else'); "
+        r"repo = (Test-InUserProfile 'E:\workspace\dummy-mcps\.python\cpython' 'C:\Users\someone'); "
+        f"missing = ($null -eq (Get-VenvHome '{tmp_path / 'none'}')) "
+        "} | ConvertTo-Json -Compress"
+    )
+    r = json.loads(out)
+    assert r["home"].endswith("cpython-3.15.2-windows-x86_64-none")
+    assert r["in_profile"] is True  # case-insensitive
+    assert r["other_user"] is False  # a sibling folder with the same prefix is not inside
+    assert r["repo"] is False
+    assert r["missing"] is True
+
+
+def test_main_repairs_the_venv_before_elevating():
+    main = "\n".join(_functions()["Invoke-Main"])
+    assert "Repair-DummyVenvForService" in main
+    assert main.index("Repair-DummyVenvForService") < main.index("Invoke-SelfElevated")
