@@ -4,6 +4,7 @@ import { StreamIndicator } from "@/components/status/StreamIndicator";
 import { copy } from "@/copy/ko";
 import type { Me } from "@/lib/api-types";
 import type { StreamStatus } from "@/lib/board-stream";
+import { cn } from "@/lib/utils";
 import { AccountMenu } from "./AccountMenu";
 import { ChannelBadge } from "./ChannelBadge";
 import { ThemeToggle } from "./ThemeToggle";
@@ -61,18 +62,20 @@ export function TopBar({
   place?: TopBarPlace;
 }) {
   return (
-    <header data-topbar="" className="flex h-(--size-topbar) items-center gap-3 bg-bg px-4 sm:px-6 2xl:px-8">
+    <header data-topbar="" className="flex h-(--size-topbar) items-center gap-3 bg-bg px-4 max-sm:gap-2 sm:px-6 2xl:px-8">
       <a href="/" className="shrink-0 rounded-sm text-base font-semibold text-fg">
         {copy.common.productName}
       </a>
       {me ? <ChannelBadge channel={me.channel} /> : null}
-      <div className="ms-auto flex min-w-0 items-center gap-2">
+      <div className="ms-auto flex min-w-0 items-center gap-2 max-sm:gap-1">
         <StreamIndicator status={streamStatus} />
         <ThemeToggle />
         {me ? <SwitchScreen me={me} place={place} /> : null}
         {me?.user ? <AccountMenu user={me.user} onLogout={onLogout} /> : null}
         {me && !me.user ? (
-          <Button asChild variant="outline">
+          // narrower than the 640 px window (400% zoom) the Local board keeps only 관리 화면,
+          // which logs in too: both would need a sideways scroll
+          <Button asChild variant="outline" className={cn(place === "board" && me.channel === "local" && "max-sm:hidden")}>
             <a href={LOGIN_HREF}>{copy.common.login}</a>
           </Button>
         ) : null}

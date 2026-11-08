@@ -140,9 +140,12 @@ const SYSTEM: SystemStatus = {
   ],
   network: { sent_bps: 52_400, recv_bps: 1_310_720 },
   boot_at: "2026-11-01T08:00:00.000+09:00",
+  // a GPU in the amber band (over 70 %) with its dedicated memory: every GPU element is drawn
+  gpu: { percent: 76.4, memory: { used: 6_012_954_214, total: 8_589_934_592, percent: 70 } },
   history: {
     cpu: Array.from({ length: 60 }, (_, i) => 15 + ((i * 13) % 20)),
     memory: Array.from({ length: 60 }, (_, i) => 52 + (i % 7)),
+    gpu: Array.from({ length: 60 }, (_, i) => 40 + ((i * 17) % 40)),
   },
 };
 

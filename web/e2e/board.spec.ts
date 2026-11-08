@@ -29,3 +29,28 @@ test("anonymous board updates live over SSE without a reload", async ({ page, st
   expect(navigations).toBe(0);
   expect(await page.evaluate(() => (window as unknown as { __e2eMarker?: string }).__e2eMarker)).toBe("kept");
 });
+
+// The app window opens the Local board (`/`): the admin screen is one click away, and back.
+test("the Local board leads to the admin screen in one click, and the admin back to the board", async ({ page, state, loginAs }) => {
+  await page.goto(`${state.localUrl}/`);
+  const banner = page.getByRole("banner");
+  // signed out: through the login page, which then opens the admin screen
+  await banner.getByRole("link", { name: copy.common.adminHome }).click();
+  await expect(page).toHaveURL(/\/admin\/login\?redirect=(%2F|\/)admin$/);
+  await expect(page.getByLabel(copy.login.email)).toBeVisible();
+
+  await loginAs(page, "admin", "local"); // lands on /admin
+  await page.getByRole("banner").getByRole("link", { name: copy.common.boardHome }).click();
+  await expect(page).toHaveURL(`${state.localUrl}/`);
+  await expect(page.getByTestId("mcp-card").filter({ hasText: MCP_NAME })).toBeVisible();
+  await page.getByRole("banner").getByRole("link", { name: copy.common.adminHome }).click();
+  await expect(page).toHaveURL(`${state.localUrl}/admin`);
+  await expect(page.getByRole("navigation", { name: copy.nav.label })).toBeVisible();
+});
+
+test("the External board keeps only its login link", async ({ page, state }) => {
+  await page.goto(`${state.externalUrl}/`);
+  const banner = page.getByRole("banner");
+  await expect(banner.getByRole("link", { name: copy.common.login })).toBeVisible();
+  await expect(banner.getByRole("link", { name: copy.common.adminHome })).toHaveCount(0);
+});
