@@ -63,7 +63,10 @@ function UsersContent() {
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold text-fg">{copy.users.title}</h1>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <h1 className="text-xl font-semibold text-fg">{copy.users.title}</h1>
+          {data ? <ActiveAdmins count={countActiveAdmins(data)} /> : null}
+        </div>
         <AddUserDialog />
       </div>
       {isPending ? (
@@ -86,13 +89,31 @@ function UsersContent() {
   );
 }
 
+const countActiveAdmins = (users: AdminUser[]) => users.filter((u) => u.role === "admin" && u.active).length;
+
+/**
+ * “Admin n명” beside the title, with why it matters: the last active Admin cannot be demoted or
+ * deactivated (the server refuses it too), so promoting someone else comes first.
+ */
+function ActiveAdmins({ count }: { count: number }) {
+  return (
+    <span className="inline-flex items-center gap-0.5">
+      <Badge variant="secondary" data-testid="active-admins">
+        <ShieldIcon aria-hidden="true" />
+        {copy.users.activeAdmins(count)}
+      </Badge>
+      <InfoTip label={copy.users.activeAdminsLabel} content={copy.help.users.activeAdmins} side="bottom" align="start" />
+    </span>
+  );
+}
+
 /**
  * Every user in server order (no sorting: a row that moved after a change would put the next click
  * on someone else). No row animation (tables never move: direction.md §6).
  */
 function UsersTable({ users }: { users: AdminUser[] }) {
   const me = useSession();
-  const activeAdmins = users.filter((u) => u.role === "admin" && u.active).length;
+  const activeAdmins = countActiveAdmins(users);
 
   return (
     <div className="rounded-md border bg-surface">

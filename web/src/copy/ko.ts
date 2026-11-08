@@ -740,7 +740,9 @@ export const copy = {
     lastLogin: "마지막 로그인",
     ownedMcps: "소유 MCP",
     neverLoggedIn: "로그인 기록 없음",
-    lastAdmin: "마지막 Admin이라 역할을 바꾸거나 비활성화할 수 없어요.",
+    lastAdmin: "현재 활성 Admin이 이 사용자 1명뿐이에요. 다른 사용자를 먼저 Admin으로 지정하면 바꿀 수 있어요.",
+    activeAdmins: (n: number | string) => `Admin ${n}명`,
+    activeAdminsLabel: "활성 Admin",
     revokeNotice: "역할을 바꾸거나 비활성화하면 그 사용자는 바로 로그아웃돼요.",
     revokeSelf: "내 계정이라 저장하면 나도 로그아웃돼요. 다시 로그인해야 해요.",
     empty: "등록된 사용자가 없어요.",
@@ -1078,6 +1080,8 @@ export const copy = {
       },
       active: "끄면 그 사용자는 로그인할 수 없고 지금 로그인한 세션도 바로 끝나요. 남긴 기록은 지워지지 않아요.",
       ownedMcps: "이 사용자가 소유자인 MCP 수예요. 소유자만 그 MCP의 스크립트를 편집할 수 있어요.",
+      activeAdmins:
+        "지금 활성 상태인 Admin 수예요. Admin이 한 명도 없으면 아무도 사용자와 설정을 관리할 수 없어서, 마지막 활성 Admin은 역할을 바꾸거나 비활성화할 수 없어요. 그 사람을 바꾸려면 먼저 다른 사용자를 Admin으로 지정하세요.",
     },
     settings: {
       ping_interval_sec: "지연과 가동률을 재려고 모든 MCP에 점검 요청을 보내는 주기예요. 이 점검으로는 상태를 바꾸지 않아요. 기본 5초.",
