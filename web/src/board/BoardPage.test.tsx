@@ -7,7 +7,7 @@ import { BoardStore } from "@/lib/board-store";
 import type { BoardStreamClient } from "@/lib/board-stream";
 import { session } from "@/lib/session";
 import type { SseEvent } from "@/lib/sse";
-import { boardEvent, item, meFixture, rdpSession } from "../../tests/msw/fixtures";
+import { boardEvent, item, meFixture, rdpSession, systemFixture } from "../../tests/msw/fixtures";
 import { server, trackRequests } from "../../tests/msw/server";
 import { BoardPage } from "./BoardPage";
 
@@ -57,6 +57,46 @@ it("orders problem MCPs first and updates a card from an mcp event", async () =>
   expect(await within(card(1)).findByText("점검 중")).toBeInTheDocument();
   act(() => store.apply({ event: "mcp", data: JSON.stringify(item(1, "FAILED", "a")) }));
   expect(screen.getAllByTestId("mcp-card").map((c) => c.dataset.id)).toEqual(["1", "2"]);
+});
+
+it("sums the board up in the overview tiles", () => {
+  renderBoard(boardEvent({ mcps: [item(1, "HEALTHY", "a"), item(2, "FAILED", "b"), item(3, "MAINTENANCE", "c")] }));
+  const overview = screen.getByRole("region", { name: copy.board.overview.title });
+  // the ring names every state count; the legend repeats them as text
+  expect(within(overview).getByRole("img", { name: copy.board.overview.donutLabel("실패 1개, 점검 중 1개, 정상 1개") })).toBeInTheDocument();
+  expect(within(overview).getByText(copy.board.overview.healthyOf(1, 3))).toBeInTheDocument();
+  // maintenance is left out of the numbers: one healthy and one failed MCP are judged
+  expect(within(overview).getByText(copy.board.overview.checkSummary(7, 10))).toBeInTheDocument();
+  expect(within(overview).getByText("96.2 %")).toHaveClass("sr-only"); // (1 + 0.925) / 2
+  expect(within(overview).getByRole("meter", { name: copy.board.overview.uptimeLabel(96.2) })).toHaveAttribute("aria-valuenow", "96.2");
+  expect(within(overview).getByText(copy.board.overview.excludesMaintenance)).toBeInTheDocument();
+  // the stream is open: the live pill says so, outside the verdict's live region (it ticks every second)
+  expect(screen.getByText(copy.board.overview.live).closest("[aria-live]")).toBeNull();
+});
+
+it("shows no overview without MCPs", () => {
+  renderBoard(boardEvent({ mcps: [] }));
+  expect(screen.queryByRole("region", { name: copy.board.overview.title })).toBeNull();
+});
+
+it("shows the PC's resources and follows system events", () => {
+  const store = renderBoard(boardEvent({ mcps: [], system: systemFixture() }));
+  const panel = screen.getByRole("region", { name: copy.board.system.title });
+  expect(within(panel).getByRole("img", { name: copy.board.system.gaugeLabel("CPU", 43) })).toBeInTheDocument();
+  expect(within(panel).getByText(copy.board.system.cores(8))).toBeInTheDocument();
+  expect(within(panel).getByText(copy.board.system.memoryUsed("14.0GB", "16.0GB"))).toBeInTheDocument();
+  // the disk bar carries its value for assistive tech; 94 % is over the second threshold
+  const disk = within(panel).getByRole("meter", { name: "C:" });
+  expect(disk).toHaveAttribute("aria-valuenow", "94");
+  expect(disk).toHaveAttribute("data-state", "FAILED");
+  expect(within(panel).getByText("1.5MB/s")).toBeInTheDocument();
+  act(() => store.apply({ event: "system", data: JSON.stringify(systemFixture({ cpu: { percent: 5, cores: 8 } })) }));
+  expect(within(panel).getByRole("img", { name: copy.board.system.gaugeLabel("CPU", 5) })).toBeInTheDocument();
+});
+
+it("says the resources have not arrived yet", () => {
+  renderBoard(boardEvent({ mcps: [] }));
+  expect(within(screen.getByRole("region", { name: copy.board.system.title })).getByText(copy.board.system.waiting)).toBeInTheDocument();
 });
 
 it("never renders host, port or owner", () => {

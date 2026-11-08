@@ -67,9 +67,28 @@ export interface RdpSession {
   first_seen_ip: boolean;
   first_seen_device: boolean;
 }
+/** This PC's resources (server app/monitor/system.py): board snapshot `system`, SSE `system` event. */
+export interface SystemStatus {
+  at: string;
+  /** Seconds between readings (the history's step). */
+  interval_sec: number;
+  cpu: { percent: number; cores: number };
+  /** Bytes; `used` is total minus available (Task Manager's "사용 중"). */
+  memory: { total: number; used: number; percent: number };
+  /** Local fixed drives ("C:"), bytes. */
+  disks: { name: string; total: number; used: number; percent: number }[];
+  /** Bytes per second since the previous reading; null on the first one. */
+  network: { sent_bps: number; recv_bps: number } | null;
+  boot_at: string;
+  /** Percent per reading, oldest first. */
+  history: { cpu: number[]; memory: number[] };
+}
+
 export interface Board {
   now: string;
   mcps: BoardItem[];
+  /** Absent until the server has read the PC's resources once. */
+  system?: SystemStatus;
   sessions?: RdpSession[];
 }
 

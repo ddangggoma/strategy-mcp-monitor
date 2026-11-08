@@ -25,6 +25,9 @@
   :root[data-theme="dark"] {
     color-scheme: dark;
   }
+  :root[data-theme="system"] {
+    color-scheme: light dark;
+  }
 
   html {
     font-family: var(--font-sans);
@@ -170,6 +173,52 @@
   @keyframes topbar-shadow {
     to {
       opacity: 1;
+    }
+  }
+}
+
+/* ── Entrances: shown once when an element first appears (transform/opacity/clip only).
+      `backwards` fill, never `both`: after the entrance nothing is left holding a transform,
+      so Motion's layout glide on the board cards keeps working. ── */
+@layer components {
+  /* panels rise into place one after another; --rise-i is the panel's place in the sequence */
+  [data-anim="rise"] {
+    animation: rise-in 520ms var(--ease-out) backwards;
+    animation-delay: calc(var(--rise-i, 0) * 70ms);
+  }
+
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      translate: 0 0.75rem;
+      scale: 0.985;
+    }
+  }
+
+  /* RollingNumber: a digit column that first appears rolls up from 0 to its own digit (a keyframe
+     with no end runs to the inline transform) */
+  .digit-roll {
+    animation: digit-roll 900ms var(--ease-out) backwards;
+  }
+
+  @keyframes digit-roll {
+    from {
+      transform: translateY(0);
+    }
+  }
+
+  /* sparklines draw in from the left */
+  .spark-draw {
+    animation: spark-draw 900ms var(--ease-out) backwards;
+    animation-delay: 120ms;
+  }
+
+  @keyframes spark-draw {
+    from {
+      clip-path: inset(0 100% 0 0);
+    }
+    to {
+      clip-path: inset(0 0 0 0);
     }
   }
 }

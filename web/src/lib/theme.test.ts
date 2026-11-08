@@ -1,4 +1,4 @@
-import { applyStoredTheme, getThemePref, setThemePref, THEME_STORAGE_KEY } from "./theme";
+import { applyStoredTheme, DEFAULT_THEME, getThemePref, setThemePref, THEME_STORAGE_KEY } from "./theme";
 
 const root = document.documentElement;
 
@@ -8,16 +8,27 @@ afterEach(() => {
   delete root.dataset.theme;
 });
 
-it("stores the preference and sets data-theme; system removes it", () => {
-  setThemePref("light");
-  expect(root.dataset.theme).toBe("light");
+it("defaults to light", () => {
+  expect(DEFAULT_THEME).toBe("light");
   expect(getThemePref()).toBe("light");
-  expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("light");
+  applyStoredTheme();
+  expect(root.dataset.theme).toBe("light");
+});
+
+it("stores a non-default preference and always sets data-theme", () => {
+  setThemePref("dark");
+  expect(root.dataset.theme).toBe("dark");
+  expect(getThemePref()).toBe("dark");
+  expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("dark");
 
   setThemePref("system");
-  expect(root.dataset.theme).toBeUndefined();
+  expect(root.dataset.theme).toBe("system"); // base.css lets the OS choose under this value
   expect(getThemePref()).toBe("system");
-  expect(localStorage.getItem(THEME_STORAGE_KEY)).toBeNull();
+  expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("system");
+
+  setThemePref("light");
+  expect(root.dataset.theme).toBe("light");
+  expect(localStorage.getItem(THEME_STORAGE_KEY)).toBeNull(); // the default needs no entry
 });
 
 it("uses the mcpmon.theme key", () => {
@@ -30,12 +41,12 @@ it("applyStoredTheme restores the saved preference on page start", () => {
   expect(root.dataset.theme).toBe("dark");
 });
 
-it("treats an unknown stored value as system", () => {
+it("treats an unknown stored value as the default", () => {
   localStorage.setItem("mcpmon.theme", "sepia");
-  expect(getThemePref()).toBe("system");
+  expect(getThemePref()).toBe("light");
   root.dataset.theme = "dark";
   applyStoredTheme();
-  expect(root.dataset.theme).toBeUndefined();
+  expect(root.dataset.theme).toBe("light");
 });
 
 it("survives a throwing localStorage", () => {
@@ -48,7 +59,7 @@ it("survives a throwing localStorage", () => {
   expect(() => setThemePref("dark")).not.toThrow();
   // the choice still applies to this page even though it could not be saved
   expect(root.dataset.theme).toBe("dark");
-  expect(getThemePref()).toBe("system");
+  expect(getThemePref()).toBe("light");
   expect(() => applyStoredTheme()).not.toThrow();
 });
 

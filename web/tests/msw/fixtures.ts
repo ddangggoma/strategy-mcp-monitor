@@ -4,7 +4,7 @@ import type {
   ActionDetail, ActionRecord, AdminUser, Board, BoardItem, Channel, CollectorStatus, CurrentSession, LogHistogram, LogIndexStatus,
   LogItem, LogonFailure, LogPage, LogUserCount, McpActivity, McpDetail, McpHistory, McpState, Me, Notice, NoticeDisplayContent,
   NoticeVersionSummary, RdpSession, RetentionPreview, Role, ScriptContent, ScriptKind, ScriptListItem, ScriptVersion, ServiceStatus,
-  SessionConnection, SessionsHistory, Settings, TamperEvent, UserSummary,
+  SessionConnection, SessionsHistory, Settings, SystemStatus, TamperEvent, UserSummary,
 } from "@/lib/api-types";
 import type { SseEvent } from "@/lib/sse";
 
@@ -388,4 +388,19 @@ export function noticeFixture(p: Partial<Notice> = {}): Notice {
 
 export function noticeVersionFixture(p: Partial<NoticeVersionSummary> = {}): NoticeVersionSummary {
   return { version: 1, title: "접속 안내", created_at: NOW, author: userSummary(1), reverted_from: null, ...p };
+}
+
+/** This PC's resources as the server sends them (board `system`, SSE `system`). */
+export function systemFixture(s: Partial<SystemStatus> = {}): SystemStatus {
+  return {
+    at: NOW,
+    interval_sec: 5,
+    cpu: { percent: 42.5, cores: 8 },
+    memory: { total: 16 * 2 ** 30, used: 14 * 2 ** 30, percent: 87.5 },
+    disks: [{ name: "C:", total: 500 * 2 ** 30, used: 470 * 2 ** 30, percent: 94 }],
+    network: { sent_bps: 2048, recv_bps: 1_572_864 },
+    boot_at: "2026-11-01T11:03:22.418+09:00",
+    history: { cpu: [10, 42.5], memory: [87, 87.5] },
+    ...s,
+  };
 }
