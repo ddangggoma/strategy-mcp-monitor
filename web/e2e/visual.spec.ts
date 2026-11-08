@@ -9,8 +9,7 @@ import type { Page, Route } from "@playwright/test";
 import type {
   LogHistogram, LogIndexStatus, LogItem, LogPage, LogUserCount, McpActivity, Notice, NoticeVersionSummary, SystemStatus, TamperEvent,
 } from "../src/lib/api-types";
-import { THEME_STORAGE_KEY } from "../src/lib/theme";
-import { MCP_NAME, copy, expect, test, type BackendState, type Who } from "./fixtures";
+import { MCP_NAME, copy, expect, test, useTheme, type BackendState, type Who } from "./fixtures";
 
 const AT = "2026-11-06T09:00:00.000+09:00";
 
@@ -255,15 +254,7 @@ for (const screen of SCREENS) {
   test(`screenshot ${screen.name}`, async ({ page, state, loginAs }, testInfo) => {
     // Light is the default theme (no saved choice): the light project shows that; the dark project
     // picks "dark" in the theme menu's storage, so each baseline is the theme its project names.
-    if (testInfo.project.use.colorScheme === "dark") {
-      await page.addInitScript((key) => {
-        try {
-          localStorage.setItem(key, "dark");
-        } catch {
-          // about:blank has no storage; the app's pages do
-        }
-      }, THEME_STORAGE_KEY);
-    }
+    await useTheme(page, testInfo.project.use.colorScheme === "dark" ? "dark" : "light");
     await fixHistoryReads(page, state);
     await fixBoardStream(page);
     if (screen.who) await loginAs(page, screen.who, "local");

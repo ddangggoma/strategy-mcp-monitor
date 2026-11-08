@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test as base, expect, type APIRequestContext, type APIResponse, type Locator, type Page } from "@playwright/test";
 import { copy } from "../src/copy/ko";
+import { THEME_STORAGE_KEY } from "../src/lib/theme";
 import {
   AUTH_DIR,
   DEV_OTP_CODE,
@@ -97,6 +98,33 @@ export async function tabTo(page: Page, target: Locator, { max = 60, back = fals
     await page.keyboard.press(back ? "Shift+Tab" : "Tab");
   }
   throw new Error(`could not reach ${String(target)} with Tab`);
+}
+
+/** The two themes a page can show: light is the default (nothing saved), dark is the saved choice. */
+export const THEMES = ["light", "dark"] as const;
+export type Theme = (typeof THEMES)[number];
+
+/**
+ * Opens every later page of `page` in `theme`: dark is saved in the theme menu's storage before the
+ * app runs (what picking "다크" does), light is the default and needs nothing. Call before goto.
+ */
+export async function useTheme(page: Page, theme: Theme): Promise<void> {
+  if (theme === "light") return;
+  await page.addInitScript(
+    ({ key, value }) => {
+      try {
+        localStorage.setItem(key, value);
+      } catch {
+        // about:blank has no storage; the app's pages do
+      }
+    },
+    { key: THEME_STORAGE_KEY, value: theme },
+  );
+}
+
+/** The page shows `theme` (a check that the theme was not silently left at the default). */
+export async function expectTheme(page: Page, theme: Theme): Promise<void> {
+  await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
 }
 
 /**

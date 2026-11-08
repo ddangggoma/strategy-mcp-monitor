@@ -2,7 +2,7 @@
 // the smallest supported window (640 x 600, W41) stays inside the window without a sideways scroll.
 import AxeBuilder from "@axe-core/playwright";
 import type { Locator, Page } from "@playwright/test";
-import { copy, expect, settled, tabTo, test } from "./fixtures";
+import { THEMES, copy, expect, expectTheme, settled, tabTo, test, useTheme } from "./fixtures";
 
 const TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 const tipButton = (page: Page, label: string) => page.getByRole("button", { name: copy.help.label(label) }).first();
@@ -30,20 +30,24 @@ async function expectInsideWindow(page: Page, tip: Locator): Promise<void> {
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
 }
 
-test("axe: the MCP settings with a field tip open, and the board with the state legend open", async ({ page, state, loginAs }) => {
-  await loginAs(page, "admin", "local");
-  await page.goto(`${state.localUrl}/admin/mcps/${state.mcpId}?tab=settings`);
-  await loaded(page);
-  await tipButton(page, copy.mcp.fields.action_delay_sec).click();
-  await expect(page.getByRole("tooltip")).toContainText(copy.help.mcp.fields.action_delay_sec);
-  expect(await axeViolations(page)).toEqual([]);
+for (const theme of THEMES) {
+  test(`axe: the MCP settings with a field tip open, and the board with the state legend open (${theme})`, async ({ page, state, loginAs }) => {
+    await useTheme(page, theme);
+    await loginAs(page, "admin", "local");
+    await page.goto(`${state.localUrl}/admin/mcps/${state.mcpId}?tab=settings`);
+    await loaded(page);
+    await expectTheme(page, theme);
+    await tipButton(page, copy.mcp.fields.action_delay_sec).click();
+    await expect(page.getByRole("tooltip")).toContainText(copy.help.mcp.fields.action_delay_sec);
+    expect(await axeViolations(page)).toEqual([]);
 
-  await page.goto(`${state.localUrl}/`);
-  await loaded(page);
-  await tipButton(page, copy.help.stateLabel).click();
-  await expect(page.getByRole("tooltip")).toContainText(copy.help.states.HEALTHY);
-  expect(await axeViolations(page)).toEqual([]);
-});
+    await page.goto(`${state.localUrl}/`);
+    await loaded(page);
+    await tipButton(page, copy.help.stateLabel).click();
+    await expect(page.getByRole("tooltip")).toContainText(copy.help.states.HEALTHY);
+    expect(await axeViolations(page)).toEqual([]);
+  });
+}
 
 test("a tip opens on hover, on keyboard focus and on click, and Escape closes it", async ({ page, state, loginAs }) => {
   await loginAs(page, "admin", "local");
