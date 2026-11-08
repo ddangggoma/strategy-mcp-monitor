@@ -12,7 +12,7 @@ import { copy } from "@/copy/ko";
 import type { BoardItem, McpState } from "@/lib/api-types";
 import { sortBoard, useBoard, type BoardStore } from "@/lib/board-store";
 import type { BoardStreamClient } from "@/lib/board-stream";
-import { bootstrapStatus, logout } from "@/lib/endpoints";
+import { bootstrapStatus, logout } from "@/lib/endpoints-auth";
 import { clearSession, refreshSession, useSession } from "@/lib/session";
 import { cn } from "@/lib/utils";
 import { BoardOverview, LiveStatus } from "./BoardOverview";
