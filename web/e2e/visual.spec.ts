@@ -7,8 +7,9 @@
 // suite. The MCP's port is fixed too (backend.ts MCP_PORT).
 import type { Page, Route } from "@playwright/test";
 import type {
-  LogHistogram, LogIndexStatus, LogItem, LogPage, LogUserCount, McpActivity, Notice, NoticeVersionSummary, TamperEvent,
+  LogHistogram, LogIndexStatus, LogItem, LogPage, LogUserCount, McpActivity, Notice, NoticeVersionSummary, SystemStatus, TamperEvent,
 } from "../src/lib/api-types";
+import { THEME_STORAGE_KEY } from "../src/lib/theme";
 import { MCP_NAME, copy, expect, test, type BackendState, type Who } from "./fixtures";
 
 const AT = "2026-11-06T09:00:00.000+09:00";
@@ -121,6 +122,68 @@ async function fixLogReads(page: Page): Promise<void> {
   );
 }
 
+// The board's overview and the "서버 PC 리소스" panel come over the SSE stream: the check history
+// (strip, rate, uptime and their tones) depends on what earlier specs staged, and the PC readings
+// (rings, memory, disks: how many and how full) on this PC at this moment. A mask would hide the
+// numbers but not the ring fills, the bar lengths, the disk rows or the tile tones, so the stream's
+// MCP measurements and `system` readings are replaced with fixed ones in the page (fetch wrapper:
+// the board stream is fetch-based, and route.fulfill cannot keep a stream open). States, names and
+// times stay real (times are data-volatile).
+const SPARK: (number | null)[] = Array.from({ length: 60 }, (_, i) => (i === 41 ? null : 30 + ((i * 7) % 11)));
+const SYSTEM: SystemStatus = {
+  at: AT,
+  interval_sec: 5,
+  cpu: { percent: 23.4, cores: 8 },
+  memory: { total: 17_179_869_184, used: 9_448_928_051, percent: 55 },
+  disks: [
+    { name: "C:", total: 511_101_108_224, used: 306_660_664_934, percent: 60 },
+    { name: "D:", total: 1_000_202_039_296, used: 850_171_733_401, percent: 85 },
+  ],
+  network: { sent_bps: 52_400, recv_bps: 1_310_720 },
+  boot_at: "2026-11-01T08:00:00.000+09:00",
+  history: {
+    cpu: Array.from({ length: 60 }, (_, i) => 15 + ((i * 13) % 20)),
+    memory: Array.from({ length: 60 }, (_, i) => 52 + (i % 7)),
+  },
+};
+
+async function fixBoardStream(page: Page): Promise<void> {
+  await page.addInitScript(
+    ({ spark, system }) => {
+      const measured = (item: Record<string, unknown>) => ({ ...item, latency_ms: 38, sparkline: spark, uptime_24h: 0.9995 });
+      const rewrite = (block: string): string => {
+        const m = /^event: (board|mcp|system)\ndata: (.*)\n\n$/s.exec(block);
+        if (!m) return block;
+        const data = JSON.parse(m[2]!) as Record<string, unknown>;
+        let out: unknown = data;
+        if (m[1] === "system") out = system;
+        else if (m[1] === "mcp") out = measured(data);
+        else out = { ...data, system, mcps: (data.mcps as Record<string, unknown>[]).map(measured) };
+        return `event: ${m[1]}\ndata: ${JSON.stringify(out)}\n\n`;
+      };
+      const realFetch = window.fetch.bind(window);
+      window.fetch = async (input, init) => {
+        const res = await realFetch(input, init);
+        const url = new URL(input instanceof Request ? input.url : String(input), location.href);
+        if (url.pathname !== "/api/stream" || !res.ok || !res.body) return res;
+        let buffer = "";
+        const blocks = new TransformStream<string, string>({
+          transform(chunk, ctl) {
+            buffer += chunk;
+            for (let end = buffer.indexOf("\n\n"); end !== -1; end = buffer.indexOf("\n\n")) {
+              ctl.enqueue(rewrite(buffer.slice(0, end + 2)));
+              buffer = buffer.slice(end + 2);
+            }
+          },
+        });
+        const body = res.body.pipeThrough(new TextDecoderStream()).pipeThrough(blocks).pipeThrough(new TextEncoderStream());
+        return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
+      };
+    },
+    { spark: SPARK, system: SYSTEM },
+  );
+}
+
 interface Screen {
   name: string;
   path: string;
@@ -189,8 +252,20 @@ const SCREENS: Screen[] = [
 ];
 
 for (const screen of SCREENS) {
-  test(`screenshot ${screen.name}`, async ({ page, state, loginAs }) => {
+  test(`screenshot ${screen.name}`, async ({ page, state, loginAs }, testInfo) => {
+    // Light is the default theme (no saved choice): the light project shows that; the dark project
+    // picks "dark" in the theme menu's storage, so each baseline is the theme its project names.
+    if (testInfo.project.use.colorScheme === "dark") {
+      await page.addInitScript((key) => {
+        try {
+          localStorage.setItem(key, "dark");
+        } catch {
+          // about:blank has no storage; the app's pages do
+        }
+      }, THEME_STORAGE_KEY);
+    }
     await fixHistoryReads(page, state);
+    await fixBoardStream(page);
     if (screen.who) await loginAs(page, screen.who, "local");
     await page.goto(`${state.localUrl}${screen.path.replace("{id}", String(state.mcpId))}`);
     await screen.ready(page);

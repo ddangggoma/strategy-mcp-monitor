@@ -2,12 +2,13 @@
 // the smallest supported window (640 x 600, W41) stays inside the window without a sideways scroll.
 import AxeBuilder from "@axe-core/playwright";
 import type { Locator, Page } from "@playwright/test";
-import { copy, expect, tabTo, test } from "./fixtures";
+import { copy, expect, settled, tabTo, test } from "./fixtures";
 
 const TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 const tipButton = (page: Page, label: string) => page.getByRole("button", { name: copy.help.label(label) }).first();
 
 async function axeViolations(page: Page): Promise<string[]> {
+  await settled(page);
   const r = await new AxeBuilder({ page }).withTags(TAGS).analyze();
   return r.violations.map((v) => `${v.id}: ${v.nodes.length} (${v.nodes.map((n) => n.target.join(" ")).join(", ")})`);
 }

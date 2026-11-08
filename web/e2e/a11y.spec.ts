@@ -1,5 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
-import { DEV_OTP_CODE, MCP_NAME, UI_USERS, copy, expect, tabTo, test } from "./fixtures";
+import { DEV_OTP_CODE, MCP_NAME, UI_USERS, copy, expect, settled, tabTo, test } from "./fixtures";
 
 const PAGES = [
   "/",
@@ -33,6 +33,7 @@ for (const [size, path] of WINDOWS.flatMap((w) => PAGES.map((p) => [w, p] as con
     // analyse the loaded page, not its skeleton
     await expect(page.locator("[role='status'] .sr-only", { hasText: copy.common.loading })).toHaveCount(0);
     await expect(page.locator("h1, [role='dialog'] h2").first()).toBeVisible();
+    await settled(page); // the board's panels rise in: contrast is read once they are opaque
     const r = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
     expect(r.violations.map((v) => `${v.id}: ${v.nodes.length} (${v.nodes.map((n) => n.target.join(" ")).join(", ")})`)).toEqual([]);
   });

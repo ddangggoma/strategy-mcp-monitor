@@ -99,6 +99,26 @@ export async function tabTo(page: Page, target: Locator, { max = 60, back = fals
   throw new Error(`could not reach ${String(target)} with Tab`);
 }
 
+/**
+ * Waits until no finite animation is running (panels rising in, digits rolling, bars filling):
+ * axe blends a fading element's opacity into its contrast, so it must read the page at rest.
+ * Endless ones (the live pulse) and scroll-driven ones (the top bar's shadow, which never "finishes"
+ * on the time axis) are left alone; a round that starts new ones (a late SSE reading) is waited out too.
+ */
+export async function settled(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    for (let round = 0; round < 10; round += 1) {
+      const running = document
+        .getAnimations()
+        .filter(
+          (a) => a.timeline === document.timeline && a.playState === "running" && a.effect?.getComputedTiming().endTime !== Infinity,
+        );
+      if (running.length === 0) return;
+      await Promise.all(running.map((a) => a.finished.catch(() => undefined)));
+    }
+  });
+}
+
 export interface AdminApi {
   get(path: string): Promise<APIResponse>;
   post(path: string, data?: unknown): Promise<APIResponse>;
