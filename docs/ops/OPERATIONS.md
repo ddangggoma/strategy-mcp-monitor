@@ -402,6 +402,11 @@ $LASTEXITCODE
   - 1.1.0에도 실제 메일·문자 발송 공급자가 없습니다.
   - 로그인 코드는 `<D>\data\dev\otp-outbox.log`에 `<시각> <이메일> <코드>` 줄로 쌓이고, PC 관리자만 읽을 수 있습니다.
   - 다른 PC에서 로그인하는 사람에게는 관리자가 코드를 전달해야 합니다. 실제 공급자는 추후입니다.
+- **데모 데이터(테스트·시연 전용, 운영 PC에서 쓰지 않습니다):** 저장소 체크아웃의 `tools\seed-demo.ps1`이 이 PC의 설치에 시험용 사용자와 실제로 도는 더미 MCP를 넣습니다.
+  - 실행: 일반 PowerShell에서 `powershell -ExecutionPolicy Bypass -File tools\seed-demo.ps1`. `dummy-mcps\.venv`가 없으면 먼저 현재 사용자로 `uv sync`를 돌리고, UAC로 한 번 권한을 올립니다.
+  - 하는 일: 서비스를 멈추고 `<server> seed-demo --root <D> --dummy-mcps-dir <체크아웃>\dummy-mcps`를 실행합니다. 사용자 `dev1@example.com`·`dev2@example.com`(Developer), `ops@example.com`(Admin)과 MCP `seoul-weather`(9101)·`calculator`(9102)·`seoul-clock`(9103)를 만들고(`admin.audit`, `actor` `seed-demo`), 이미 있는 것은 건드리지 않습니다. MCP의 시작·정지·재시작 스크립트는 `dummy-mcps\examples\*.ps1`을 부르고, 실행 기록은 `<D>\data\demo-run`에 둡니다.
+  - 기본으로 서비스 binPath 끝에 `--external-host 127.0.0.1 --dev-otp-code 123456`을 붙여 모든 사용자가 고정 코드로 로그인합니다(외부 채널은 이 PC에서만 열림). `-NoDevOtp`는 binPath를 그대로 두고, `-DevOtpCode <6자리>`로 코드를 바꿉니다. 그 뒤 서비스를 시작하고 `http://127.0.0.1:8700/api/channel` 응답을 기다립니다.
+  - 되돌리기: `-Revert`가 붙인 인자를 빼고 서비스를 다시 시작합니다. 데모 사용자·MCP는 관리 화면에서 비활성화·삭제합니다. 진행 기록은 `%LOCALAPPDATA%\mcp-monitor-demo\`에 남습니다.
 - 수집 큐가 넘치면 오래된 이벤트부터 버리고, 버린 수를 `system` `collector.dropped`/`logstore.dropped`로 남깁니다.
 - 로그 화면에서 넓은 키워드는 느릴 수 있습니다(⑥).
 

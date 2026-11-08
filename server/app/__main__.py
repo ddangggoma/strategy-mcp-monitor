@@ -12,7 +12,9 @@ from app import __version__
 from app.bundle import default_root, default_static_dir, find_bundle
 from app.clock import SystemClock
 from app.collect.cli import add_collector_arguments, agent_dialog_error, collector_config
-from app.db import DatabaseTooNewError
+from app.db import Database, DatabaseTooNewError
+from app.demo import DemoSetupError
+from app.demo import seed as seed_demo_data
 from app.logstore.indexer import IndexStatus, LogIndex
 from app.main import PortInUseError, ServeControl, serve
 from app.paths import AppPaths
@@ -136,6 +138,56 @@ def reindex(argv: list[str]) -> int:
     return 0
 
 
+def seed_demo(argv: list[str]) -> int:
+    """``python -m app seed-demo --dummy-mcps-dir PATH [--root PATH] [--owner-email EMAIL]``: DEV/TEST
+    ONLY. Add the demo users and the running dummy MCPs (``app.demo``) to a stopped install."""
+    parser = argparse.ArgumentParser(
+        prog="python -m app seed-demo",
+        description="TEST ONLY: add demo users and the dummy MCPs of dummy-mcps/ (idempotent)",
+    )
+    parser.add_argument(
+        "--root", type=Path, default=default_root(find_bundle()),
+        help=_ROOT_HELP,
+    )
+    parser.add_argument(
+        "--dummy-mcps-dir", type=Path, required=True,
+        help="the dummy-mcps checkout (examples/*.ps1; its .venv runs the servers)",
+    )
+    parser.add_argument(
+        "--owner-email", default=None,
+        help="the active admin recorded as creator of the demo users (default: the first admin)",
+    )
+    ns = parser.parse_args(argv)
+    root = ns.root.resolve()
+    paths = AppPaths(root)
+    paths.ensure()
+    lock = RootLock(root)
+    try:
+        lock.acquire()  # never under a running server or service (exit 4)
+    except RootInUseError:
+        _error(f"data root {root} is already in use by another MCP Monitor process")
+        return EXIT_ROOT_IN_USE
+    try:
+        db = Database(paths.db_path)
+        try:
+            db.migrate()
+            report = seed_demo_data(root, db, SystemClock(), ns.dummy_mcps_dir, ns.owner_email)
+        finally:
+            db.close()
+    except DemoSetupError as exc:
+        _error(str(exc))
+        return 2
+    except DatabaseTooNewError as exc:
+        _error(
+            f"{paths.db_path} was written by a newer version (schema {exc.found} > "
+            f"{exc.supported}); install that version or restore a backup"
+        )
+        return EXIT_DATABASE_TOO_NEW
+    finally:
+        lock.release()
+    return 0 if report.ok else 1
+
+
 def run_server(ns: argparse.Namespace, control: ServeControl | None = None) -> int:
     """Run the server until it stops; the expected startup failures become exit codes 3/4/5
     with one line on stderr and no traceback (W23)."""
@@ -176,6 +228,8 @@ def main(argv: list[str] | None = None) -> int:
         return dispatch(args[1:])
     if args[:1] == ["reindex"]:
         return reindex(args[1:])
+    if args[:1] == ["seed-demo"]:
+        return seed_demo(args[1:])
     return run_server(parse_args(args))
 
 
