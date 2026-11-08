@@ -36,7 +36,8 @@ def test_record_builds_the_status_and_publishes_it(clock):
         "disks": [{"name": "C:", "total": 500 * 2**30, "used": 200 * 2**30, "percent": 40.0}],
         "network": None,  # a rate needs two readings
         "boot_at": "2026-11-04T09:00:00.000+09:00",
-        "history": {"cpu": [12.3], "memory": [50.0]},
+        "gpu": None,  # no GPU in this reading: the board hides the GPU block
+        "history": {"cpu": [12.3], "memory": [50.0], "gpu": []},
     }
     assert sampler.latest is status
     assert list(sub.events) == [("system", status)]

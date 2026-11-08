@@ -33,6 +33,9 @@ export function formatUptime(bootIso: string, nowMs: number): string {
 export const CPU_LOAD = [70, 90] as const;
 export const MEMORY_LOAD = [80, 90] as const;
 export const DISK_LOAD = [80, 90] as const;
+/** The GPU's busiest engine reads like a CPU; its dedicated memory like the PC's memory. */
+export const GPU_LOAD = CPU_LOAD;
+export const GPU_MEMORY_LOAD = MEMORY_LOAD;
 
 /** A load in percent as the state hue it borrows: fine, worth a look, or bad. */
 export function loadState(percent: number, [warn, bad]: readonly [number, number]): McpState {

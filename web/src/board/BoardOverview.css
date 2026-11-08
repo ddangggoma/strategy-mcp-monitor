@@ -310,6 +310,38 @@
     }
   }
 
+  /* with the GPU tile (five): two columns with the network tile across the last row, then CPU ·
+     memory · GPU over disks · network, then five in a row on a very wide window */
+  @media (width >= 40rem) {
+    .sys-grid[data-tiles="5"] > :last-child {
+      grid-column: 1 / -1;
+    }
+  }
+
+  @media (width >= 80rem) {
+    .sys-grid[data-tiles="5"] {
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
+
+    .sys-grid[data-tiles="5"] > :nth-child(n) {
+      grid-column: span 2;
+    }
+
+    .sys-grid[data-tiles="5"] > :nth-child(n + 4) {
+      grid-column: span 3;
+    }
+  }
+
+  @media (width >= 110rem) {
+    .sys-grid[data-tiles="5"] {
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+
+    .sys-grid[data-tiles="5"] > :nth-child(n) {
+      grid-column: auto;
+    }
+  }
+
   .sys-gauge {
     width: 6rem;
     height: 6rem;

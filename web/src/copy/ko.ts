@@ -240,6 +240,11 @@ export const copy = {
       cores: (n: number | string) => `논리 프로세서 ${n}개`,
       memory: "메모리",
       memoryUsed: (used: string, total: string) => `${total} 중 ${used} 사용`,
+      gpu: "GPU",
+      gpuMemory: "GPU 전용 메모리",
+      gpuMemoryUsed: (used: string, total: string) => `${total} 중 ${used} 사용`,
+      gpuMemoryOnly: (used: string) => `${used} 사용`,
+      gpuNoMemory: "전용 메모리 정보 없음",
       disk: "디스크",
       diskUsed: (used: string, total: string) => `${total} 중 ${used} 사용`,
       noDisk: "읽을 수 있는 고정 디스크가 없어요.",
@@ -929,6 +934,8 @@ export const copy = {
     countdown: "조치 대기 시간이 끝나면 자동 조치를 해요. 그 전에 점검이 정상으로 돌아오면 조치하지 않아요.",
     devOtp:
       "실제 메일·문자를 보내지 않는 개발용 공급자(Dummy)예요. 인증 코드는 서버 PC의 data\\dev\\otp-outbox.log에 쌓여요. 다른 PC에서 로그인하는 사람에게는 관리자가 코드를 전해 줘야 해요.",
+    gpu:
+      "작업 관리자의 GPU 사용률과 같은 값이에요. 3D·복사·비디오 디코드 같은 GPU 엔진 가운데 가장 바쁜 엔진이 측정 간격 동안 일한 비율이고, GPU가 여러 개면 가장 바쁜 GPU를 보여 줘요. 전용 메모리는 GPU에 달린 메모리 사용량이에요(내장 GPU는 공유 메모리를 써서 거의 0이에요). 70% 이상은 주의, 90% 이상은 위험 색이에요.",
     setupAdmin:
       "Admin은 사용자·전역 설정·사전 고지 관리와 MCP 소유권 이전까지 모든 기능을 써요. 다른 Admin은 나중에 사용자 화면에서 더 만들 수 있어요.",
     session: {

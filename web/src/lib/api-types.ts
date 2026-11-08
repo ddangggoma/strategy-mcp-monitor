@@ -80,8 +80,20 @@ export interface SystemStatus {
   /** Bytes per second since the previous reading; null on the first one. */
   network: { sent_bps: number; recv_bps: number } | null;
   boot_at: string;
-  /** Percent per reading, oldest first. */
-  history: { cpu: number[]; memory: number[] };
+  /**
+   * The GPU (server app/monitor/gpu.py): the busiest engine of the busiest hardware adapter, as Task
+   * Manager shows it, and the dedicated memory in use (`total`/`percent` only when the server knows
+   * the adapters' size). null or absent on a PC without GPU counters: the panel has no GPU tile.
+   */
+  gpu?: GpuStatus | null;
+  /** Percent per reading, oldest first (`gpu` empty or absent without a GPU). */
+  history: { cpu: number[]; memory: number[]; gpu?: number[] };
+}
+
+export interface GpuStatus {
+  percent: number;
+  /** Bytes of dedicated (on-board) memory; null without the memory counters. */
+  memory: { used: number; total: number | null; percent: number | null } | null;
 }
 
 export interface Board {

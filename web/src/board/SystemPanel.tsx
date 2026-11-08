@@ -1,24 +1,48 @@
-import { ArrowDownIcon, ArrowUpIcon, CpuIcon, HardDriveIcon, MemoryStickIcon, NetworkIcon, type LucideIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, CpuIcon, GpuIcon, HardDriveIcon, MemoryStickIcon, NetworkIcon, type LucideIcon } from "lucide-react";
 import { useId, type CSSProperties, type ReactNode } from "react";
+import { InfoTip } from "@/components/app/InfoTip";
 import { RollingNumber } from "@/components/status/RollingNumber";
 import { Sparkline } from "@/components/status/Sparkline";
 import { copy } from "@/copy/ko";
-import type { McpState, SystemStatus } from "@/lib/api-types";
+import type { GpuStatus, McpState, SystemStatus } from "@/lib/api-types";
 import { useClock } from "@/lib/clock";
-import { CPU_LOAD, DISK_LOAD, MEMORY_LOAD, formatBytes, formatRate, formatUptime, loadState } from "./system";
+import { CPU_LOAD, DISK_LOAD, GPU_LOAD, GPU_MEMORY_LOAD, MEMORY_LOAD, formatBytes, formatRate, formatUptime, loadState } from "./system";
 import "./BoardOverview.css";
 
 const t = copy.board.system;
 
-function Tile({ title, icon: Icon, tone, children }: { title: string; icon: LucideIcon; tone: McpState | null; children: ReactNode }) {
+function Tile({
+  title,
+  icon: Icon,
+  tone,
+  tip,
+  children,
+}: {
+  title: string;
+  icon: LucideIcon;
+  tone: McpState | null;
+  /** A help tip beside the title (outside the heading: its button is not part of the heading's name). */
+  tip?: ReactNode;
+  children: ReactNode;
+}) {
+  const heading = (
+    <h3 className="flex items-center gap-2 text-sm font-medium text-fg-muted">
+      <span aria-hidden="true" className="ov-chip">
+        <Icon className="size-4" />
+      </span>
+      {title}
+    </h3>
+  );
   return (
     <li data-tone={tone ?? undefined} className="ov-tile">
-      <h3 className="flex items-center gap-2 text-sm font-medium text-fg-muted">
-        <span aria-hidden="true" className="ov-chip">
-          <Icon className="size-4" />
-        </span>
-        {title}
-      </h3>
+      {tip ? (
+        <div className="flex items-center gap-0.5">
+          {heading}
+          {tip}
+        </div>
+      ) : (
+        heading
+      )}
       {children}
     </li>
   );
@@ -50,7 +74,7 @@ function Gauge({ name, percent, state }: { name: string; percent: number; state:
   );
 }
 
-/** CPU or memory: the ring, a line or two of detail, and the recent percentages. */
+/** CPU, memory or GPU: the ring, a line or two of detail, and the recent percentages. */
 function LoadTile({
   title,
   icon,
@@ -59,21 +83,23 @@ function LoadTile({
   detail,
   history,
   minutes,
+  tip,
 }: {
   title: string;
   icon: LucideIcon;
   percent: number;
   load: readonly [number, number];
-  detail: string;
+  detail: ReactNode;
   history: number[];
   minutes: number;
+  tip?: ReactNode;
 }) {
   const state = loadState(percent, load);
   return (
-    <Tile title={title} icon={icon} tone={state}>
+    <Tile title={title} icon={icon} tone={state} tip={tip}>
       <div className="flex items-center gap-4">
         <Gauge name={title} percent={percent} state={state} />
-        <p className="min-w-0 text-sm text-fg">{detail}</p>
+        {typeof detail === "string" ? <p className="min-w-0 text-sm text-fg">{detail}</p> : <div className="min-w-0 flex-1">{detail}</div>}
       </div>
       <div className="flex flex-col gap-1">
         <div className="sys-trend" data-state={state}>
@@ -84,6 +110,69 @@ function LoadTile({
         </p>
       </div>
     </Tile>
+  );
+}
+
+/** A labelled bar: a disk's fill, or the GPU's dedicated memory. */
+function UsageMeter({
+  label,
+  mono = false,
+  percent,
+  state,
+  caption,
+}: {
+  label: string;
+  mono?: boolean;
+  percent: number;
+  state: McpState;
+  caption: string;
+}) {
+  const id = useId();
+  const pct = Math.min(100, Math.max(0, percent));
+  const text = copy.common.units.percent(pct.toFixed(1));
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-baseline justify-between gap-3">
+        <span id={id} className={mono ? "font-mono text-sm font-semibold text-fg" : "text-sm text-fg-muted"}>
+          {label}
+        </span>
+        <span className="text-sm font-semibold text-fg tabular-nums">{text}</span>
+      </div>
+      <div
+        role="meter"
+        aria-labelledby={id}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={pct}
+        aria-valuetext={text}
+        className="ov-meter"
+        data-state={state}
+      >
+        <span className="ov-meter-fill" style={{ "--meter": pct / 100 } as CSSProperties} />
+      </div>
+      <span className="text-xs text-fg-muted tabular-nums">{caption}</span>
+    </div>
+  );
+}
+
+/** The GPU's dedicated memory: a bar when its size is known, else what is in use, else a note. */
+function GpuMemory({ memory }: { memory: GpuStatus["memory"] }) {
+  if (memory === null) return <p className="text-sm text-fg-muted">{t.gpuNoMemory}</p>;
+  if (memory.total === null || memory.percent === null) {
+    return (
+      <p className="flex flex-col text-sm">
+        <span className="text-fg-muted">{t.gpuMemory}</span>
+        <span className="text-fg tabular-nums">{t.gpuMemoryOnly(formatBytes(memory.used))}</span>
+      </p>
+    );
+  }
+  return (
+    <UsageMeter
+      label={t.gpuMemory}
+      percent={memory.percent}
+      state={loadState(memory.percent, GPU_MEMORY_LOAD)}
+      caption={t.gpuMemoryUsed(formatBytes(memory.used), formatBytes(memory.total))}
+    />
   );
 }
 
@@ -105,29 +194,15 @@ function Disks({ disks }: { disks: SystemStatus["disks"] }) {
 }
 
 function DiskRow({ disk }: { disk: SystemStatus["disks"][number] }) {
-  const id = useId();
-  const state = loadState(disk.percent, DISK_LOAD);
   return (
-    <li className="flex flex-col gap-1.5">
-      <div className="flex items-baseline justify-between gap-3">
-        <span id={id} className="font-mono text-sm font-semibold text-fg">
-          {disk.name}
-        </span>
-        <span className="text-sm font-semibold text-fg tabular-nums">{copy.common.units.percent(disk.percent.toFixed(1))}</span>
-      </div>
-      <div
-        role="meter"
-        aria-labelledby={id}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={disk.percent}
-        aria-valuetext={copy.common.units.percent(disk.percent.toFixed(1))}
-        className="ov-meter"
-        data-state={state}
-      >
-        <span className="ov-meter-fill" style={{ "--meter": disk.percent / 100 } as CSSProperties} />
-      </div>
-      <span className="text-xs text-fg-muted tabular-nums">{t.diskUsed(formatBytes(disk.used), formatBytes(disk.total))}</span>
+    <li>
+      <UsageMeter
+        label={disk.name}
+        mono
+        percent={disk.percent}
+        state={loadState(disk.percent, DISK_LOAD)}
+        caption={t.diskUsed(formatBytes(disk.used), formatBytes(disk.total))}
+      />
     </li>
   );
 }
@@ -163,13 +238,15 @@ function Uptime({ bootAt }: { bootAt: string }) {
 }
 
 /**
- * “서버 PC 리소스”: CPU and memory as rings with their recent trend, each fixed disk as a bar, and
- * the network rate, from the server's readings (every few seconds over the board stream). The
- * hues are the state hues: green under the load thresholds, amber over the first, red over the second.
+ * “서버 PC 리소스”: CPU, memory and (when the PC has GPU counters) the GPU as rings with their recent
+ * trend, the GPU's dedicated memory and each fixed disk as a bar, and the network rate, from the
+ * server's readings (every few seconds over the board stream). The hues are the state hues: green
+ * under the load thresholds, amber over the first, red over the second. No GPU, no GPU tile.
  */
 export function SystemPanel({ system }: { system: SystemStatus | undefined }) {
   const headingId = useId();
   const minutes = system ? Math.round((system.history.cpu.length * system.interval_sec) / 60) || 1 : 0;
+  const gpu = system?.gpu ?? null;
   return (
     <section aria-labelledby={headingId} data-anim="rise" style={{ "--rise-i": 6 } as CSSProperties} className="flex flex-col gap-3">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
@@ -185,7 +262,7 @@ export function SystemPanel({ system }: { system: SystemStatus | undefined }) {
         ) : null}
       </div>
       {system ? (
-        <ul className="ov-grid sys-grid">
+        <ul className="ov-grid sys-grid" data-tiles={gpu ? 5 : 4}>
           <LoadTile
             title={t.cpu}
             icon={CpuIcon}
@@ -204,6 +281,18 @@ export function SystemPanel({ system }: { system: SystemStatus | undefined }) {
             history={system.history.memory}
             minutes={minutes}
           />
+          {gpu ? (
+            <LoadTile
+              title={t.gpu}
+              icon={GpuIcon}
+              percent={gpu.percent}
+              load={GPU_LOAD}
+              detail={<GpuMemory memory={gpu.memory} />}
+              history={system.history.gpu ?? []}
+              minutes={minutes}
+              tip={<InfoTip label={t.gpu} content={copy.help.gpu} side="bottom" align="start" />}
+            />
+          ) : null}
           <Disks disks={system.disks} />
           <Network network={system.network} />
         </ul>

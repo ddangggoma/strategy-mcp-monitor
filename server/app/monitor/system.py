@@ -1,9 +1,11 @@
-"""This PC's resources for the board: CPU, memory, fixed disks, network rate and boot time.
+"""This PC's resources for the board: CPU, memory, GPU, fixed disks, network rate and boot time.
 
 ``SystemSampler`` reads them every ``interval_sec`` (in a worker thread: psutil may block for a
-moment on a busy disk), keeps the last ``history`` CPU and memory percentages, and publishes the
-whole status as the public SSE ``system`` event; ``latest`` is the board snapshot's ``system``.
-Nothing that names the machine, its users or its addresses is read (the board is anonymous).
+moment on a busy disk, PDH for a moment on the GPU counters), keeps the last ``history`` CPU,
+memory and GPU percentages, and publishes the whole status as the public SSE ``system`` event;
+``latest`` is the board snapshot's ``system``. ``gpu`` is None on a PC without GPU counters (see
+``app.monitor.gpu`` for what the percentage means). Nothing that names the machine, its users, its
+addresses or its GPU model is read (the board is anonymous).
 """
 from __future__ import annotations
 
@@ -15,12 +17,13 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 import psutil
 
 from app.clock import Clock, to_kst_iso
 from app.monitor.bus import BoardBus
+from app.monitor.gpu import GpuReader, GpuReading, open_gpu_reader
 
 INTERVAL_SEC = 5.0
 HISTORY = 60  # five minutes at the default interval
@@ -51,6 +54,8 @@ class ResourceReading:
     """Epoch seconds."""
     mono: float
     """``time.monotonic()`` at the reading: the network rate's time base."""
+    gpu: GpuReading | None = None
+    """None on a PC without GPU counters."""
 
 
 class ResourceSource(Protocol):
@@ -75,8 +80,25 @@ def _fixed_disks() -> tuple[DiskReading, ...]:
 
 
 class PsutilSource:
-    def __init__(self) -> None:
+    def __init__(self, gpu: GpuReader | None | Literal["auto"] = "auto") -> None:
         psutil.cpu_percent(interval=None)  # the first call only sets the baseline
+        # the GPU counters' first collection is their baseline too
+        self._gpu = open_gpu_reader() if gpu == "auto" else gpu
+        self._gpu_failing = False
+
+    def _read_gpu(self) -> GpuReading | None:
+        """The GPU reading; a failing read leaves only the GPU out (logged once per run of failures)."""
+        if self._gpu is None:
+            return None
+        try:
+            reading = self._gpu.read()
+        except Exception:
+            if not self._gpu_failing:
+                _log.warning("reading the GPU counters failed", exc_info=True)
+            self._gpu_failing = True
+            return None
+        self._gpu_failing = False
+        return reading
 
     def read(self) -> ResourceReading:
         mem = psutil.virtual_memory()
@@ -92,7 +114,24 @@ class PsutilSource:
             net_recv=net.bytes_recv if net else 0,
             boot_time=psutil.boot_time(),
             mono=time.monotonic(),
+            gpu=self._read_gpu(),
         )
+
+
+def _gpu_status(g: GpuReading | None) -> dict[str, Any] | None:
+    """The status's ``gpu``: the percentage, and the dedicated memory when the counters tell it
+    (``total`` and its ``percent`` only when DXGI told the adapters' size)."""
+    if g is None:
+        return None
+    memory = None
+    if g.mem_used is not None:
+        total = g.mem_total
+        memory = {
+            "used": g.mem_used,
+            "total": total,
+            "percent": round(min(100.0, g.mem_used * 100 / total), 1) if total else None,
+        }
+    return {"percent": round(g.percent, 1), "memory": memory}
 
 
 class SystemSampler:
@@ -111,6 +150,7 @@ class SystemSampler:
         self._interval = interval_sec
         self._cpu: deque[float] = deque(maxlen=history)
         self._mem: deque[float] = deque(maxlen=history)
+        self._gpu: deque[float] = deque(maxlen=history)
         self._prev: ResourceReading | None = None
         self._latest: dict[str, Any] | None = None
         self._task: asyncio.Task[None] | None = None
@@ -124,6 +164,8 @@ class SystemSampler:
         """Take one reading: update the history and the rates, publish and return the status."""
         self._cpu.append(round(r.cpu_percent, 1))
         self._mem.append(round(r.mem_percent, 1))
+        if r.gpu is not None:
+            self._gpu.append(round(r.gpu.percent, 1))
         network = None
         prev = self._prev
         if prev is not None and r.mono > prev.mono:
@@ -144,7 +186,8 @@ class SystemSampler:
             ],
             "network": network,
             "boot_at": to_kst_iso(datetime.fromtimestamp(r.boot_time, UTC)),
-            "history": {"cpu": list(self._cpu), "memory": list(self._mem)},
+            "gpu": _gpu_status(r.gpu),
+            "history": {"cpu": list(self._cpu), "memory": list(self._mem), "gpu": list(self._gpu)},
         }
         self._latest = status
         self._bus.publish("system", status)

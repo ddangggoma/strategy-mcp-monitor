@@ -94,6 +94,36 @@ it("shows the PC's resources and follows system events", () => {
   expect(within(panel).getByRole("img", { name: copy.board.system.gaugeLabel("CPU", 5) })).toBeInTheDocument();
 });
 
+it("shows no GPU tile on a PC without GPU counters", () => {
+  renderBoard(boardEvent({ mcps: [], system: systemFixture({ gpu: null }) }));
+  const panel = screen.getByRole("region", { name: copy.board.system.title });
+  expect(within(panel).queryByRole("heading", { name: copy.board.system.gpu })).toBeNull();
+  expect(within(panel).getAllByRole("listitem").filter((li) => li.parentElement === panel.querySelector(".sys-grid"))).toHaveLength(4);
+});
+
+it("shows the GPU as a ring with its trend, its memory as a bar and a tip, in the CPU's load hues", async () => {
+  const gpu = { percent: 91.2, memory: { used: 1536 * 2 ** 20, total: 2 * 2 ** 30, percent: 75 } };
+  const store = renderBoard(boardEvent({ mcps: [], system: systemFixture({ gpu, history: { cpu: [10, 42.5], memory: [87, 87.5], gpu: [60, 91.2] } }) }));
+  const panel = screen.getByRole("region", { name: copy.board.system.title });
+  const tile = within(panel).getByRole("heading", { name: copy.board.system.gpu }).closest("li")!;
+  expect(tile).toHaveAttribute("data-tone", "FAILED"); // over 90 %, like the CPU
+  expect(within(tile).getByRole("img", { name: copy.board.system.gaugeLabel("GPU", 91) })).toBeInTheDocument();
+  expect(within(tile).getByRole("img", { name: (n) => n.startsWith(copy.board.system.trendLabel("GPU")) })).toBeInTheDocument();
+  const meter = within(tile).getByRole("meter", { name: copy.board.system.gpuMemory });
+  expect(meter).toHaveAttribute("aria-valuenow", "75");
+  expect(meter).toHaveAttribute("data-state", "HEALTHY"); // memory thresholds: 80 / 90
+  expect(within(tile).getByText(copy.board.system.gpuMemoryUsed("1.5GB", "2.0GB"))).toBeInTheDocument();
+  await userEvent.click(within(tile).getByRole("button", { name: copy.help.label(copy.board.system.gpu) }));
+  expect(await screen.findByRole("tooltip")).toHaveTextContent(copy.help.gpu);
+  // a size the server does not know: what is in use, no bar
+  act(() =>
+    store.apply({ event: "system", data: JSON.stringify(systemFixture({ gpu: { percent: 72, memory: { used: 2 ** 30, total: null, percent: null } } })) }),
+  );
+  expect(tile).toHaveAttribute("data-tone", "SUSPECT");
+  expect(within(tile).queryByRole("meter")).toBeNull();
+  expect(within(tile).getByText(copy.board.system.gpuMemoryOnly("1.0GB"))).toBeInTheDocument();
+});
+
 it("says the resources have not arrived yet", () => {
   renderBoard(boardEvent({ mcps: [] }));
   expect(within(screen.getByRole("region", { name: copy.board.system.title })).getByText(copy.board.system.waiting)).toBeInTheDocument();
