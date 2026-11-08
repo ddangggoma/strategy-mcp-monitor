@@ -40,6 +40,7 @@ class DemoMcp:
     module: str  # the dummy-mcps package run with ``python -m``
     port: int  # its default port (dummy-mcps/<module>/__main__.py)
     owner_email: str
+    icon: str | None = None  # one emoji (app/monitor/icons.py)
 
 
 DEMO_USERS: tuple[DemoUser, ...] = (
@@ -49,9 +50,9 @@ DEMO_USERS: tuple[DemoUser, ...] = (
 )
 
 DEMO_MCPS: tuple[DemoMcp, ...] = (
-    DemoMcp("seoul-weather", "seoul_weather", 9101, "dev1@example.com"),
-    DemoMcp("calculator", "calculator", 9102, "dev2@example.com"),
-    DemoMcp("seoul-clock", "seoul_clock", 9103, "dev1@example.com"),
+    DemoMcp("seoul-weather", "seoul_weather", 9101, "dev1@example.com", "☀️"),
+    DemoMcp("calculator", "calculator", 9102, "dev2@example.com", "🧮"),
+    DemoMcp("seoul-clock", "seoul_clock", 9103, "dev1@example.com", "⏰"),
 )
 
 
@@ -209,6 +210,7 @@ def seed(
                     "path": "/mcp",
                     "probe": "mcp_ping",
                     "autostart_on_boot": True,
+                    "icon": demo_mcp.icon,
                 }
             )
             uploads = {

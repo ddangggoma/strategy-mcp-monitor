@@ -15,7 +15,7 @@ from app.monitor.store import McpNotFoundError
 from tests.fakes import ok_result
 from tests.mcp_helpers import make_user, seed_mcp
 
-BOARD_KEYS = {"id", "name", "state", "issue", "latency_ms", "sparkline", "uptime_24h", "last_check_at",
+BOARD_KEYS = {"id", "name", "icon", "state", "issue", "latency_ms", "sparkline", "uptime_24h", "last_check_at",
               "action_due_at", "action_in_sec", "action_delay_sec", "maintenance", "running"}
 
 
@@ -311,7 +311,7 @@ async def test_board_item_and_order(services):
     assert [i["name"] for i in mon.board()] == ["Alpha", "beta"] and mon.board_item(999) is None
     item = mon.board_item(b.id)
     assert set(item) == BOARD_KEYS
-    assert item == {"id": b.id, "name": "beta", "state": "HEALTHY", "issue": None, "latency_ms": None, "sparkline": [],
+    assert item == {"id": b.id, "name": "beta", "icon": None, "state": "HEALTHY", "issue": None, "latency_ms": None, "sparkline": [],
                     "uptime_24h": None, "last_check_at": None, "action_due_at": None, "action_in_sec": None, "action_delay_sec": None,
                     "maintenance": False, "running": None}
     mon._prober.set_check(b.id, Issue.PROCESS_DOWN)

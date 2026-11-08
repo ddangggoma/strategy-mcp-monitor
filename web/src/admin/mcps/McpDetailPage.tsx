@@ -2,6 +2,7 @@ import { Link, getRouteApi } from "@tanstack/react-router";
 import { OctagonAlertIcon } from "lucide-react";
 import { useState } from "react";
 import { InfoTip, type HelpContent } from "@/components/app/InfoTip";
+import { McpIcon } from "@/components/status/McpIcon";
 import { StatusBadge } from "@/components/status/StatusBadge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -86,7 +87,10 @@ function Detail({ mcp }: { mcp: McpDetail }) {
       <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
         <div className="flex min-w-0 flex-col gap-1.5">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <h1 className="text-xl font-semibold break-all text-fg">{mcp.name}</h1>
+            <span className="inline-flex min-w-0 items-center gap-3">
+              <McpIcon icon={mcp.icon} size="lg" />
+              <h1 className="text-xl font-semibold break-all text-fg">{mcp.name}</h1>
+            </span>
             {mcp.config_error ? (
               <ConfigErrorBadge size="lg" />
             ) : mcp.live ? (

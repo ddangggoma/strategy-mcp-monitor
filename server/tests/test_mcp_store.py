@@ -40,6 +40,20 @@ def test_defaults():
         "/mcp", "mcp_ping", 30, 30, 3, 600)
     assert (c.auto_recovery, c.autostart_on_boot, c.maintenance, c.script_timeout_sec, c.expected_process_name) == (
         True, False, False, 120, None)
+    assert c.icon is None
+
+
+def test_a_row_stored_before_icons_existed_stays_valid_and_takes_an_icon(env, db):
+    store, _users, owner = env
+    mcp = store.create(cfg(), owner.id)
+    legacy = {k: v for k, v in json.loads(cfg().model_dump_json()).items() if k != "icon"}
+    with db.transaction() as conn:
+        conn.execute("UPDATE mcps SET config = ? WHERE id = ?", (json.dumps(legacy), mcp.id))
+    old = store.get(mcp.id)
+    assert old.config_error is None and old.config.icon is None
+    _before, after = store.update(mcp.id, {"icon": "☀️"})
+    assert after.config.icon == "☀️"
+    assert json.loads(db.query("SELECT config FROM mcps WHERE id = ?", (mcp.id,))[0]["config"])["icon"] == "☀️"
 
 
 @pytest.mark.parametrize("bad", [
@@ -59,6 +73,9 @@ def test_defaults():
     {"action_delay_sec": 3601}, {"startup_grace_sec": -1}, {"startup_grace_sec": 601},
     {"max_auto_actions": 0}, {"max_auto_actions": 21}, {"window_sec": 59}, {"window_sec": 86401},
     {"autostart_on_boot": 1}, {"maintenance": "false"}, {"name": None},
+    # icon: exactly one emoji, never markup, URLs or names (more cases: test_icon_emoji.py)
+    {"icon": "skull"}, {"icon": ""}, {"icon": "<svg/>"}, {"icon": "data:image/png;base64,AA"}, {"icon": 3},
+    {"icon_color": "blue"},
 ])
 def test_config_rejects(bad):
     with pytest.raises(ValidationError):
@@ -73,6 +90,7 @@ def test_config_rejects(bad):
     {"script_timeout_sec": 10}, {"script_timeout_sec": 120},
     {"probe": "tcp"}, {"probe": "icmp"}, {"host": "a"}, {"host": "my-host.example.com"}, {"host": "a1.2b"},
     {"host": "x" * 63 + ".com"},
+    {"icon": "🤖"}, {"icon": "🇰🇷"}, {"icon": None},
 ])
 def test_config_accepts_boundaries(ok):
     assert cfg(**ok)

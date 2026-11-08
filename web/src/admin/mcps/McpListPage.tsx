@@ -11,6 +11,7 @@ import { ArrowDownIcon, ArrowUpIcon, ChevronsUpDownIcon, PlusIcon } from "lucide
 import { useEffect, useMemo, useRef, useState } from "react";
 import { InfoTip, type HelpContent } from "@/components/app/InfoTip";
 import { WithReason } from "@/components/app/WithReason";
+import { McpIcon } from "@/components/status/McpIcon";
 import { STATE_ICONS, StatusBadge } from "@/components/status/StatusBadge";
 import { UptimeMeter } from "@/components/status/UptimeMeter";
 import { Button } from "@/components/ui/button";
@@ -57,13 +58,16 @@ const columns = helper.columns([
     header: copy.mcp.columns.name,
     sortFn: byNameRow,
     cell: ({ row: { original: m } }) => (
-      <Link
-        to="/admin/mcps/$mcpId"
-        params={{ mcpId: String(m.id) }}
-        className="font-semibold text-fg underline-offset-4 hover:underline"
-      >
-        {m.name}
-      </Link>
+      <span className="inline-flex items-center gap-2">
+        <McpIcon icon={m.icon} size="sm" />
+        <Link
+          to="/admin/mcps/$mcpId"
+          params={{ mcpId: String(m.id) }}
+          className="font-semibold text-fg underline-offset-4 hover:underline"
+        >
+          {m.name}
+        </Link>
+      </span>
     ),
   }),
   helper.display({

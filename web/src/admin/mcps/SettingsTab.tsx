@@ -31,6 +31,7 @@ function toValues(m: McpDetail): McpFormValues {
     autostart_on_boot: m.autostart_on_boot,
     maintenance: m.maintenance,
     script_timeout_sec: m.script_timeout_sec,
+    icon: m.icon ?? null,
   };
 }
 

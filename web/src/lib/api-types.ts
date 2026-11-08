@@ -28,6 +28,8 @@ export interface Me {
 export interface BoardItem {
   id: number;
   name: string;
+  /** One emoji (lib/mcp-emoji.ts); null = the default MCP icon. */
+  icon: string | null;
   state: McpState;
   issue: Issue | null;
   latency_ms: number | null;
@@ -205,6 +207,8 @@ export interface McpConfig {
   autostart_on_boot: boolean;
   maintenance: boolean;
   script_timeout_sec: number;
+  /** One emoji (lib/mcp-emoji.ts); null = the default MCP icon. */
+  icon: string | null;
 }
 export interface McpDetail extends McpConfig {
   id: number;

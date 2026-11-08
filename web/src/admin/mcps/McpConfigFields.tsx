@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { copy } from "@/copy/ko";
 import type { McpConfig } from "@/lib/api-types";
+import { McpIconPicker } from "./McpIconPicker";
 import { RANGES, type McpFormValues } from "./mcp-schema";
 
 type NumberKey = keyof typeof RANGES;
@@ -15,7 +16,7 @@ type SwitchKey = "auto_recovery" | "autostart_on_boot" | "maintenance";
 const PROBES = ["mcp_ping", "tcp", "icmp"] as const;
 
 /**
- * Every McpConfig field in three fieldsets (connection and checks / auto recovery / operation),
+ * Every McpConfig field in four fieldsets (connection and checks / icon / auto recovery / operation),
  * shared by the settings tab and the registration page. The form, its schema and its submit
  * belong to the caller.
  */
@@ -65,6 +66,10 @@ export function McpConfigFields({
         />
         <TextField control={control} name="expected_process_name" label={copy.mcp.fields.expected_process_name}
           readOnly={readOnly} mono hint={copy.mcp.processNameHint} tip={copy.help.mcp.fields.expected_process_name} />
+      </Group>
+
+      <Group legend={copy.mcp.icon.legend} tip={copy.help.mcp.icon}>
+        <McpIconPicker control={control} readOnly={readOnly} />
       </Group>
 
       <Group legend={copy.mcp.groups.recovery} tip={copy.help.mcp.recoveryGroup} tipLabel={copy.help.mcp.recoveryGroupLabel}>

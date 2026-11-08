@@ -587,6 +587,7 @@ class Monitor:
         return {
             "id": mcp_id,
             "name": mcp.config.name,
+            "icon": mcp.config.icon,
             "state": snap.state.value,
             "issue": snap.issue.value if snap.issue else None,
             "latency_ms": spark[-1] if spark else None,

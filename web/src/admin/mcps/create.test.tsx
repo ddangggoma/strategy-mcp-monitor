@@ -80,6 +80,27 @@ it("requires start and stop scripts and posts config with scripts", async () => 
   expect(loadDraft("mcp-create")).toBeNull();
 });
 
+it("posts the chosen emoji icon (null by default) and keeps it in the draft", async () => {
+  const posted = capturePost();
+  await renderCreate();
+  await fillConfig();
+  const icons = screen.getByRole("radiogroup", { name: copy.mcp.icon.choiceLabel });
+  await userEvent.click(within(icons).getByRole("radio", { name: copy.mcp.icon.names["📁"] }));
+  await waitFor(() => expect(loadDraft<{ icon: string | null }>("mcp-create")?.icon).toBe("📁"));
+  await typeScript("start", "a");
+  await typeScript("stop", "b");
+  await userEvent.click(submit());
+  await waitFor(() => expect(posted()?.icon).toBe("📁"));
+});
+
+it("drops a stored draft whose icon is not one emoji", async () => {
+  const empty = { ext: ".ps1", content: "" };
+  saveDraft("mcp-create", { name: "x", icon: "<svg onload=alert(1)>", scripts: { start: empty, stop: empty, restart: empty } });
+  await renderCreate();
+  expect(field(copy.mcp.fields.name)).toHaveValue("");
+  expect(loadDraft("mcp-create")).toBeNull();
+});
+
 it("sends a restart script with its extension when one is given", async () => {
   const posted = capturePost();
   await renderCreate();

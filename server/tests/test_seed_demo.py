@@ -88,6 +88,7 @@ def test_seed_creates_users_mcps_and_scripts(root, dummy_dir, capsys):
             assert mcp.config_error is None
             assert (mcp.config.host, mcp.config.port, mcp.config.path) == ("127.0.0.1", demo.port, "/mcp")
             assert mcp.config.probe == "mcp_ping" and mcp.config.autostart_on_boot
+            assert mcp.config.icon == demo.icon and demo.icon is not None  # every demo MCP gets an emoji
             assert mcp.owner_id == by_email[demo.owner_email].id
             infos = scripts.list(mcp.id)
             assert [i.kind for i in infos] == ["start", "stop", "restart"]

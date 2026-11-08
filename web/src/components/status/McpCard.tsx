@@ -7,6 +7,7 @@ import type { BoardItem } from "@/lib/api-types";
 import { useClock } from "@/lib/clock";
 import { formatKst, relativeKo } from "@/lib/time";
 import { CountdownBar } from "./CountdownBar";
+import { McpIcon } from "./McpIcon";
 import { RollingNumber } from "./RollingNumber";
 import { Sparkline } from "./Sparkline";
 import { StatusBadge } from "./StatusBadge";
@@ -27,7 +28,7 @@ function LastCheck({ at }: { at: string | null }) {
 }
 
 /**
- * One MCP on the board: name, state, issue, latency, sparkline, 24 h uptime, last check; the
+ * One MCP on the board: icon and name, state, issue, latency, sparkline, 24 h uptime, last check; the
  * countdown only while the server runs one (`action_in_sec`, F23); a running script; maintenance.
  * Host, port and owner are never shown (anonymous screen). Rows line up across cards through
  * subgrid (McpCard.css); Motion `layout` glides the card when the board re-sorts (needs a
@@ -48,9 +49,13 @@ export function McpCard({ item, receivedAt }: { item: BoardItem; receivedAt: num
       className="mcp-card"
     >
       <header className="flex items-start justify-between gap-3">
-        <h2 id={nameId} className="min-w-0 text-lg leading-tight font-semibold break-words">
-          {item.name}
-        </h2>
+        <div className="flex min-w-0 items-center gap-2.5">
+          {/* the chosen icon, or the default MCP icon; decorative (the name is the label) */}
+          <McpIcon icon={item.icon} />
+          <h2 id={nameId} className="min-w-0 text-lg leading-tight font-semibold break-words">
+            {item.name}
+          </h2>
+        </div>
         <StatusBadge state={item.state} />
       </header>
 

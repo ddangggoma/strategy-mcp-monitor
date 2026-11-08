@@ -18,7 +18,7 @@ from tests.live import live_app
 from tests.mcp_helpers import login_as, make_user, seed_mcp
 from tests.test_auth_api import audit_events
 
-KEYS = {"id", "name", "state", "issue", "latency_ms", "sparkline", "uptime_24h", "last_check_at", "action_due_at", "action_in_sec", "action_delay_sec", "maintenance", "running"}
+KEYS = {"id", "name", "icon", "state", "issue", "latency_ms", "sparkline", "uptime_24h", "last_check_at", "action_due_at", "action_in_sec", "action_delay_sec", "maintenance", "running"}
 
 
 def parse(chunk: str):
@@ -149,6 +149,30 @@ async def test_put_audit_records_failures_and_skips_noops(external_client, servi
     assert (await external_client.put(f"/api/mcps/{m.id}", json=[1], headers=h)).status_code == 422
     ev = [(e["result"], e["target"].get("error")) for e in await audit_events(services, "admin.audit") if e["action"] == "mcp_update"]
     assert ev == [("error", "validation"), ("error", "endpoint_taken"), ("error", "not_found")]
+
+
+async def test_icon_put_detail_board_and_audit(external_client, services):
+    owner = make_user(services, "o@x.com"); m = seed_mcp(services, owner)
+    h = {"X-CSRF-Token": login_as(external_client, services, owner, "external")}
+    d = (await external_client.get(f"/api/mcps/{m.id}")).json()
+    assert d["icon"] is None  # absent = the default MCP icon
+    robot = "🤖"
+    r = await external_client.put(f"/api/mcps/{m.id}", json={"icon": robot}, headers=h)
+    assert r.status_code == 200 and r.json()["icon"] == robot and services.mcps.get(m.id).config.icon == robot
+    item = (await external_client.get("/api/board")).json()["mcps"][0]  # anonymous board: icon included
+    assert item["icon"] == robot
+    assert (await external_client.get("/api/mcps")).json()[0]["icon"] == robot
+    ev = [e for e in await audit_events(services, "admin.audit") if e["action"] == "mcp_update"]
+    assert ev[-1]["target"]["changes"] == {"icon": [None, robot]}
+    r = await external_client.put(f"/api/mcps/{m.id}", json={"icon": None}, headers=h)  # back to the default
+    assert r.status_code == 200 and r.json()["icon"] is None
+    ev = [e for e in await audit_events(services, "admin.audit") if e["action"] == "mcp_update"]
+    assert ev[-1]["target"]["changes"] == {"icon": [robot, None]}
+    for bad in ({"icon": "calculator"}, {"icon": "<svg onload=alert(1)>"}, {"icon": "https://x/i.png"},
+                {"icon": robot * 2}, {"icon": 1}, {"icon": ""}, {"icon_color": "red"}):
+        r = await external_client.put(f"/api/mcps/{m.id}", json=bad, headers=h)
+        assert (r.status_code, r.json()) == (422, {"error": "validation"}), bad
+    assert services.mcps.get(m.id).config.icon is None
 
 
 async def test_put_maintenance_moves_the_engine(external_client, services):

@@ -29,6 +29,14 @@ async def test_create_owner_is_creator(local_client, services):
     assert (ev["action"], ev["result"], ev["target"]) == ("mcp_create", "ok", {"mcp_id": mid, "name": "calc", "host": "127.0.0.1", "port": 9102})
 
 
+async def test_create_with_an_icon(local_client, services):
+    _, h = await as_user(local_client, services, "dev@x.com")
+    r = await local_client.post("/api/mcps", json={**BODY, "icon": "🧮"}, headers=h)
+    assert r.status_code == 201 and r.json()["icon"] == "🧮" and r.json()["live"]["icon"] == "🧮"
+    r = await local_client.post("/api/mcps", json={**BODY, "name": "x", "port": 9200, "icon": "calculator"}, headers=h)
+    assert (r.status_code, r.json()) == (422, {"error": "validation"})
+
+
 async def test_create_requires_both_scripts(local_client, services):
     _, h = await as_user(local_client, services, "dev@x.com")
     r = await local_client.post("/api/mcps", json={**BODY, "scripts": {"start": SCRIPTS["start"]}}, headers=h)

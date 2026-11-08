@@ -140,6 +140,8 @@
     --font-sans: "Pretendard Variable", Pretendard, "Segoe UI Variable Text", "Segoe UI", "Malgun Gothic",
       "Apple SD Gothic Neo", system-ui, sans-serif;
     --font-mono: "JetBrains Mono Variable", "Cascadia Mono", Consolas, "D2Coding", ui-monospace, monospace;
+    /* MCP icons are emoji: the system colour emoji font (Segoe UI Emoji on Windows) */
+    --font-emoji: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif;
 
     --font-weight-normal: 400;
     --font-weight-medium: 500;

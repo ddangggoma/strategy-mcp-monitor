@@ -28,6 +28,7 @@ export function item(id: number, state: McpState, name = "mcp" + id): BoardItem 
   return {
     id,
     name,
+    icon: null,
     state,
     issue: healthy ? null : "PROCESS_DOWN",
     latency_ms: healthy ? 12 : null,
@@ -170,6 +171,7 @@ export function mcpDetailFixture(p: Partial<McpDetail> = {}): McpDetail {
     autostart_on_boot: false,
     maintenance: false,
     script_timeout_sec: 120,
+    icon: null,
     id,
     config_error: false,
     owner: userSummary(1),

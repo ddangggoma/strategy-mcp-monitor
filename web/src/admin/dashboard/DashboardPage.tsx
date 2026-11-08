@@ -4,6 +4,7 @@ import { useId, useMemo, type ReactNode } from "react";
 import { InfoTip, type HelpContent } from "@/components/app/InfoTip";
 import { ConnectionBanner } from "@/components/status/ConnectionBanner";
 import { SessionCard } from "@/components/status/SessionCard";
+import { McpIcon } from "@/components/status/McpIcon";
 import { STATE_ICONS, StatusBadge } from "@/components/status/StatusBadge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -126,7 +127,8 @@ function recentRows(activity: McpActivity): ActivityRow[] {
   return rows.sort((x, y) => Date.parse(y.at) - Date.parse(x.at)).slice(0, RECENT);
 }
 
-function RecentActivity() {
+/** `items`: the live board, for each row's MCP icon (an MCP deleted since shows the default icon). */
+function RecentActivity({ items }: { items: ReadonlyMap<number, BoardItem> }) {
   const { data, isPending, isError } = useMcpActivity();
   const rows = useMemo(() => (data ? recentRows(data) : []), [data]);
 
@@ -167,13 +169,16 @@ function RecentActivity() {
               </time>
             </TableCell>
             <TableCell>
-              <Link
-                to="/admin/mcps/$mcpId"
-                params={{ mcpId: String(r.mcpId) }}
-                className="font-medium text-fg underline-offset-4 hover:underline"
-              >
-                {r.name}
-              </Link>
+              <span className="inline-flex items-center gap-2 whitespace-nowrap">
+                <McpIcon icon={items.get(r.mcpId)?.icon} size="sm" />
+                <Link
+                  to="/admin/mcps/$mcpId"
+                  params={{ mcpId: String(r.mcpId) }}
+                  className="font-medium text-fg underline-offset-4 hover:underline"
+                >
+                  {r.name}
+                </Link>
+              </span>
             </TableCell>
             <TableCell>
               {r.type === "transition" ? <StatusBadge state={r.t.to} issue={r.t.issue} /> : <ActionCell a={r.a} />}
@@ -224,7 +229,7 @@ export function DashboardPage() {
           ) : null}
         </DashCard>
         <DashCard title={copy.dashboard.recentActivity} tip={copy.help.dashboard.recent} className="col-span-full">
-          <RecentActivity />
+          <RecentActivity items={board.items} />
         </DashCard>
         <DashCard title={copy.dashboard.loginFailures.title} tip={copy.help.dashboard.loginFailures}>
           <LoginFailuresCard />

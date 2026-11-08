@@ -16,6 +16,7 @@ import { ApiError } from "@/lib/api";
 import type { McpConfig, McpCreate, ScriptExt, ScriptKind, ScriptUpload } from "@/lib/api-types";
 import { clearDraft, loadDraft, saveDraft } from "@/lib/draft";
 import { createMcp } from "@/lib/endpoints";
+import { isMcpEmoji } from "@/lib/mcp-emoji";
 import { denyReason } from "@/lib/permissions";
 import { useSession } from "@/lib/session";
 import { qk } from "../query-keys";
@@ -51,6 +52,7 @@ const DEFAULTS: McpFormValues = {
   autostart_on_boot: false,
   maintenance: false,
   script_timeout_sec: 120,
+  icon: null,
 };
 const KEYS = Object.keys(DEFAULTS) as (keyof McpFormValues)[];
 const EMPTY_SCRIPTS: Scripts = {
@@ -90,10 +92,12 @@ function readDraft(): CreateDraft | null {
     const got = d[k];
     if (got === undefined) continue;
     const ok =
-      typeof got === typeof want ||
-      (typeof got === "string" && typeof want === "number") || // a number input being edited
-      (k === "port" && typeof got === "number") ||
-      (k === "expected_process_name" && got === null);
+      k === "icon"
+        ? got === null || isMcpEmoji(got)
+        : typeof got === typeof want ||
+          (typeof got === "string" && typeof want === "number") || // a number input being edited
+          (k === "port" && typeof got === "number") ||
+          (k === "expected_process_name" && got === null);
     if (!ok) return bad();
     values[k] = got;
   }
