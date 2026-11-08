@@ -1,3 +1,5 @@
+<img src="docs/assets/brand/icon.svg" width="96" alt="MCP Monitor 아이콘. 어두운 판 위의 흰 AX(AI Transformation) 글자에서 A의 가로획은 초록 심박 파형, X의 교차점은 초록 점입니다.">
+
 # 🛰️ MCP Monitor
 
 ![Python 3.15](https://img.shields.io/badge/Python-3.15.2-3776AB?logo=python&logoColor=white)
@@ -308,13 +310,13 @@ strategy-mcp-monitor/
 ├─ server/        # 서비스 백엔드 (FastAPI, 모니터 엔진, 수집기, 로그 저장소) — python -m app
 │  ├─ app/        #   auth, monitor, sessions, activity, collect, logstore, web, win, winsvc, ...
 │  └─ tests/      #   pytest (perf/ 는 100만 건 성능)
-├─ desktop/       # Rust(Tauri 2) mcp-monitor.exe — src/{cli,payload,install,agent,app}, tests/, ui/(연결 중 페이지), icons/
+├─ desktop/       # Rust(Tauri 2) mcp-monitor.exe — src/{cli,payload,install,agent,app}, tests/, ui/(연결 중 페이지), icons/(icon.ico — make-icon.py로 생성)
 ├─ agent/         # Python 세션 에이전트 (개발·테스트용) — python -m mcp_agent
 ├─ web/           # 프런트엔드: board.html · admin.html · notice.html, src/, e2e/, tests/
 ├─ dummy-mcps/    # 시험용 MCP 3종 (seoul_weather, calculator, seoul_clock) + examples/ 조치 스크립트
 ├─ install/       # build.ps1(서버 payload), build-desktop.ps1(릴리스 exe), pyinstaller/
 ├─ .github/       # workflows/desktop.yml — Rust 테스트·릴리스 빌드(Windows 러너)
-├─ docs/          # PLAN.md, ops/, verification/, design/, assets/(구성도 SVG), superpowers/plans/
+├─ docs/          # PLAN.md, ops/, verification/, design/, assets/(구성도 SVG, brand/ AX 아이콘 원본), superpowers/plans/
 ├─ build/         # (git 제외) PyInstaller 작업 폴더
 └─ dist/          # (git 제외) payload/, mcp-monitor-<버전>.exe, .exe.sha256
 ```

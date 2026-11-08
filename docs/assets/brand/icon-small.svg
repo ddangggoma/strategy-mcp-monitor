@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+  <!-- MCP Monitor brand icon, 16-24 px (favicon, tray): icon.svg on the pixel grid, the trace
+       reduced to a green crossbar and the node dropped. -->
+  <title>MCP Monitor</title>
+  <defs><linearGradient id="plate" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1a1e24"/><stop offset="1" stop-color="#0e1216"/></linearGradient></defs>
+  <rect width="16" height="16" rx="3.5" fill="url(#plate)"/>
+  <rect x=".5" y=".5" width="15" height="15" rx="3" fill="none" stroke="#5a616b" stroke-width="1" stroke-opacity=".75"/>
+  <path d="M4 4H6L4 12H2ZM4 4H6L8 12H6ZM9 4H11L14 12H12ZM12 4H14L11 12H9Z" fill="#fcfdff"/>
+  <path d="M4 9h2v1.5H4z" fill="#5bcc80"/>
+</svg>

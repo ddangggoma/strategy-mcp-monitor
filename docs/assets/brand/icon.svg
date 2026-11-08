@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- MCP Monitor brand icon, 32 px and up. "AX" (AI Transformation, 전략팀) drawn as paths:
+       the A's crossbar is a heartbeat trace and the X's crossing is a live node, both in
+       green-400 (the "running" state). Plate: steel-900 to steel-1000 with a steel-600 rim
+       so the mark holds on light and dark taskbars. 16-24 px: icon-small.svg. Rasters:
+       desktop/icons/make-icon.py. -->
+  <title>MCP Monitor</title>
+  <defs>
+    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1a1e24"/><stop offset="1" stop-color="#0e1216"/></linearGradient>
+    <mask id="node"><rect width="256" height="256" fill="#fff"/><circle cx="181" cy="128" r="22" fill="#000"/></mask>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="54" fill="url(#plate)"/>
+  <rect x="11" y="11" width="234" height="234" rx="51" fill="none" stroke="#5a616b" stroke-width="6" stroke-opacity=".75"/>
+  <path d="M68 66H96L62 190H34ZM68 66H96L130 190H102Z" fill="#fcfdff"/>
+  <path d="M140 66H168L222 190H194ZM194 66H222L168 190H140Z" fill="#fcfdff" mask="url(#node)"/>
+  <path d="M60 152H72L82 124L94 172L102 152H106" fill="none" stroke="#5bcc80" stroke-width="12" stroke-linejoin="round"/>
+  <circle cx="181" cy="128" r="12" fill="#5bcc80"/>
+</svg>
