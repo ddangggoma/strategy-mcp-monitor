@@ -6,8 +6,11 @@
 
     uv run desktop/icons/make-icon.py
 
-- desktop/icons/icon.ico: the exe, window, taskbar and tray icon (tauri.conf.json bundle.icon).
+- desktop/icons/icon.ico: the exe, window and taskbar icon (tauri.conf.json bundle.icon).
   PNG frames; 16-24 px from icon-small.svg, 32-256 px from icon.svg.
+- desktop/icons/tray-{16,20,24,32}.png: icon-small.svg at the tray sizes; the tray picks the one
+  matching the system small-icon size and DPI (src/app/tray.rs), so Windows never shrinks the
+  256 px frame of the large design into the notification area.
 - web/public/favicon.svg: icon-small.svg (browser tabs draw it at 16-32 px).
 - docs/assets/brand/icon-256.png: a preview for documents that cannot show SVG.
 Run it after changing a master; the outputs are committed.
@@ -24,6 +27,7 @@ ROOT = Path(__file__).resolve().parents[2]
 BRAND = ROOT / "docs" / "assets" / "brand"
 SMALL = (16, 20, 24)
 LARGE = (32, 40, 48, 64, 128, 256)
+TRAY = (16, 20, 24, 32)
 
 
 def render(svg: Path, size: int) -> Image.Image:
@@ -42,6 +46,9 @@ def main() -> None:
         append_images=frames[:-1],
     )
     largest.save(BRAND / "icon-256.png", optimize=True)
+    for s in TRAY:
+        tray = render(BRAND / "icon-small.svg", s)
+        tray.save(ROOT / "desktop" / "icons" / f"tray-{s}.png", optimize=True)
     shutil.copyfile(BRAND / "icon-small.svg", ROOT / "web" / "public" / "favicon.svg")
 
 

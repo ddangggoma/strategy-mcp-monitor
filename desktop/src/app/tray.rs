@@ -1,7 +1,8 @@
 //! The app mode's notification-area icon: the app icon, tooltip "MCP Monitor", a left click opens
 //! the window, and a menu with `창 열기`, the service's state (a grey line, refreshed every 5 s),
 //! `로그인할 때 트레이 시작` (the user's `Run` value) and `트레이 종료` (ends this app only; the
-//! service keeps running).
+//! service keeps running). The icon is the small AX design (icons/tray-*.png, made by
+//! icons/make-icon.py) at the system's small-icon size, not the window's 256 px frame shrunk.
 
 use super::autostart::{autostart_enabled, set_autostart};
 use crate::install::registry::WinRegistry;
@@ -22,6 +23,44 @@ const OPEN_ID: &str = "open";
 const SERVICE_ID: &str = "service";
 const AUTOSTART_ID: &str = "autostart";
 const QUIT_ID: &str = "quit";
+
+/// The small-design tray frames, smallest first (`icons/make-icon.py` renders them).
+const TRAY_FRAMES: [(u32, &[u8]); 4] = [
+    (16, include_bytes!("../../icons/tray-16.png")),
+    (20, include_bytes!("../../icons/tray-20.png")),
+    (24, include_bytes!("../../icons/tray-24.png")),
+    (32, include_bytes!("../../icons/tray-32.png")),
+];
+
+/// The frame for a small-icon size of `px` pixels: the smallest frame that is at least `px`
+/// (Windows shrinks it a little rather than blowing up a smaller one); 32 above that.
+pub fn tray_frame_size(px: i32) -> u32 {
+    TRAY_FRAMES
+        .iter()
+        .map(|&(size, _)| size)
+        .find(|&size| i64::from(size) >= i64::from(px))
+        .unwrap_or(32)
+}
+
+/// The system small-icon size in pixels: `SM_CXSMICON` at the system DPI (16 at 100 %, 20 at
+/// 125 %, 24 at 150 %, 32 at 200 %).
+pub fn system_small_icon_px() -> i32 {
+    use windows::Win32::UI::HiDpi::{GetDpiForSystem, GetSystemMetricsForDpi};
+    use windows::Win32::UI::WindowsAndMessaging::SM_CXSMICON;
+    // SAFETY: plain queries without pointers.
+    let px = unsafe { GetSystemMetricsForDpi(SM_CXSMICON, GetDpiForSystem()) };
+    if px > 0 { px } else { 16 }
+}
+
+/// The tray icon for this PC's small-icon size.
+fn tray_icon() -> tauri::Result<tauri::image::Image<'static>> {
+    let want = tray_frame_size(system_small_icon_px());
+    let png = TRAY_FRAMES
+        .iter()
+        .find(|&&(size, _)| size == want)
+        .map_or(TRAY_FRAMES[0].1, |&(_, png)| png);
+    tauri::image::Image::from_bytes(png)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ServiceState {
@@ -122,8 +161,14 @@ pub fn create(app: &AppHandle, install_dir: Option<PathBuf>) -> tauri::Result<()
         .tooltip(TOOLTIP)
         .menu(&menu)
         .show_menu_on_left_click(false);
-    if let Some(icon) = app.default_window_icon() {
-        builder = builder.icon(icon.clone());
+    match tray_icon() {
+        Ok(icon) => builder = builder.icon(icon),
+        Err(e) => {
+            eprintln!("tray icon frame: {e}");
+            if let Some(icon) = app.default_window_icon() {
+                builder = builder.icon(icon.clone());
+            }
+        }
     }
     let check = autostart.clone();
     builder
@@ -205,6 +250,35 @@ mod tests {
         let state = query_service_state();
         let exists = crate::install::host::open_service(SERVICE_QUERY_STATUS).is_some();
         assert_eq!(state == ServiceState::NotInstalled, !exists, "{state:?}");
+    }
+
+    #[test]
+    fn the_tray_frame_matches_the_small_icon_size_of_each_dpi() {
+        let cases = [
+            (0, 16),
+            (16, 16), // 100 %
+            (17, 20),
+            (20, 20), // 125 %
+            (24, 24), // 150 %
+            (28, 32), // 175 %
+            (32, 32), // 200 %
+            (48, 32), // 300 %: the largest small frame
+        ];
+        for (px, want) in cases {
+            assert_eq!(tray_frame_size(px), want, "{px} px");
+        }
+    }
+
+    #[test]
+    fn every_tray_frame_decodes_at_its_size_and_this_pc_gets_one() {
+        for (size, png) in TRAY_FRAMES {
+            let image = tauri::image::Image::from_bytes(png).expect("a PNG");
+            assert_eq!((image.width(), image.height()), (size, size));
+        }
+        let px = system_small_icon_px();
+        assert!(px >= 16, "{px}");
+        let icon = tray_icon().expect("a tray icon");
+        assert_eq!(icon.width(), tray_frame_size(px));
     }
 
     #[test]
