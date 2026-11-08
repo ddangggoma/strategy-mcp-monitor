@@ -4,6 +4,7 @@
 import { z } from "zod";
 import { copy } from "@/copy/ko";
 import type { McpConfig } from "@/lib/api-types";
+import { isMcpEmoji } from "@/lib/mcp-emoji";
 
 /** Letters, digits (any script), space, "." "_" "-": the name reaches cmd as %MCP_NAME% (server allowlist). */
 export const NAME_PATTERN = /^[\p{L}\p{N} ._-]+$/u;
@@ -57,6 +58,13 @@ const processName = z
     return v;
   });
 
+// one emoji (server check_icon); null = the default MCP icon
+const icon = z
+  .string()
+  .nullable()
+  .default(null)
+  .refine((v) => v === null || isMcpEmoji(v), { message: copy.mcp.icon.invalid });
+
 const schema = z.object({
   name,
   host,
@@ -72,6 +80,7 @@ const schema = z.object({
   autostart_on_boot: z.boolean(),
   maintenance: z.boolean(),
   script_timeout_sec: int(10, 120),
+  icon,
 });
 
 /** What the form holds: number fields may be the raw text of their input. */

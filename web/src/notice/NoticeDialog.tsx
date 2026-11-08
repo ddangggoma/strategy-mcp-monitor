@@ -11,6 +11,55 @@ export interface NoticeDialogProps {
   onAcknowledge?: () => void;
   /** Standalone: the acknowledgement is on its way — the button says so (aria-busy) and ignores presses. */
   busy?: boolean;
+  /** Standalone: a control drawn above the panel, inside the dialog (`/notice` in preview mode: the way back). */
+  aside?: ReactNode;
+}
+
+export interface NoticePanelProps {
+  content: NoticeContent;
+  titleId: string;
+  bodyId: string;
+  heading: "h1" | "h2";
+  /** The real notice: the body is a tab stop (it scrolls) and the button acts. Otherwise a picture of it. */
+  live: boolean;
+  onAcknowledge?: () => void;
+  busy?: boolean;
+}
+
+/** The notice panel itself — the one drawing of title, body and button that every mode shares. */
+export function NoticePanel({ content, titleId, bodyId, heading: Title, live, onAcknowledge, busy = false }: NoticePanelProps) {
+  const body = useMemo(() => renderNoticeMarkup(parseNoticeMarkup(content.body)), [content.body]);
+  return (
+    <div className="notice-panel">
+      <Title id={titleId} className="notice-title">
+        {content.title}
+      </Title>
+      <div
+        id={bodyId}
+        className="notice-body"
+        // a long notice scrolls inside the panel: keyboard users need to reach it to scroll it
+        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+        tabIndex={live ? 0 : undefined}
+      >
+        {body}
+      </div>
+      <div className="notice-actions">
+        <button
+          type="button"
+          className="notice-button"
+          // in the preview the button is a picture of the button: no tab stop, no action, and a
+          // screen reader hears it is unavailable (its look is not dimmed: the preview shows the real one)
+          tabIndex={live ? undefined : -1}
+          aria-disabled={live ? undefined : true}
+          // never `disabled` while busy: the focus stays on the button
+          aria-busy={live && busy ? true : undefined}
+          onClick={live && !busy ? onAcknowledge : undefined}
+        >
+          {content.button_text}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -22,42 +71,20 @@ export interface NoticeDialogProps {
  * close gets through anyway (Chromium lets a repeated Escape close a dialog whose `cancel` was
  * already refused) it opens again. Only the button acknowledges.
  */
-export function NoticeDialog({ content, mode, onAcknowledge, busy = false }: NoticeDialogProps) {
+export function NoticeDialog({ content, mode, onAcknowledge, busy = false, aside }: NoticeDialogProps) {
   const ids = { title: useId(), body: useId() };
-  const body = useMemo(() => renderNoticeMarkup(parseNoticeMarkup(content.body)), [content.body]);
   const standalone = mode === "standalone";
-  const Title = standalone ? "h1" : "h2";
 
   const panel = (
-    <div className="notice-panel">
-      <Title id={ids.title} className="notice-title">
-        {content.title}
-      </Title>
-      <div
-        id={ids.body}
-        className="notice-body"
-        // a long notice scrolls inside the panel: keyboard users need to reach it to scroll it
-        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
-        tabIndex={standalone ? 0 : undefined}
-      >
-        {body}
-      </div>
-      <div className="notice-actions">
-        <button
-          type="button"
-          className="notice-button"
-          // in the preview the button is a picture of the button: no tab stop, no action, and a
-          // screen reader hears it is unavailable (its look is not dimmed: the preview shows the real one)
-          tabIndex={standalone ? undefined : -1}
-          aria-disabled={standalone ? undefined : true}
-          // never `disabled` while busy: the focus stays on the button
-          aria-busy={standalone && busy ? true : undefined}
-          onClick={standalone && !busy ? onAcknowledge : undefined}
-        >
-          {content.button_text}
-        </button>
-      </div>
-    </div>
+    <NoticePanel
+      content={content}
+      titleId={ids.title}
+      bodyId={ids.body}
+      heading={standalone ? "h1" : "h2"}
+      live={standalone}
+      onAcknowledge={onAcknowledge}
+      busy={busy}
+    />
   );
 
   if (!standalone) {
@@ -69,6 +96,7 @@ export function NoticeDialog({ content, mode, onAcknowledge, busy = false }: Not
   }
   return (
     <StandaloneDialog titleId={ids.title} bodyId={ids.body}>
+      {aside}
       {panel}
     </StandaloneDialog>
   );

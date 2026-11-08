@@ -4,7 +4,7 @@ use std::io::Read;
 use std::process::Stdio;
 
 const VERSION_LINE: &str =
-    r"^mcp-monitor 1\.1\.0 \(payload [0-9a-f]{12}, (fixture|release)(, dev)?\)\r?\n$";
+    r"^mcp-monitor 1\.0\.0 \(payload [0-9a-f]{12}, (fixture|release)(, dev)?\)\r?\n$";
 
 fn assert_version_line(line: &str) {
     assert!(

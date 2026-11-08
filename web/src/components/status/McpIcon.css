@@ -1,0 +1,53 @@
+/*
+ * An MCP's icon (McpIcon.tsx): its uploaded image, its emoji in the system emoji font, or the default MCP icon, on a
+ * small rounded neutral tile.
+ */
+@layer components {
+  .mcp-icon {
+    display: inline-grid;
+    flex: none;
+    place-items: center;
+    border-radius: var(--radius-md);
+    color: var(--color-fg-muted);
+    background-color: var(--color-hover);
+    font-family: var(--font-emoji);
+    line-height: 1;
+    user-select: none;
+  }
+
+  .mcp-icon[data-size="sm"] {
+    width: 1.5rem;
+    height: 1.5rem;
+    font-size: 0.9375rem;
+  }
+  .mcp-icon[data-size="md"] {
+    width: 2rem;
+    height: 2rem;
+    font-size: 1.25rem;
+  }
+  .mcp-icon[data-size="lg"] {
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: var(--radius-lg);
+    font-size: 1.5rem;
+  }
+  /* the default glyph is a line icon: a little smaller than the emoji box */
+  .mcp-icon svg {
+    width: 0.8em;
+    height: 0.8em;
+  }
+  /* an uploaded logo fills the tile, whole (any aspect ratio), clipped to the tile's corners; the
+     tile stays behind it so a transparent logo keeps its contrast in both themes */
+  .mcp-icon img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    border-radius: inherit;
+  }
+
+  /* emoji text elsewhere (the picker): the same system emoji font */
+  .mcp-emoji {
+    font-family: var(--font-emoji);
+  }
+}

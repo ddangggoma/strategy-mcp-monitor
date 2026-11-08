@@ -11,6 +11,7 @@ import { tags } from "@lezer/highlight";
 import { HistoryIcon } from "lucide-react";
 import { useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type Ref } from "react";
 import { toast } from "sonner";
+import { InfoTip } from "@/components/app/InfoTip";
 import { WithReason } from "@/components/app/WithReason";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -390,6 +391,7 @@ export function ScriptEditor({ mcpId, kind, initial, onSaved, onDirtyChange }: S
         <Label htmlFor={ids.ext} className="text-sm text-fg-muted">
           {copy.scripts.ext}
         </Label>
+        <InfoTip label={copy.scripts.ext} content={copy.help.scripts.ext} className="-ms-1.5" />
         <Select value={ext} onValueChange={(v) => change(v as ScriptExt, content)}>
           <SelectTrigger id={ids.ext} size="sm" className="w-24 font-mono">
             <SelectValue />

@@ -1,8 +1,10 @@
 import { Link } from "@tanstack/react-router";
 import { CircleCheckIcon, CircleXIcon, ClockAlertIcon, TriangleAlertIcon, type LucideIcon } from "lucide-react";
 import { useId, useMemo, type ReactNode } from "react";
+import { InfoTip, type HelpContent } from "@/components/app/InfoTip";
 import { ConnectionBanner } from "@/components/status/ConnectionBanner";
 import { SessionCard } from "@/components/status/SessionCard";
+import { McpIcon } from "@/components/status/McpIcon";
 import { STATE_ICONS, StatusBadge } from "@/components/status/StatusBadge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -38,13 +40,16 @@ const STATUS_ICON: Record<ScriptStatus, LucideIcon> = {
   error: TriangleAlertIcon,
 };
 
-function DashCard({ title, children, className }: { title: string; children: ReactNode; className?: string }) {
+function DashCard({ title, tip, children, className }: { title: string; tip?: HelpContent; children: ReactNode; className?: string }) {
   const id = useId();
   return (
     <section aria-labelledby={id} className={cn("@container flex min-w-0 flex-col gap-3 rounded-md border bg-surface p-4", className)}>
-      <h2 id={id} className="text-base font-semibold text-fg">
-        {title}
-      </h2>
+      <div className="flex items-center gap-1">
+        <h2 id={id} className="text-base font-semibold text-fg">
+          {title}
+        </h2>
+        {tip ? <InfoTip label={title} content={tip} align="start" /> : null}
+      </div>
       {children}
     </section>
   );
@@ -122,7 +127,8 @@ function recentRows(activity: McpActivity): ActivityRow[] {
   return rows.sort((x, y) => Date.parse(y.at) - Date.parse(x.at)).slice(0, RECENT);
 }
 
-function RecentActivity() {
+/** `items`: the live board, for each row's MCP icon (an MCP deleted since shows the default icon). */
+function RecentActivity({ items }: { items: ReadonlyMap<number, BoardItem> }) {
   const { data, isPending, isError } = useMcpActivity();
   const rows = useMemo(() => (data ? recentRows(data) : []), [data]);
 
@@ -163,13 +169,16 @@ function RecentActivity() {
               </time>
             </TableCell>
             <TableCell>
-              <Link
-                to="/admin/mcps/$mcpId"
-                params={{ mcpId: String(r.mcpId) }}
-                className="font-medium text-fg underline-offset-4 hover:underline"
-              >
-                {r.name}
-              </Link>
+              <span className="inline-flex items-center gap-2 whitespace-nowrap">
+                <McpIcon icon={items.get(r.mcpId)?.icon} image={items.get(r.mcpId)?.icon_image} size="sm" />
+                <Link
+                  to="/admin/mcps/$mcpId"
+                  params={{ mcpId: String(r.mcpId) }}
+                  className="font-medium text-fg underline-offset-4 hover:underline"
+                >
+                  {r.name}
+                </Link>
+              </span>
             </TableCell>
             <TableCell>
               {r.type === "transition" ? <StatusBadge state={r.t.to} issue={r.t.issue} /> : <ActionCell a={r.a} />}
@@ -206,7 +215,7 @@ export function DashboardPage() {
     <>
       <h1 className="text-xl font-semibold text-fg">{copy.dashboard.title}</h1>
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <DashCard title={copy.dashboard.mcpSummary}>
+        <DashCard title={copy.dashboard.mcpSummary} tip={copy.help.stateLegend}>
           <McpSummary items={board.items} loading={board.now === null} />
         </DashCard>
         <DashCard title={copy.dashboard.currentSessions}>
@@ -219,13 +228,13 @@ export function DashboardPage() {
             </div>
           ) : null}
         </DashCard>
-        <DashCard title={copy.dashboard.recentActivity} className="col-span-full">
-          <RecentActivity />
+        <DashCard title={copy.dashboard.recentActivity} tip={copy.help.dashboard.recent} className="col-span-full">
+          <RecentActivity items={board.items} />
         </DashCard>
-        <DashCard title={copy.dashboard.loginFailures.title}>
+        <DashCard title={copy.dashboard.loginFailures.title} tip={copy.help.dashboard.loginFailures}>
           <LoginFailuresCard />
         </DashCard>
-        <DashCard title={copy.dashboard.bypassEvents}>
+        <DashCard title={copy.dashboard.bypassEvents} tip={copy.help.dashboard.tamper}>
           <TamperCard />
         </DashCard>
       </div>

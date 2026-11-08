@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
+import { InfoTip } from "@/components/app/InfoTip";
 import { WithReason } from "@/components/app/WithReason";
 import { Button } from "@/components/ui/button";
 import { Form, FormControl, FormField, FormItem, FormLabel } from "@/components/ui/form";
@@ -180,20 +181,23 @@ function SettingsForm({ settings }: { settings: Settings }) {
             render={({ field }) => (
               <FormItem className="@lg:col-span-2">
                 <FormLabel className="sr-only">{s.fields.service_start_type}</FormLabel>
-                <Select value={field.value} onValueChange={field.onChange} disabled={busy}>
-                  <FormControl>
-                    <SelectTrigger className="w-full @lg:w-72" onBlur={field.onBlur}>
-                      <SelectValue />
-                    </SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    {START_TYPES.map((t) => (
-                      <SelectItem key={t} value={t}>
-                        {s.startTypes[t]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="flex items-center gap-1">
+                  <Select value={field.value} onValueChange={field.onChange} disabled={busy}>
+                    <FormControl>
+                      <SelectTrigger className="w-full @lg:w-72" onBlur={field.onBlur}>
+                        <SelectValue />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {START_TYPES.map((t) => (
+                        <SelectItem key={t} value={t}>
+                          {s.startTypes[t]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <InfoTip label={s.fields.service_start_type} content={copy.help.settings.service_start_type} />
+                </div>
               </FormItem>
             )}
           />
@@ -201,7 +205,10 @@ function SettingsForm({ settings }: { settings: Settings }) {
         </Group>
 
         <Group legend={s.otp}>
-          <p className="text-sm text-fg @lg:col-span-2">{s.otpDummy}</p>
+          <p className="flex items-center gap-1 text-sm text-fg @lg:col-span-2">
+            {s.otpDummy}
+            <InfoTip label={s.fields.otp_provider} content={copy.help.settings.otp_provider} />
+          </p>
         </Group>
 
         <Group legend={s.alerts}>

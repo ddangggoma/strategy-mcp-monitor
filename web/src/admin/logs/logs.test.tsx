@@ -108,8 +108,8 @@ it("shows the indexing banner until the index is ready", async () => {
 });
 it("explains what is never collected", async () => {
   renderWithProviders(null, { me: ME, route: "/admin/logs" });
-  await userEvent.click(await screen.findByRole("button", { name: copy.common.help }));
-  expect(await screen.findByText(copy.logs.cmdLimitHelp)).toBeInTheDocument();
+  await userEvent.click(await screen.findByRole("button", { name: copy.help.label(copy.logs.cats["activity.command"]) }));
+  expect(await screen.findByRole("tooltip")).toHaveTextContent(copy.logs.cmdLimitHelp);
   expect(document.querySelector("main [data-anim]")).toBeNull();
 });
 

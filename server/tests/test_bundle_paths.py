@@ -18,14 +18,14 @@ REPO = Path(__file__).resolve().parents[2]
 
 
 def make_bundle(root: Path, layout: str) -> None:
-    (root / "bundle.json").write_text(json.dumps({"layout": layout, "version": "1.0.0", "python": "3.15.2"}), "utf-8")
+    (root / "bundle.json").write_text(json.dumps({"layout": layout, "version": "0.9.0", "python": "3.15.2"}), "utf-8")
 
 
 def test_runtime_layout(tmp_path):
     make_bundle(tmp_path, "runtime")
     exe = tmp_path / "runtime" / "python.exe"; exe.parent.mkdir(); exe.write_bytes(b"")
     b = find_bundle(exe)
-    assert b == Bundle(tmp_path, "runtime", "1.0.0")
+    assert b == Bundle(tmp_path, "runtime", "0.9.0")
     assert agent_command(b) == (str(tmp_path / "runtime" / "python.exe"), "-m", "mcp_agent")
     assert default_static_dir(b) == tmp_path / "web"
 
@@ -45,7 +45,7 @@ def test_no_or_invalid_bundle(tmp_path):
 
 def test_default_root(monkeypatch, tmp_path):
     monkeypatch.setenv("ProgramData", str(tmp_path))
-    assert default_root(Bundle(tmp_path, "runtime", "1.0.0")) == tmp_path / "MCP Monitor"
+    assert default_root(Bundle(tmp_path, "runtime", "0.9.0")) == tmp_path / "MCP Monitor"
     assert default_root(None) == Path.cwd()
 
 
@@ -68,7 +68,7 @@ def test_search_stops_three_levels_up(tmp_path):
     deep = tmp_path / "a" / "b" / "c" / "x.exe"; deep.parent.mkdir(parents=True); deep.write_bytes(b"")
     assert find_bundle(deep) is None  # c, b, a: the root is the 4th level
     near = tmp_path / "a" / "b" / "x.exe"; near.write_bytes(b"")
-    assert find_bundle(near) == Bundle(tmp_path, "runtime", "1.0.0")
+    assert find_bundle(near) == Bundle(tmp_path, "runtime", "0.9.0")
 
 
 def test_nearest_bundle_json_wins_and_an_invalid_one_is_not_skipped(tmp_path):
@@ -84,7 +84,7 @@ def test_nearest_bundle_json_wins_and_an_invalid_one_is_not_skipped(tmp_path):
 def test_bundle_json_shapes_that_are_ignored(tmp_path):
     exe = tmp_path / "x.exe"; exe.write_bytes(b"")
     for text in ('["runtime"]', '{"layout": "runtime"}', '{"layout": "runtime", "version": 1}',
-                 '{"layout": "runtime", "version": ""}', '{"version": "1.0.0"}', "\xff\xfe"):
+                 '{"layout": "runtime", "version": ""}', '{"version": "0.9.0"}', "\xff\xfe"):
         (tmp_path / "bundle.json").write_text(text, "utf-8")
         assert find_bundle(exe) is None, text
     (tmp_path / "bundle.json").unlink(); (tmp_path / "bundle.json").mkdir()
@@ -133,7 +133,7 @@ def test_reindex_defaults_to_the_bundle_root(monkeypatch, tmp_path, capsys):
 # --- Plan 6 Task 2: the desktop bundle (agent: desktop) ------------------------------------
 
 def write_bundle(root: Path, **kw) -> None:
-    (root / "bundle.json").write_text(json.dumps({"layout": "pyinstaller", "version": "1.1.0", **kw}), "utf-8")
+    (root / "bundle.json").write_text(json.dumps({"layout": "pyinstaller", "version": "1.0.0", **kw}), "utf-8")
 
 
 def server_exe(root: Path) -> Path:
@@ -145,7 +145,7 @@ def server_exe(root: Path) -> Path:
 def test_desktop_bundle_runs_the_rust_agent_with_a_webview_notice(tmp_path):
     write_bundle(tmp_path, agent="desktop")
     b = find_bundle(server_exe(tmp_path))
-    assert b == Bundle(tmp_path, "pyinstaller", "1.1.0", "desktop")
+    assert b == Bundle(tmp_path, "pyinstaller", "1.0.0", "desktop")
     assert agent_command(b) == (str(tmp_path / "mcp-monitor.exe"), "agent")
     assert default_agent_dialog(b) == "webview"
 
@@ -172,7 +172,7 @@ def test_agent_values_that_are_not_an_agent_kind_mean_no_bundle(tmp_path):
         write_bundle(tmp_path, agent=agent)
         assert find_bundle(exe) is None, agent
     write_bundle(tmp_path, agent="python")
-    assert find_bundle(exe) == Bundle(tmp_path, "pyinstaller", "1.1.0", "python")
+    assert find_bundle(exe) == Bundle(tmp_path, "pyinstaller", "1.0.0", "python")
 
 
 def test_cli_in_a_desktop_bundle_runs_mcp_monitor_agent_from_the_bundle_root(monkeypatch, tmp_path, clock):

@@ -69,17 +69,17 @@ mod tests {
     #[test]
     fn version_line_names_the_payload() {
         assert_eq!(
-            version_line("1.1.0", "0123456789abcdef", "fixture", false),
-            "mcp-monitor 1.1.0 (payload 0123456789ab, fixture)"
+            version_line("1.0.0", "0123456789abcdef", "fixture", false),
+            "mcp-monitor 1.0.0 (payload 0123456789ab, fixture)"
         );
         assert_eq!(
-            version_line("1.1.0", "0123456789abcdef", "release", true),
-            "mcp-monitor 1.1.0 (payload 0123456789ab, release, dev)"
+            version_line("1.0.0", "0123456789abcdef", "release", true),
+            "mcp-monitor 1.0.0 (payload 0123456789ab, release, dev)"
         );
-        assert_eq!(PRODUCT, "1.1.0");
+        assert_eq!(PRODUCT, "1.0.0");
         assert_eq!(
             (product(), product().to_string()),
-            (Version(1, 1, 0), PRODUCT.into())
+            (Version(1, 0, 0), PRODUCT.into())
         );
     }
 }

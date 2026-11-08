@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useRouterState, useSearch } from "@tanstack/react-router";
 import { FlaskConicalIcon } from "lucide-react";
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { InfoTip } from "@/components/app/InfoTip";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -176,10 +177,13 @@ export function LoginPage() {
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <h1 className="text-xl font-semibold text-fg">{copy.login.title}</h1>
           {dev ? (
-            <Badge variant="outline">
-              <FlaskConicalIcon aria-hidden="true" />
-              {copy.login.devBadge}
-            </Badge>
+            <span className="inline-flex items-center gap-0.5">
+              <Badge variant="outline">
+                <FlaskConicalIcon aria-hidden="true" />
+                {copy.login.devBadge}
+              </Badge>
+              <InfoTip label={copy.login.devBadge} content={copy.help.devOtp} side="bottom" />
+            </span>
           ) : null}
         </div>
         <p className="text-sm text-fg-muted">{copy.login.lead}</p>

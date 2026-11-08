@@ -1,31 +1,33 @@
-// Theme preference: "system" follows the OS through `color-scheme: light dark` + light-dark();
-// "dark"/"light" pin it with <html data-theme>. Called from each entry's main.tsx before the
-// first render (no inline <head> script: CSP is script-src 'self').
+// Theme preference: light by default; "dark" pins dark and "system" follows the OS through
+// `color-scheme: light dark` + light-dark(). The choice is always written to <html data-theme>
+// (tokens.css starts in light, so the first paint is light before this runs). Called from each
+// entry's main.tsx before the first render (no inline <head> script: CSP is script-src 'self').
 
 export type ThemePref = "system" | "dark" | "light";
 
 export const THEME_STORAGE_KEY = "mcpmon.theme";
 
-function isPinned(v: unknown): v is "dark" | "light" {
-  return v === "dark" || v === "light";
+/** What a browser without a saved choice gets. */
+export const DEFAULT_THEME: ThemePref = "light";
+
+function isThemePref(v: unknown): v is ThemePref {
+  return v === "system" || v === "dark" || v === "light";
 }
 
 export function getThemePref(): ThemePref {
   try {
     const stored = localStorage.getItem(THEME_STORAGE_KEY);
-    return isPinned(stored) ? stored : "system";
+    return isThemePref(stored) ? stored : DEFAULT_THEME;
   } catch {
-    return "system"; // storage blocked (privacy mode, policy): fall back to the OS
+    return DEFAULT_THEME; // storage blocked (privacy mode, policy)
   }
 }
 
 function apply(pref: ThemePref): void {
-  const root = document.documentElement;
-  if (isPinned(pref)) root.dataset.theme = pref;
-  else delete root.dataset.theme;
+  document.documentElement.dataset.theme = pref;
 }
 
-/** Applies the saved preference. Call first thing in every entry. */
+/** Applies the saved preference (light when none). Call first thing in every entry. */
 export function applyStoredTheme(): void {
   apply(getThemePref());
 }
@@ -33,13 +35,13 @@ export function applyStoredTheme(): void {
 let switchTimer: ReturnType<typeof setTimeout> | undefined;
 
 /**
- * Saves and applies a preference. Transitions are suppressed for the flip (base.css
- * `[data-theme-switching]`), so every surface changes at once instead of fading piecemeal.
+ * Saves and applies a preference (the default is not stored). Transitions are suppressed for the
+ * flip (base.css `[data-theme-switching]`), so every surface changes at once instead of fading.
  */
 export function setThemePref(pref: ThemePref): void {
   try {
-    if (isPinned(pref)) localStorage.setItem(THEME_STORAGE_KEY, pref);
-    else localStorage.removeItem(THEME_STORAGE_KEY);
+    if (pref === DEFAULT_THEME) localStorage.removeItem(THEME_STORAGE_KEY);
+    else localStorage.setItem(THEME_STORAGE_KEY, pref);
   } catch {
     // not persisted; still applied to this page below
   }

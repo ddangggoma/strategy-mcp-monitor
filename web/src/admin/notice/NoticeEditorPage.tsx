@@ -1,14 +1,16 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { BoldIcon, ExternalLinkIcon, HistoryIcon, ListIcon } from "lucide-react";
+import { BoldIcon, HistoryIcon, ListIcon, Maximize2Icon } from "lucide-react";
+import { Dialog as DialogPrimitive } from "radix-ui";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode, type Ref } from "react";
 import { toast } from "sonner";
+import { InfoTip } from "@/components/app/InfoTip";
 import { TextDiff } from "@/components/app/TextDiff";
 import { WithReason } from "@/components/app/WithReason";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
   AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -21,6 +23,7 @@ import { putNotice, revertNotice } from "@/lib/endpoints";
 import { formatKst } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { NoticeDialog } from "@/notice/NoticeDialog";
+import { NoticeFullPreview } from "./NoticeFullPreview";
 import { useNotice, useNoticeVersion, useNoticeVersions } from "../queries";
 import { qk } from "../query-keys";
 import { LeaveGuard } from "../shell/LeaveGuard";
@@ -53,26 +56,30 @@ export function NoticeEditorPage() {
 function NoticeEditor() {
   const notice = useNotice();
   const [dirty, setDirty] = useState(false);
+  const [fullPreview, setFullPreview] = useState(false);
   const noteId = useId();
 
   return (
     <div className="flex min-w-0 flex-col gap-6">
       <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
         <div className="flex max-w-(--size-prose) flex-col gap-1">
-          <h1 className="text-xl font-semibold text-fg">{copy.notice.title}</h1>
+          <div className="flex items-center gap-1">
+            <h1 className="text-xl font-semibold text-fg">{copy.notice.title}</h1>
+            <InfoTip label={copy.notice.title} content={copy.help.notice.what} side="bottom" align="start" />
+          </div>
           <p className="text-sm text-fg-muted">{copy.notice.lead}</p>
         </div>
         <div className="flex flex-col items-start gap-1">
-          <a
-            href="/notice"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-describedby={noteId}
-            className={buttonVariants({ variant: "outline" })}
-          >
-            <ExternalLinkIcon aria-hidden="true" />
-            {copy.notice.fullPreview}
-          </a>
+          {/* in place, not /notice in a new tab: closing it must lead back here (the desktop app has one window) */}
+          <DialogPrimitive.Root open={fullPreview} onOpenChange={setFullPreview}>
+            <DialogPrimitive.Trigger asChild>
+              <Button variant="outline" aria-describedby={noteId} disabled={!notice.data}>
+                <Maximize2Icon aria-hidden="true" />
+                {copy.notice.fullPreview}
+              </Button>
+            </DialogPrimitive.Trigger>
+            {notice.data ? <NoticeFullPreview content={notice.data} onClose={() => setFullPreview(false)} /> : null}
+          </DialogPrimitive.Root>
           <p id={noteId} className="text-xs text-fg-muted">
             {copy.notice.fullPreviewNote}
           </p>
@@ -357,7 +364,10 @@ function TextField({ field, value, problem, onChange, helpId, inputRef, toolbar 
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
       <div className="flex flex-wrap items-end justify-between gap-2">
-        <Label htmlFor={ids.input}>{copy.notice.fields[field]}</Label>
+        <span className="flex items-center gap-1">
+          <Label htmlFor={ids.input}>{copy.notice.fields[field]}</Label>
+          {field === "button_text" ? <InfoTip label={copy.notice.fields.button_text} content={copy.help.notice.button} /> : null}
+        </span>
         {toolbar}
       </div>
       {field === "body" ? (

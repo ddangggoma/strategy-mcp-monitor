@@ -660,7 +660,7 @@ mod tests {
             .clone();
         assert_eq!(
             hello,
-            Some(json!({"session_id": 2, "pid": 4242, "version": "1.1.0"}))
+            Some(json!({"session_id": 2, "pid": 4242, "version": "1.0.0"}))
         );
     }
 

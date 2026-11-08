@@ -15,6 +15,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { InfoTip } from "@/components/app/InfoTip";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -62,7 +63,10 @@ function UsersContent() {
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold text-fg">{copy.users.title}</h1>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <h1 className="text-xl font-semibold text-fg">{copy.users.title}</h1>
+          {data ? <ActiveAdmins count={countActiveAdmins(data)} /> : null}
+        </div>
         <AddUserDialog />
       </div>
       {isPending ? (
@@ -85,13 +89,31 @@ function UsersContent() {
   );
 }
 
+const countActiveAdmins = (users: AdminUser[]) => users.filter((u) => u.role === "admin" && u.active).length;
+
+/**
+ * “Admin n명” beside the title, with why it matters: the last active Admin cannot be demoted or
+ * deactivated (the server refuses it too), so promoting someone else comes first.
+ */
+function ActiveAdmins({ count }: { count: number }) {
+  return (
+    <span className="inline-flex items-center gap-0.5">
+      <Badge variant="secondary" data-testid="active-admins">
+        <ShieldIcon aria-hidden="true" />
+        {copy.users.activeAdmins(count)}
+      </Badge>
+      <InfoTip label={copy.users.activeAdminsLabel} content={copy.help.users.activeAdmins} side="bottom" align="start" />
+    </span>
+  );
+}
+
 /**
  * Every user in server order (no sorting: a row that moved after a change would put the next click
  * on someone else). No row animation (tables never move: direction.md §6).
  */
 function UsersTable({ users }: { users: AdminUser[] }) {
   const me = useSession();
-  const activeAdmins = users.filter((u) => u.role === "admin" && u.active).length;
+  const activeAdmins = countActiveAdmins(users);
 
   return (
     <div className="rounded-md border bg-surface">
@@ -100,11 +122,24 @@ function UsersTable({ users }: { users: AdminUser[] }) {
           <TableRow className="hover:bg-transparent">
             <TableHead scope="col">{copy.users.name}</TableHead>
             <TableHead scope="col">{copy.users.email}</TableHead>
-            <TableHead scope="col">{copy.users.role}</TableHead>
-            <TableHead scope="col">{copy.users.active}</TableHead>
+            <TableHead scope="col" aria-label={copy.users.role}>
+              <span className="inline-flex items-center gap-0.5">
+                {copy.users.role}
+                <InfoTip label={copy.users.role} content={copy.help.users.role} />
+              </span>
+            </TableHead>
+            <TableHead scope="col" aria-label={copy.users.active}>
+              <span className="inline-flex items-center gap-0.5">
+                {copy.users.active}
+                <InfoTip label={copy.users.active} content={copy.help.users.active} />
+              </span>
+            </TableHead>
             <TableHead scope="col">{copy.users.lastLogin}</TableHead>
-            <TableHead scope="col" className="text-right">
-              {copy.users.ownedMcps}
+            <TableHead scope="col" aria-label={copy.users.ownedMcps} className="text-right">
+              <span className="inline-flex items-center gap-0.5">
+                {copy.users.ownedMcps}
+                <InfoTip label={copy.users.ownedMcps} content={copy.help.users.ownedMcps} />
+              </span>
             </TableHead>
             <TableHead scope="col">
               <span className="sr-only">{copy.users.actions}</span>

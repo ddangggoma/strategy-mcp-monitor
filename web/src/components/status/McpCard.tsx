@@ -1,11 +1,13 @@
 import { CirclePauseIcon, PlayIcon } from "lucide-react";
 import { m } from "motion/react";
-import { useId } from "react";
+import { useId, useState } from "react";
+import { InfoTip } from "@/components/app/InfoTip";
 import { copy } from "@/copy/ko";
 import type { BoardItem } from "@/lib/api-types";
 import { useClock } from "@/lib/clock";
 import { formatKst, relativeKo } from "@/lib/time";
 import { CountdownBar } from "./CountdownBar";
+import { McpIcon } from "./McpIcon";
 import { RollingNumber } from "./RollingNumber";
 import { Sparkline } from "./Sparkline";
 import { StatusBadge } from "./StatusBadge";
@@ -26,7 +28,7 @@ function LastCheck({ at }: { at: string | null }) {
 }
 
 /**
- * One MCP on the board: name, state, issue, latency, sparkline, 24 h uptime, last check; the
+ * One MCP on the board: icon and name, state, issue, latency, sparkline, 24 h uptime, last check; the
  * countdown only while the server runs one (`action_in_sec`, F23); a running script; maintenance.
  * Host, port and owner are never shown (anonymous screen). Rows line up across cards through
  * subgrid (McpCard.css); Motion `layout` glides the card when the board re-sorts (needs a
@@ -35,6 +37,16 @@ function LastCheck({ at }: { at: string | null }) {
 export function McpCard({ item, receivedAt }: { item: BoardItem; receivedAt: number }) {
   const nameId = useId();
   const recovering = item.state === "RECOVERING";
+  // the reading the card first showed: only a later one lights the card up (its entrance is the rise)
+  const [firstReading] = useState(receivedAt);
+  // whether the state has turned since the card appeared: the first band draws in with the card's
+  // entrance, a later one at once (state from the previous render, React's documented pattern)
+  const [shownState, setShownState] = useState(item.state);
+  const [stateTurned, setStateTurned] = useState(false);
+  if (item.state !== shownState) {
+    setShownState(item.state);
+    setStateTurned(true);
+  }
   return (
     <m.article
       layout="position"
@@ -46,24 +58,46 @@ export function McpCard({ item, receivedAt }: { item: BoardItem; receivedAt: num
       data-anim={recovering ? "spin" : undefined}
       className="mcp-card"
     >
+      {/* the state band along the top: remounted per state, so a card turning SUSPECT or FAILED
+          draws its band in from the left (McpCard.css) */}
+      <span key={item.state} aria-hidden="true" data-anim="band" data-entrance={stateTurned ? undefined : ""} className="mcp-card-band" />
+      {/* a new reading: a brief glow around the card, remounted per reading */}
+      {receivedAt !== firstReading ? <span key={receivedAt} aria-hidden="true" data-anim="flash" className="mcp-card-flash" /> : null}
       <header className="flex items-start justify-between gap-3">
-        <h2 id={nameId} className="min-w-0 text-lg leading-tight font-semibold break-words">
-          {item.name}
-        </h2>
+        <div className="flex min-w-0 items-center gap-2.5">
+          {/* the chosen icon, or the default MCP icon; decorative (the name is the label) */}
+          <McpIcon icon={item.icon} image={item.icon_image} />
+          <h2 id={nameId} className="min-w-0 text-lg leading-tight font-semibold break-words">
+            {item.name}
+          </h2>
+        </div>
         <StatusBadge state={item.state} />
       </header>
 
-      <p className="text-sm font-medium text-fg">{item.issue ? copy.issues[item.issue] : null}</p>
+      <p className="flex items-center gap-0.5 text-sm font-medium text-fg">
+        {item.issue ? (
+          <>
+            {copy.issues[item.issue]}
+            <InfoTip label={copy.issues[item.issue]} content={copy.help.issues[item.issue]} />
+          </>
+        ) : null}
+      </p>
 
       <dl className="mcp-card-metrics">
         <div>
-          <dt className="text-xs text-fg-muted">{copy.board.latency}</dt>
+          <dt className="flex items-center gap-0.5 text-xs text-fg-muted">
+            {copy.board.latency}
+            <InfoTip label={copy.board.latency} content={copy.help.latency} />
+          </dt>
           <dd className="mcp-card-metric">
             <RollingNumber value={item.latency_ms} unit="ms" />
           </dd>
         </div>
         <div>
-          <dt className="text-xs text-fg-muted">{copy.board.uptime24h}</dt>
+          <dt className="flex items-center gap-0.5 text-xs text-fg-muted">
+            {copy.board.uptime24h}
+            <InfoTip label={copy.board.uptime24h} content={copy.help.uptime} />
+          </dt>
           <dd className="mcp-card-metric">
             <UptimeMeter value={item.uptime_24h} />
           </dd>
@@ -73,7 +107,10 @@ export function McpCard({ item, receivedAt }: { item: BoardItem; receivedAt: num
       <div className="flex flex-col gap-2 self-end">
         <Sparkline points={item.sparkline} label={copy.board.sparklineLabel(item.name)} className="mcp-card-spark" />
         {item.action_in_sec !== null ? (
-          <CountdownBar inSec={item.action_in_sec} totalSec={item.action_delay_sec} receivedAt={receivedAt} />
+          <div className="flex items-center gap-1">
+            <CountdownBar inSec={item.action_in_sec} totalSec={item.action_delay_sec} receivedAt={receivedAt} className="min-w-0 flex-1" />
+            <InfoTip label={copy.board.autoAction} content={copy.help.countdown} />
+          </div>
         ) : null}
       </div>
 

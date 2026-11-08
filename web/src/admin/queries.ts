@@ -240,6 +240,18 @@ export function useUpdateMcp(id: number) {
   });
 }
 
+/** PUT (a file) or DELETE (null) /api/mcps/{id}/icon-image, applied at once (not part of the settings form). */
+export function useMcpIconImage(id: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (file: Blob | null) => (file === null ? ep.deleteIconImage(id) : ep.putIconImage(id, file)),
+    onSuccess: (detail) => {
+      storeMcp(qc, detail);
+      void qc.invalidateQueries({ queryKey: qk.mcps });
+    },
+  });
+}
+
 export interface ManualActionRequest {
   mcp: Pick<McpDetail, "id" | "name" | "script_timeout_sec">;
   kind: ScriptKind;

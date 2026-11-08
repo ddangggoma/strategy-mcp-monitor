@@ -5,6 +5,7 @@ import { HistoryIcon, LockIcon } from "lucide-react";
 import { lazy, Suspense, useEffect, useId, useRef, useState, type FormEvent, type RefObject } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
+import { InfoTip } from "@/components/app/InfoTip";
 import { Button } from "@/components/ui/button";
 import { Form } from "@/components/ui/form";
 import { Label } from "@/components/ui/label";
@@ -14,12 +15,14 @@ import { copy, messageForError } from "@/copy/ko";
 import { ApiError } from "@/lib/api";
 import type { McpConfig, McpCreate, ScriptExt, ScriptKind, ScriptUpload } from "@/lib/api-types";
 import { clearDraft, loadDraft, saveDraft } from "@/lib/draft";
-import { createMcp } from "@/lib/endpoints";
+import { createMcp, putIconImage } from "@/lib/endpoints";
+import { isMcpEmoji } from "@/lib/mcp-emoji";
 import { denyReason } from "@/lib/permissions";
 import { useSession } from "@/lib/session";
 import { qk } from "../query-keys";
 import type { CodeEditorHandle } from "../scripts/ScriptEditor";
 import { McpConfigFields } from "./McpConfigFields";
+import type { IconImageProps } from "./McpIconPicker";
 import { mcpConfigSchema, type McpFormValues } from "./mcp-schema";
 
 // the editor chunk (CodeMirror) is shared with the scripts tab and loads after the page
@@ -50,6 +53,7 @@ const DEFAULTS: McpFormValues = {
   autostart_on_boot: false,
   maintenance: false,
   script_timeout_sec: 120,
+  icon: null,
 };
 const KEYS = Object.keys(DEFAULTS) as (keyof McpFormValues)[];
 const EMPTY_SCRIPTS: Scripts = {
@@ -89,10 +93,12 @@ function readDraft(): CreateDraft | null {
     const got = d[k];
     if (got === undefined) continue;
     const ok =
-      typeof got === typeof want ||
-      (typeof got === "string" && typeof want === "number") || // a number input being edited
-      (k === "port" && typeof got === "number") ||
-      (k === "expected_process_name" && got === null);
+      k === "icon"
+        ? got === null || isMcpEmoji(got)
+        : typeof got === typeof want ||
+          (typeof got === "string" && typeof want === "number") || // a number input being edited
+          (k === "port" && typeof got === "number") ||
+          (k === "expected_process_name" && got === null);
     if (!ok) return bad();
     values[k] = got;
   }
@@ -180,6 +186,8 @@ function CreateForm() {
   const [scripts, setScripts] = useState<Scripts>(draft?.scripts ?? EMPTY_SCRIPTS);
   const [scriptErrors, setScriptErrors] = useState<ScriptErrors>({});
   const [restored, setRestored] = useState(draft !== null);
+  // the logo picked before the MCP exists: uploaded right after it is created (not kept in the draft)
+  const [heldImage, setHeldImage] = useState<{ file: Blob; src: string } | null>(null);
   const finished = useRef(false);
   const editors = {
     start: useRef<CodeEditorHandle>(null),
@@ -205,6 +213,7 @@ function CreateForm() {
 
   const discardDraft = () => {
     clearDraft(DRAFT_KEY);
+    setHeldImage(null);
     form.reset(DEFAULTS);
     setScripts(EMPTY_SCRIPTS);
     setScriptErrors({});
@@ -227,9 +236,17 @@ function CreateForm() {
       },
     };
     try {
-      const detail = await createMcp(body);
+      let detail = await createMcp(body);
       finished.current = true;
       clearDraft(DRAFT_KEY);
+      if (heldImage) {
+        try {
+          detail = await putIconImage(detail.id, heldImage.file);
+        } catch {
+          // the MCP exists: say so and point at the settings, without blocking the way there
+          toast.error(copy.mcp.icon.imageAfterCreateFailed);
+        }
+      }
       qc.setQueryData(qk.mcp(detail.id), detail);
       void qc.invalidateQueries({ queryKey: qk.mcps });
       toast.success(copy.mcp.created(detail.name));
@@ -247,6 +264,22 @@ function CreateForm() {
         form.setError("root.server", { type: "server", message: messageForError(code) });
       }
     }
+  };
+
+  const image: IconImageProps = {
+    src: heldImage?.src ?? null,
+    busy: false,
+    reason: null,
+    error: null,
+    onPick: (file) => {
+      const reader = new FileReader();
+      // a data: URL for the preview (the page CSP allows data: images, not blob:)
+      reader.onload = () => {
+        if (typeof reader.result === "string") setHeldImage({ file, src: reader.result });
+      };
+      reader.readAsDataURL(file);
+    },
+    onRemove: () => setHeldImage(null),
   };
 
   const onSubmit = (e: FormEvent<HTMLFormElement>) => {
@@ -280,7 +313,7 @@ function CreateForm() {
       <Form {...form}>
         <form noValidate onSubmit={onSubmit} className="flex min-w-0 flex-col gap-6" aria-busy={isSubmitting || undefined}>
           <div className="flex max-w-(--size-prose) flex-col gap-6">
-            <McpConfigFields control={form.control} readOnly={isSubmitting} nameError={errors.name !== undefined} />
+            <McpConfigFields control={form.control} readOnly={isSubmitting} nameError={errors.name !== undefined} iconImage={image} />
           </div>
 
           <fieldset className="flex min-w-0 max-w-5xl flex-col gap-5 border-t border-border pt-4">
@@ -331,14 +364,16 @@ function ScriptBlock({
   editorRef: RefObject<CodeEditorHandle | null>;
   onChange(patch: Partial<ScriptUpload>): void;
 }) {
-  const ids = { ext: useId(), error: useId(), hint: useId() };
+  const ids = { ext: useId(), error: useId(), hint: useId(), legend: useId() };
   const required = kind !== "restart";
   const describedBy = [error ? ids.error : null, required ? null : ids.hint].filter(Boolean).join(" ") || undefined;
 
   return (
-    <fieldset data-testid={`script-field-${kind}`} className="flex min-w-0 flex-col gap-2">
-      <legend className="mb-2 text-sm font-medium text-fg">
-        {copy.scripts.kinds[kind]}
+    // named by the legend's words alone (aria-labelledby), not by the tip button inside the legend
+    <fieldset data-testid={`script-field-${kind}`} aria-labelledby={ids.legend} className="flex min-w-0 flex-col gap-2">
+      <legend className="mb-2 flex items-center text-sm font-medium text-fg">
+        <span id={ids.legend}>{copy.scripts.kinds[kind]}</span>
+        <InfoTip label={copy.scripts.kinds[kind]} content={copy.help.scripts.kinds[kind]} className="ms-0.5" />
         {/* the editor says "required" itself (aria-required): shown, not read twice */}
         <span aria-hidden="true" className="ml-2 text-xs font-normal text-fg-muted">
           {required ? copy.common.required : copy.common.optional}
@@ -353,6 +388,7 @@ function ScriptBlock({
         <Label htmlFor={ids.ext} className="text-sm text-fg-muted">
           {copy.scripts.ext}
         </Label>
+        <InfoTip label={copy.scripts.ext} content={copy.help.scripts.ext} className="-ms-1.5" />
         <Select value={value.ext} onValueChange={(v) => onChange({ ext: v as ScriptExt })}>
           <SelectTrigger id={ids.ext} size="sm" className="w-24 font-mono">
             <SelectValue />

@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useId, useState, type FormEvent } from "react";
+import { InfoTip } from "@/components/app/InfoTip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -66,7 +67,10 @@ export function SetupPage() {
   return (
     <AuthFrame>
       <div className="flex flex-col gap-2">
-        <h1 className="text-xl font-semibold text-fg">{copy.setup.title}</h1>
+        <div className="flex items-center gap-1">
+          <h1 className="text-xl font-semibold text-fg">{copy.setup.title}</h1>
+          <InfoTip label={copy.roles.admin} content={copy.help.setupAdmin} side="bottom" />
+        </div>
         <p className="text-sm text-fg-muted">{copy.setup.lead}</p>
       </div>
       {alert ? (

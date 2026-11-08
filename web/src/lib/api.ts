@@ -24,6 +24,8 @@ export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 export interface ApiInit {
   method?: Method;
   body?: unknown;
+  /** Raw bytes sent as they are, with the blob's type as Content-Type (an icon image), instead of JSON `body`. */
+  blob?: Blob;
   signal?: AbortSignal;
   query?: Query;
 }
@@ -79,7 +81,8 @@ async function request<T>(path: string, init: ApiInit, csrfRetry: boolean): Prom
   const method = init.method ?? "GET";
   const actor = currentActor();
   const headers: Record<string, string> = { Accept: "application/json" };
-  if (init.body !== undefined) headers["Content-Type"] = "application/json";
+  if (init.blob !== undefined) headers["Content-Type"] = init.blob.type;
+  else if (init.body !== undefined) headers["Content-Type"] = "application/json";
   if (method !== "GET" && session.csrf) headers["X-CSRF-Token"] = session.csrf;
 
   let res: Response;
@@ -87,7 +90,7 @@ async function request<T>(path: string, init: ApiInit, csrfRetry: boolean): Prom
     res = await fetch(apiUrl(path, init.query), {
       method,
       headers,
-      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+      body: init.blob ?? (init.body === undefined ? undefined : JSON.stringify(init.body)),
       credentials: "same-origin",
       signal: init.signal,
     });

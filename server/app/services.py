@@ -24,11 +24,13 @@ from app.logstore.retention import RetentionJob
 from app.logstore.writer import DailyJsonlWriter, LogWriter
 from app.monitor.bus import BoardBus
 from app.monitor.history import McpHistory
+from app.monitor.icon_images import IconImageStore
 from app.monitor.probes import Prober
 from app.monitor.runner import ScriptRunner
 from app.monitor.scripts import ScriptStore
 from app.monitor.store import McpStore
 from app.monitor.supervisor import Monitor, ProberLike, ScriptRunnerLike
+from app.monitor.system import SystemSampler
 from app.notice.displays import NoticeDisplays
 from app.notice.store import NoticeStore
 from app.paths import AppPaths
@@ -57,6 +59,8 @@ class Services:
     audit: AuditLogger
     mcps: McpStore
     scripts: ScriptStore
+    icon_images: IconImageStore
+    """The uploaded per-MCP icon images (``mcp_icons``); the board, lists and detail carry their URL."""
     history: McpHistory
     bus: BoardBus
     tamper: TamperMonitor
@@ -89,6 +93,9 @@ class Services:
     retention: RetentionJob
     """The daily log retention job (W14); ``serve()`` starts it after the log index and stops it
     first. Fixtures do not start it (tests call ``run_once``)."""
+    system: SystemSampler
+    """This PC's CPU, memory, disks and network for the board; ``serve()`` starts it after the
+    monitor and stops it before. Fixtures do not start it (tests call ``record``)."""
     start_type: StartTypeManager
     """The ``mcp-monitor`` service's start type vs the ``service_start_type`` setting (Task 8)."""
 
@@ -159,6 +166,7 @@ def _wire(
     mcps = McpStore(db, clock, users)
     scripts = ScriptStore(db, paths, clock, mcps)
     history = McpHistory(db, clock)
+    icon_images = IconImageStore(db, clock)
     bus = BoardBus()
     tamper = TamperMonitor(log, bus, clock)
     monitor = Monitor(
@@ -172,6 +180,7 @@ def _wire(
         bus=bus,
         clock=clock,
         tamper=tamper,
+        icon_images=icon_images,
     )
     config_collectors = collectors or CollectorConfig()
     rdp_history = SessionHistory(db, clock)
@@ -252,6 +261,7 @@ def _wire(
         audit=audit,
         mcps=mcps,
         scripts=scripts,
+        icon_images=icon_images,
         history=history,
         bus=bus,
         tamper=tamper,
@@ -270,6 +280,7 @@ def _wire(
         tamper_scanner=tamper_scanner,
         log_index=log_index,
         retention=retention,
+        system=SystemSampler(bus, clock),
         start_type=StartTypeManager(
             service_configurator if service_configurator is not None else default_configurator(),
             settings,

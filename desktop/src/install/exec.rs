@@ -757,7 +757,7 @@ mod tests {
         let h = FakeHost::new();
         let mut ex = RealExecutor::new(&p, &h, FakeRunner::default(), Vec::new());
         let target = s.path().join("install-state.json");
-        let state = json!({"installed_at": null, "version": "1.1.0", "registry_before": {"a": null, "b": 0}, "installer": "desktop"});
+        let state = json!({"installed_at": null, "version": "1.0.0", "registry_before": {"a": null, "b": 0}, "installer": "desktop"});
         let step = st(
             "install_state",
             "(write-state)",
@@ -768,7 +768,7 @@ mod tests {
         assert!(!bytes.starts_with(b"\xef\xbb\xbf"));
         let text = String::from_utf8(bytes).unwrap();
         assert!(
-            text.contains("\n  \"version\": \"1.1.0\""),
+            text.contains("\n  \"version\": \"1.0.0\""),
             "indent 2: {text}"
         );
         let mut written: Value = serde_json::from_str(&text).unwrap();
@@ -800,7 +800,7 @@ mod tests {
         let h = FakeHost::new();
         let mut ex = RealExecutor::new(&p, &h, FakeRunner::default(), Vec::new());
         let info = s.path().join("install.json");
-        let text = r#"{"version":"1.1.0","local_port":8700}"#;
+        let text = r#"{"version":"1.0.0","local_port":8700}"#;
         assert_eq!(
             ex.internal(&st(
                 "install_info",
@@ -1054,7 +1054,7 @@ mod tests {
                 &[
                     key,
                     "DisplayName=REG_SZ:MCP Monitor",
-                    "DisplayVersion=REG_SZ:1.1.0",
+                    "DisplayVersion=REG_SZ:1.0.0",
                     "NoModify=REG_DWORD:1",
                 ],
             );
@@ -1065,7 +1065,7 @@ mod tests {
             1,
             "nothing written by the refused step: {fake:?}"
         );
-        assert_eq!(fake.string(key, "DisplayVersion").as_deref(), Some("1.1.0"));
+        assert_eq!(fake.string(key, "DisplayVersion").as_deref(), Some("1.0.0"));
         assert_eq!(fake.0[key]["NoModify"], RegValue::Dword(1));
         assert_eq!(
             fake.subkeys(r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
@@ -1096,11 +1096,11 @@ mod tests {
                 &lnk.display().to_string(),
                 &target.display().to_string(),
                 "",
-                "MCP Monitor 1.1.0",
+                "MCP Monitor 1.0.0",
             ],
         );
         assert_eq!(ex.internal(&step), Ok(0));
-        assert_eq!(read_shortcut(&lnk).unwrap().1, "MCP Monitor 1.1.0");
+        assert_eq!(read_shortcut(&lnk).unwrap().1, "MCP Monitor 1.0.0");
         assert!(read_shortcut(&s.path().join("missing.lnk")).is_err());
     }
 
@@ -1133,15 +1133,15 @@ mod tests {
             format!("{}.old", inst.display()),
         );
         fs::create_dir_all(&inst).unwrap();
-        fs::write(inst.join("bundle.json"), r#"{"version":"1.0.0"}"#).unwrap();
-        let exe = s.path().join("downloads").join("mcp-monitor-1.1.0.exe");
+        fs::write(inst.join("bundle.json"), r#"{"version":"0.9.0"}"#).unwrap();
+        let exe = s.path().join("downloads").join("mcp-monitor-1.0.0.exe");
         fs::create_dir_all(exe.parent().unwrap()).unwrap();
-        fs::write(&exe, b"MZ 1.1.0").unwrap();
+        fs::write(&exe, b"MZ 1.0.0").unwrap();
         let p = plan("install", Some(&inst), None, vec![]);
         let h = FakeHost::new();
         let mut ex = RealExecutor::new(&p, &h, FakeRunner::default(), Vec::new());
         ex.self_exe = Some(exe);
-        ex.payload = Some(release_payload(&s, "1.1.0"));
+        ex.payload = Some(release_payload(&s, "1.0.0"));
         assert_eq!(
             ex.internal(&st("stage_payload", "(stage)", &[&staging, &i])),
             Ok(0)
@@ -1157,11 +1157,11 @@ mod tests {
             ex.internal(&st("swap_install_dir", "(swap)", &[&staging, &i, &old])),
             Ok(0)
         );
-        assert_eq!(fs::read(inst.join("mcp-monitor.exe")).unwrap(), b"MZ 1.1.0");
+        assert_eq!(fs::read(inst.join("mcp-monitor.exe")).unwrap(), b"MZ 1.0.0");
         assert!(
             fs::read_to_string(inst.join("bundle.json"))
                 .unwrap()
-                .contains("1.1.0")
+                .contains("1.0.0")
         );
         assert!(ex.condition("old_exists"));
         assert_eq!(
@@ -1185,9 +1185,9 @@ mod tests {
         // Ruling F06: run from the install folder (a repair from the installed copy).
         let mut ex = RealExecutor::new(&p, &h, FakeRunner::default(), Vec::new());
         ex.self_exe = Some(inst.join("mcp-monitor.exe"));
-        ex.payload = Some(release_payload(&s, "1.1.0"));
+        ex.payload = Some(release_payload(&s, "1.0.0"));
         assert!(
-            matches!(ex.internal(&step), Err(StepError::Failed(m)) if m.contains("다운로드한 mcp-monitor-1.1.0.exe로 실행하세요"))
+            matches!(ex.internal(&step), Err(StepError::Failed(m)) if m.contains("다운로드한 mcp-monitor-1.0.0.exe로 실행하세요"))
         );
         // A test build embeds the fixture payload: never installed for real.
         let mut ex = RealExecutor::new(&p, &h, FakeRunner::default(), Vec::new());

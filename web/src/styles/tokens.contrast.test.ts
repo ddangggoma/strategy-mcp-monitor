@@ -1,6 +1,6 @@
 // Reads tokens.css, picks the light-dark() branch per theme, composites translucent tokens
 // (the *-soft color-mix values) over their backdrop and checks WCAG contrast with culori.
-import { converter } from "culori";
+import { converter, wcagContrast } from "culori";
 import { GROUP_STACK } from "@/admin/logs/categories";
 import { colorTokenNames, compositeOver, contrastPairs, isDisplayable, resolveToken } from "./contrast-helpers";
 
@@ -155,5 +155,56 @@ it.each(THEMES)("diff rows keep code and line numbers readable in %s", (theme) =
   for (const row of ["diff-add", "diff-del"]) {
     expect(contrastPairs(theme, "fg", row, "surface"), `fg on ${row}`).toBeGreaterThanOrEqual(4.5);
     expect(contrastPairs(theme, "fg-muted", row, "surface"), `fg-muted on ${row}`).toBeGreaterThanOrEqual(4.5);
+  }
+});
+
+// Board metric accents (BoardOverview.css): ring and bar gradients (both ends), sparklines and chip
+// glyphs are non-text UI on every surface a board tile paints (WCAG 1.4.11).
+const RESOURCE_ROW = ["cpu", "memory", "gpu", "disk", "network"] as const;
+const OVERVIEW_ROW = ["states", "latency", "checks", "uptime"] as const;
+const GRADIENT_ENDS = ["cpu-2", "memory-2", "gpu-2", "disk-2"] as const;
+
+it.each(THEMES)("board metric accents meet 3:1 on every surface in %s", (theme) => {
+  for (const m of [...RESOURCE_ROW, ...OVERVIEW_ROW, ...GRADIENT_ENDS]) {
+    for (const bg of ["bg", "surface", "surface-raised"]) {
+      expect(contrastPairs(theme, `metric-${m}`, bg), `metric-${m} on ${bg}`).toBeGreaterThanOrEqual(3);
+    }
+  }
+  expect(contrastPairs(theme, "brand", "surface")).toBeGreaterThanOrEqual(3);
+});
+
+it.each(THEMES)("a tile's chip glyph stays 3:1 on its own 14%% tint in %s", (theme) => {
+  const surface = resolveToken(theme, "surface");
+  for (const m of [...RESOURCE_ROW, ...OVERVIEW_ROW]) {
+    const hue = resolveToken(theme, `metric-${m}`);
+    const chip = compositeOver({ ...hue, alpha: 0.14 }, surface);
+    expect(wcagContrast(compositeOver(hue, chip), chip), m).toBeGreaterThanOrEqual(3);
+  }
+});
+
+// Tiles sit side by side in these orders: neighbours stay apart under protan/deutan by the floor
+// ΔE 6 (every tile also carries its title and icon, the secondary encoding) and under normal
+// vision by ΔE 15 (OKLab ×100).
+it.each(THEMES)("neighbouring board tiles keep their accents apart in %s", (theme) => {
+  const dist = (p: number[], q: number[]) => 100 * Math.hypot(p[0]! - q[0]!, p[1]! - q[1]!, p[2]! - q[2]!);
+  for (const row of [RESOURCE_ROW, OVERVIEW_ROW] as const) {
+    for (const [i, a] of row.slice(0, -1).entries()) {
+      const b = row[i + 1]!;
+      for (const kind of ["protan", "deutan"] as const) {
+        expect(dist(seen(theme, `metric-${a}`, kind), seen(theme, `metric-${b}`, kind)), `${a}/${b} ${kind}`).toBeGreaterThanOrEqual(6);
+      }
+      expect(dist(seen(theme, `metric-${a}`), seen(theme, `metric-${b}`)), `${a}/${b} normal`).toBeGreaterThanOrEqual(15);
+    }
+  }
+});
+
+// A resource's hue must not pass for a trouble state: the amber and red its load turns to, or the
+// orange of an action. (Next to healthy green it may sit closer: under its thresholds a load is fine.)
+it.each(THEMES)("metric accents stay clear of the state hues in %s", (theme) => {
+  const dist = (p: number[], q: number[]) => 100 * Math.hypot(p[0]! - q[0]!, p[1]! - q[1]!, p[2]! - q[2]!);
+  for (const m of [...RESOURCE_ROW, ...GRADIENT_ENDS]) {
+    for (const s of ["suspect", "action", "failed"]) {
+      expect(dist(seen(theme, `metric-${m}`), seen(theme, `state-${s}`)), `${m} vs ${s}`).toBeGreaterThanOrEqual(15);
+    }
   }
 });

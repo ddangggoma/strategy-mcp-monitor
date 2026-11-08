@@ -403,13 +403,61 @@ it("offers no revert to the version in use", async () => {
 
 // ---- full-screen preview, permissions -----------------------------------------------------
 
-it("links the full-screen preview of the saved notice in a new tab", async () => {
+const fullPreviewButton = () => screen.getByRole("button", { name: copy.notice.fullPreview });
+const fullPreview = () => screen.getByRole("dialog", { name: copy.notice.fullPreview });
+
+it("opens the full-screen preview of the saved notice in place, not in a new tab", async () => {
+  await renderEditor(noticeFixture({ version: 1, title: "저장된 제목", button_text: "알겠어요" }));
+  await retype(copy.notice.fields.title, "저장 안 한 제목"); // the preview shows what is saved, not the draft
+  const trigger = fullPreviewButton();
+  expect(screen.queryByRole("link", { name: new RegExp(copy.notice.fullPreview) })).toBeNull();
+  expect(trigger).toHaveAccessibleDescription(copy.notice.fullPreviewNote);
+  const path = window.location.pathname;
+
+  await userEvent.click(trigger);
+  const dialog = fullPreview();
+  expect(dialog).toHaveAccessibleDescription(copy.notice.fullPreviewDescription);
+  expect(within(dialog).getByRole("heading", { name: "저장된 제목" })).toBeInTheDocument();
+  expect(within(dialog).queryByText("저장 안 한 제목")).toBeNull();
+  // the real notice's button, live (not the inline preview's aria-disabled picture of it)
+  expect(within(dialog).getByRole("button", { name: "알겠어요" })).not.toHaveAttribute("aria-disabled");
+  // the focus is in the preview, on its close control; the editor behind is hidden from assistive tech
+  const close = within(dialog).getByRole("button", { name: copy.notice.fullPreviewClose });
+  await waitFor(() => expect(close).toHaveFocus());
+  expect(screen.queryByRole("textbox", { name: copy.notice.fields.title })).toBeNull();
+  expect(screen.queryByRole("button", { name: copy.notice.fullPreview })).toBeNull();
+
+  await userEvent.click(close);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  await waitFor(() => expect(fullPreviewButton()).toHaveFocus());
+  expect(window.location.pathname).toBe(path);
+  expect(field(copy.notice.fields.title)).toHaveValue("저장 안 한 제목"); // the edits are still there
+});
+
+it("closes the full-screen preview on Escape and puts the focus back on its button", async () => {
   await renderEditor(noticeFixture({ version: 1 }));
-  const link = screen.getByRole("link", { name: new RegExp(copy.notice.fullPreview) });
-  expect(link).toHaveAttribute("href", "/notice");
-  expect(link).toHaveAttribute("target", "_blank");
-  expect(link).toHaveAttribute("rel", expect.stringContaining("noopener"));
-  expect(link).toHaveAccessibleDescription(copy.notice.fullPreviewNote);
+  await userEvent.click(fullPreviewButton());
+  await waitFor(() => expect(within(fullPreview()).getByRole("button", { name: copy.notice.fullPreviewClose })).toHaveFocus());
+  await userEvent.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog")).toBeNull();
+  await waitFor(() => expect(fullPreviewButton()).toHaveFocus());
+});
+
+it("the preview's notice button only closes the preview: nothing is recorded or reported", async () => {
+  const postMessage = vi.fn();
+  (window as { chrome?: unknown }).chrome = { webview: { postMessage } };
+  try {
+    await renderEditor(noticeFixture({ version: 4, button_text: "동의" }));
+    const calls = trackCalls();
+    await userEvent.click(fullPreviewButton());
+    await userEvent.click(within(fullPreview()).getByRole("button", { name: "동의" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(fullPreviewButton()).toHaveFocus());
+    expect(calls()).toEqual([]);
+    expect(postMessage).not.toHaveBeenCalled();
+  } finally {
+    delete (window as { chrome?: unknown }).chrome;
+  }
 });
 
 it("notice editor on external explains and makes no request", async () => {

@@ -2,7 +2,8 @@
 //! opening the window (Y12); `app` is the single-instance WebView2 window on the local channel
 //! with a tray icon (Y11); `autostart on|off` is the user's sign-in start.
 //!
-//! The window only shows `http://127.0.0.1:<local port>` and its own "connecting" page; every
+//! The window opens on the status board (`http://127.0.0.1:<local port>/`, whose top bar leads to
+//! the admin screen) and only shows that origin and its own "connecting" page; every
 //! other web address goes to the default browser and anything else is refused ([`nav`]). New
 //! windows are never made. Devtools are off. Closing the window hides it (the tray stays and the
 //! service keeps running); `트레이 종료` ends the app. A second start brings the first window
@@ -53,7 +54,8 @@ pub trait Desktop {
     /// The Apps & features entry (`DisplayVersion`, `InstallLocation`).
     fn installed(&self) -> Option<Installed>;
     fn service_exists(&self) -> bool;
-    /// The service's command line (a 1.0.0 install names its folders only there, F13).
+    /// The service's command line (the earlier PowerShell install names its folders only there,
+    /// F13).
     fn service_bin_path(&self) -> Option<String>;
     /// A folder variable (`ProgramFiles`, `ProgramData`).
     fn env_folder(&self, name: &str) -> Option<PathBuf>;
@@ -105,8 +107,8 @@ pub fn app_target(server_url: Option<&str>, install_dir: Option<PathBuf>) -> Opt
     Some(AppTarget { info, install_dir })
 }
 
-/// The install folder: the Apps & features location, else the service's binPath (a 1.0.0 install,
-/// F13), else `%ProgramFiles%\MCP Monitor` (what a new install uses).
+/// The install folder: the Apps & features location, else the service's binPath (the earlier
+/// PowerShell install, F13), else `%ProgramFiles%\MCP Monitor` (what a new install uses).
 pub fn install_dir_of(
     installed: Option<&Installed>,
     service_bin_path: Option<&str>,
@@ -290,7 +292,7 @@ pub fn run_app_command(sys: &dyn crate::System, args: &AppArgs) -> i32 {
     }
 }
 
-/// One step of the "connecting" page: the server answered → the admin screen; no answer for
+/// One step of the "connecting" page: the server answered → the status board; no answer for
 /// [`STOPPED_AFTER`] → the `#stopped` text (once), then ask every [`STOPPED_EVERY`]; before that
 /// every [`CONNECT_EVERY`].
 #[derive(Debug, PartialEq)]
@@ -325,8 +327,8 @@ fn channel_answers(agent: &ureq::Agent, port: u16) -> Result<(), String> {
 }
 
 /// The thread behind the "connecting" page: asks the server until it answers, then shows the
-/// admin screen (and ends).
-fn start_connecting(window: WebviewWindow, port: u16, admin: Url) {
+/// status board, the window's home (and ends).
+fn start_connecting(window: WebviewWindow, port: u16, home: Url) {
     let _ = std::thread::Builder::new()
         .name("app-connect".into())
         .spawn(move || {
@@ -350,8 +352,8 @@ fn start_connecting(window: WebviewWindow, port: u16, admin: Url) {
                 }
                 match connect_step(answer.is_ok(), start.elapsed(), stopped_shown) {
                     Connect::Open => {
-                        let opened = window.navigate(admin);
-                        eprintln!("app window: the server answered; admin page ({opened:?})");
+                        let opened = window.navigate(home);
+                        eprintln!("app window: the server answered; status board ({opened:?})");
                         return;
                     }
                     Connect::ShowStopped => {
@@ -463,7 +465,51 @@ fn build_main_window(
         let _ = window.destroy();
         return Err(e.to_string());
     }
+    set_taskbar_icon(&window);
     Ok(window)
+}
+
+/// Gives the window a big icon (`WM_SETICON`/`ICON_BIG`) from this exe's own icon, at the
+/// window's DPI. Tauri sets only the small one (the title bar); without a big one the taskbar
+/// draws the shell's cached icon of the exe path, which can still be an older build's.
+fn set_taskbar_icon(window: &WebviewWindow) {
+    use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+    use windows::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
+    use windows::Win32::UI::Shell::SHDefExtractIconW;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        HICON, ICON_BIG, SM_CXICON, SendMessageW, WM_SETICON,
+    };
+    let (Ok(raw), Ok(exe)) = (window.hwnd(), std::env::current_exe()) else {
+        return;
+    };
+    let hwnd = HWND(raw.0 as *mut _);
+    // SAFETY: a live window of this thread's app.
+    let px = unsafe { GetSystemMetricsForDpi(SM_CXICON, GetDpiForWindow(hwnd)) }.clamp(32, 256);
+    let mut big = HICON::default();
+    // SAFETY: a NUL-terminated path that outlives the call; one out pointer, no small icon.
+    let got = unsafe {
+        SHDefExtractIconW(
+            &windows::core::HSTRING::from(exe.as_path()),
+            0,
+            0,
+            Some(&mut big),
+            None,
+            px as u32,
+        )
+    };
+    if got.is_err() || big.is_invalid() {
+        eprintln!("taskbar icon: {got:?}");
+        return;
+    }
+    // SAFETY: the window keeps the icon for its lifetime; it is not destroyed here.
+    unsafe {
+        SendMessageW(
+            hwnd,
+            WM_SETICON,
+            Some(WPARAM(ICON_BIG as usize)),
+            Some(LPARAM(big.0 as isize)),
+        );
+    }
 }
 
 fn window_error(e: &str) -> String {
@@ -480,7 +526,7 @@ pub fn run_window(target: AppTarget, background: bool) -> i32 {
         crate::agent::config::strip_webview2_env(&mut crate::agent::config::ProcessEnv);
     }
     let port = target.info.local_port;
-    let admin = Url::parse(&app_url(&target.info)).expect("a valid address");
+    let home = Url::parse(&app_url(&target.info)).expect("a valid address");
     let data_dir =
         app_data_dir(&crate::agent::webview::local_app_data().unwrap_or_else(std::env::temp_dir));
     let install_dir = target.install_dir;
@@ -499,7 +545,7 @@ pub fn run_window(target: AppTarget, background: bool) -> i32 {
                         // Without a tray a hidden window could never be opened.
                         let _ = window.show();
                     }
-                    start_connecting(window, port, admin);
+                    start_connecting(window, port, home);
                 }
                 Err(e) => {
                     eprintln!("app window: not created: {e}");
@@ -639,7 +685,7 @@ mod tests {
         assert_eq!(app_target(None, Some(d.path().to_path_buf())), None);
         std::fs::write(
             d.path().join("install.json"),
-            r#"{"version":"1.1.0","local_port":9700,"external_port":9701,"data_root":"D:\\MCP"}"#,
+            r#"{"version":"1.0.0","local_port":9700,"external_port":9701,"data_root":"D:\\MCP"}"#,
         )
         .unwrap();
         let t = app_target(None, Some(d.path().to_path_buf())).unwrap();
@@ -649,7 +695,7 @@ mod tests {
         );
         let dev = app_target(Some("http://127.0.0.1:5555"), None).unwrap();
         assert_eq!((dev.info.local_port, dev.install_dir), (5555, None));
-        assert_eq!(app_url(&dev.info), "http://127.0.0.1:5555/admin");
+        assert_eq!(app_url(&dev.info), "http://127.0.0.1:5555/");
         assert_eq!(app_target(Some("http://localhost:5555"), None), None);
     }
 
@@ -657,7 +703,7 @@ mod tests {
     fn the_install_folder_is_the_entry_then_the_service_then_program_files() {
         let pf = Path::new(r"C:\Program Files");
         let arp = Installed {
-            version: "1.1.0".into(),
+            version: "1.0.0".into(),
             install_location: PathBuf::from(r"D:\Apps\MCP Monitor"),
         };
         let old = r#""E:\MCP\bin\monitor\mcp-monitor.exe" service --root "E:\MCP Data" --local-port 9700"#;
@@ -694,16 +740,16 @@ mod tests {
             "MCP Monitor가 이 PC에 설치되어 있지 않습니다.\n\n지금 설치할까요? 관리자 권한이 필요합니다.\n설치 위치: C:\\Program Files\\MCP Monitor\n데이터: C:\\ProgramData\\MCP Monitor"
         );
         assert_eq!(
-            upgrade_prompt(Some(Version(1, 0, 0)), Version(1, 1, 0)),
-            "설치된 MCP Monitor 1.0.0을(를) 1.1.0(으)로 업그레이드할까요?\n\n서비스가 잠시 멈추고, 데이터와 설정은 그대로 남습니다. 관리자 권한이 필요합니다."
+            upgrade_prompt(Some(Version(0, 9, 0)), Version(1, 0, 0)),
+            "설치된 MCP Monitor 0.9.0을(를) 1.0.0(으)로 업그레이드할까요?\n\n서비스가 잠시 멈추고, 데이터와 설정은 그대로 남습니다. 관리자 권한이 필요합니다."
         );
         assert!(
-            upgrade_prompt(None, Version(1, 1, 0))
-                .starts_with("설치된 MCP Monitor 알 수 없는 버전을(를) 1.1.0(으)로")
+            upgrade_prompt(None, Version(1, 0, 0))
+                .starts_with("설치된 MCP Monitor 알 수 없는 버전을(를) 1.0.0(으)로")
         );
         assert_eq!(
-            older_notice(Version(1, 2, 0), Version(1, 1, 0)),
-            "설치된 MCP Monitor(1.2.0)가 이 실행 파일(1.1.0)보다 새롭습니다. 설치된 MCP Monitor의 창을 엽니다."
+            older_notice(Version(1, 2, 0), Version(1, 0, 0)),
+            "설치된 MCP Monitor(1.2.0)가 이 실행 파일(1.0.0)보다 새롭습니다. 설치된 MCP Monitor의 창을 엽니다."
         );
     }
 }

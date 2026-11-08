@@ -4,6 +4,7 @@ import { useCallback, useId, useMemo, useRef, useState } from "react";
 import { VirtualTable, vtFeatures } from "@/components/data/VirtualTable";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { InfoTip } from "@/components/app/InfoTip";
 import { copy } from "@/copy/ko";
 import type { AuditQuery, Channel, LogCategory, LogItem, LogOutcome, LogQuery } from "@/lib/api-types";
 import { auditExportUrl } from "@/lib/endpoints";
@@ -173,11 +174,14 @@ function AuditFilters({
         onCustom={(from, to) => onChange({ from, to, range: undefined })}
       />
       <div className="flex min-w-0 flex-wrap items-end gap-x-4 gap-y-2">
-        <div role="group" aria-labelledby={resultsLabel} className="flex flex-col gap-1">
-          <span id={resultsLabel} className="text-xs text-fg-muted">
-            {c.result}
-          </span>
-          <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-0.5">
+            <span id={resultsLabel} className="text-xs text-fg-muted">
+              {c.result}
+            </span>
+            <InfoTip label={c.result} content={copy.help.audit.result} align="start" />
+          </div>
+          <div role="group" aria-labelledby={resultsLabel} className="flex flex-wrap gap-1.5">
             {KIND_RESULTS[kind].map((r) => {
               const Icon = RESULT_ICON[r];
               const on = search.result?.includes(r) ?? false;
@@ -197,9 +201,12 @@ function AuditFilters({
           </div>
         </div>
         <div className="flex flex-col gap-1">
-          <span aria-hidden="true" className="text-xs text-fg-muted">
-            {c.channel}
-          </span>
+          <div className="flex items-center gap-0.5">
+            <span aria-hidden="true" className="text-xs text-fg-muted">
+              {c.channel}
+            </span>
+            <InfoTip label={c.channel} content={copy.help.audit.channel} align="start" />
+          </div>
           <ToggleGroup label={c.channel}>
             {CHANNELS.map((ch) => (
               <Toggle key={ch} pressed={(search.channel ?? "all") === ch} onClick={() => onChange({ channel: ch === "all" ? undefined : ch })}>
@@ -369,13 +376,16 @@ export function AuditPage() {
         <p className="text-sm text-fg-muted">{copy.deny[reason]}</p>
       ) : (
         <Tabs value={kind} onValueChange={onKind}>
-          <TabsList variant="line" aria-label={copy.audit.tabsLabel}>
-            {KINDS.map((k) => (
-              <TabsTrigger key={k} value={k}>
-                {copy.audit.kinds[k]}
-              </TabsTrigger>
-            ))}
-          </TabsList>
+          <div className="flex items-center gap-1">
+            <TabsList variant="line" aria-label={copy.audit.tabsLabel}>
+              {KINDS.map((k) => (
+                <TabsTrigger key={k} value={k}>
+                  {copy.audit.kinds[k]}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+            <InfoTip label={copy.audit.tabsLabel} content={copy.help.audit.kinds} align="start" />
+          </div>
           {KINDS.map((k) => (
             <TabsContent key={k} value={k} className="flex min-w-0 flex-col gap-4 pt-2">
               {k === kind ? (

@@ -24,3 +24,6 @@ web/.vite/
 # desktop (Rust)
 desktop/target/
 desktop/gen/
+
+# demo: a Python the LocalSystem service can see (see tools/seed-demo.ps1)
+dummy-mcps/.python/

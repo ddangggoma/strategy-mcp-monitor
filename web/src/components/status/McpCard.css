@@ -1,6 +1,8 @@
 /*
- * Board MCP card. Healthy is quiet (neutral panel, gray sparkline); a problem card gets a 3px
- * state band, a soft state fill and a state-colored sparkline (direction.md §2). Five rows
+ * Board MCP card. Healthy is quiet (neutral panel, healthy-tinted sparkline); a problem card gets a
+ * 3px state band, a soft state fill and a state-colored sparkline (direction.md §2). Motion: the
+ * card rises in, glides when the board re-sorts, lifts under a resting pointer, draws its band in
+ * when its state turns, and glows briefly when a new reading arrives (all off for reduced motion). Five rows
  * (head, issue, metrics, chart, foot) join the board grid's rows through subgrid so metrics and
  * sparklines line up across a row of cards; without subgrid each card keeps its own rows.
  */
@@ -17,9 +19,25 @@
     grid-template-rows: subgrid;
     row-gap: calc(var(--spacing) * 2);
     padding: calc(var(--spacing) * 4);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
+    border: 1px solid var(--color-border-panel);
+    border-radius: var(--radius-lg);
     background-color: var(--color-surface);
+    box-shadow: var(--shadow-panel); /* light: lifted off the page; dark: transparent */
+    /* a state change tints the edge in step with the band drawing in */
+    transition: border-color var(--motion-slow) var(--ease-hover);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .mcp-card {
+      transition:
+        border-color var(--motion-slow) var(--ease-hover),
+        translate var(--motion-base) var(--ease-out);
+    }
+
+    /* translate, not transform: Motion's layout glide owns transform */
+    .mcp-card:hover {
+      translate: 0 -2px;
+    }
   }
 
   @supports not (grid-template-rows: subgrid) {
@@ -46,16 +64,121 @@
     --card-soft: var(--color-state-failed-soft);
   }
 
-  /* problem cards: soft fill over the surface + a 3px band along the top edge. The border mixes in
-     oklab: an oklch mix of amber and steel blue swings the hue through green. */
+  /* problem cards: a soft fill that fades down the card + a 3px band along the top edge. The
+     border mixes in oklab: an oklch mix of amber and steel blue swings the hue through green. */
   .mcp-card:is([data-state="SUSPECT"], [data-state="ACTION"], [data-state="RECOVERING"], [data-state="FAILED"]) {
     border-color: color-mix(in oklab, var(--card-tone) 40%, var(--color-border));
-    background-image: linear-gradient(var(--card-soft), var(--card-soft));
-    box-shadow: inset 0 3px 0 var(--card-tone);
+    background-image: linear-gradient(var(--card-soft), color-mix(in oklab, var(--card-soft) 40%, transparent));
+  }
+
+  /* the band itself: an element keyed by state, so a new state draws it in from the left
+     (scaleX, transform only). Quiet states have none; the recovering ring replaces it. */
+  .mcp-card-band {
+    position: absolute;
+    inset: 0 0 auto;
+    height: 3px;
+    background-color: var(--card-tone);
+    transform-origin: left;
+    pointer-events: none;
+    animation: band-draw 560ms var(--ease-out) backwards;
+  }
+
+  /* the first band waits for its card to rise in (the card's own delay, see below) */
+  .mcp-card-band[data-entrance] {
+    animation-delay: calc(560ms + var(--card-i, 0) * 60ms);
+  }
+
+  .mcp-card:is([data-state="HEALTHY"], [data-state="MAINTENANCE"], [data-anim="spin"]) .mcp-card-band {
+    display: none;
+  }
+
+  @keyframes band-draw {
+    from {
+      transform: scaleX(0);
+    }
+  }
+
+  /* a new reading arrived: a glow around the card's edge in the brand teal (a problem card: in its
+     state hue) fades in and out once; opacity only, the glow itself is static */
+  .mcp-card-flash {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    box-shadow:
+      inset 0 0 0 1px color-mix(in oklab, var(--flash) 70%, transparent),
+      inset 0 0 1.5rem -0.5rem var(--flash);
+    opacity: 0;
+    animation: card-flash 1.4s var(--ease-out);
+  }
+
+  .mcp-card {
+    --flash: var(--color-brand);
+  }
+
+  .mcp-card:is([data-state="SUSPECT"], [data-state="ACTION"], [data-state="RECOVERING"], [data-state="FAILED"]) {
+    --flash: var(--card-tone);
+  }
+
+  @keyframes card-flash {
+    15% {
+      opacity: 0.9;
+    }
+    to {
+      opacity: 0;
+    }
   }
 
   .mcp-card-spark {
     color: var(--card-tone);
+  }
+
+  /* healthy cards keep a neutral panel but draw their trend in the healthy hue: the one colour on
+     a quiet card says "this is fine" (problem cards still outshout it with band and fill) */
+  .mcp-card[data-state="HEALTHY"] .mcp-card-spark {
+    color: color-mix(in oklab, var(--color-state-healthy) 80%, var(--color-fg-muted));
+  }
+
+  /* cards rise in after the overview tiles, one after another (first show only; `backwards`, so
+     Motion's layout transform is never held by the animation) */
+  .mcp-card {
+    animation: rise-in 520ms var(--ease-out) backwards;
+    animation-delay: calc(360ms + var(--card-i, 0) * 60ms);
+  }
+  .mcp-card:nth-child(2) { --card-i: 1; }
+  .mcp-card:nth-child(3) { --card-i: 2; }
+  .mcp-card:nth-child(4) { --card-i: 3; }
+  .mcp-card:nth-child(5) { --card-i: 4; }
+  .mcp-card:nth-child(6) { --card-i: 5; }
+  .mcp-card:nth-child(7) { --card-i: 6; }
+  .mcp-card:nth-child(n + 8) { --card-i: 7; }
+
+  /* FAILED: the top band breathes, so a failure is found from across the room */
+  .mcp-card[data-state="FAILED"]::after {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto;
+    height: 3px;
+    background-color: var(--card-tone);
+    box-shadow: 0 0 12px 1px var(--card-tone);
+    pointer-events: none;
+    animation: band-breathe 1.8s var(--ease-in-out) infinite alternate;
+  }
+
+  @keyframes band-breathe {
+    from {
+      opacity: 0.35;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .mcp-card[data-state="FAILED"]::after {
+      animation: none;
+      opacity: 0;
+    }
   }
 
   /* the container for the metric size query; not the card itself: container-type implies layout
@@ -110,9 +233,9 @@
     position: absolute;
     inset: 2px;
     z-index: -1;
-    border-radius: calc(var(--radius-md) - 2px);
+    border-radius: calc(var(--radius-lg) - 2px);
     background-color: var(--color-surface);
-    background-image: linear-gradient(var(--card-soft), var(--card-soft));
+    background-image: linear-gradient(var(--card-soft), color-mix(in oklab, var(--card-soft) 40%, transparent));
     box-shadow: inset 0 1px 0 var(--card-tone);
   }
 

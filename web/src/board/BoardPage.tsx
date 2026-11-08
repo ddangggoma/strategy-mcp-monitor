@@ -1,6 +1,7 @@
 import { CircleDashedIcon, SettingsIcon } from "lucide-react";
 import { LazyMotion, MotionConfig, domMax } from "motion/react";
 import { useCallback, useEffect, useState } from "react";
+import { InfoTip } from "@/components/app/InfoTip";
 import { TopBar } from "@/components/app/TopBar";
 import { ConnectionBanner } from "@/components/status/ConnectionBanner";
 import { McpCard } from "@/components/status/McpCard";
@@ -11,9 +12,12 @@ import { copy } from "@/copy/ko";
 import type { BoardItem, McpState } from "@/lib/api-types";
 import { sortBoard, useBoard, type BoardStore } from "@/lib/board-store";
 import type { BoardStreamClient } from "@/lib/board-stream";
-import { bootstrapStatus, logout } from "@/lib/endpoints";
+import { bootstrapStatus, logout } from "@/lib/endpoints-auth";
 import { clearSession, refreshSession, useSession } from "@/lib/session";
 import { cn } from "@/lib/utils";
+import { BoardOverview, LiveStatus } from "./BoardOverview";
+import { latestCheck } from "./overview";
+import { SystemPanel } from "./SystemPanel";
 
 const GRID = "grid grid-cols-[repeat(auto-fill,minmax(min(var(--size-board-card),100%),1fr))] gap-4";
 const SKELETON_CARDS = [0, 1, 2, 3, 4, 5];
@@ -118,19 +122,28 @@ export function BoardPage({ store, stream }: { store: BoardStore; stream: BoardS
           </section>
 
           <section aria-labelledby="board-verdict" className="flex flex-col gap-5">
-            <div aria-live="polite">
-              <h1
-                id="board-verdict"
-                className={cn(
-                  "flex items-center gap-3 text-display font-bold",
-                  loading ? "text-fg-muted" : v.state ? STATE_TEXT[v.state] : "text-fg",
-                )}
-              >
-                {loading ? null : <VerdictIcon aria-hidden="true" className="size-[0.8em] shrink-0" />}
-                {loading ? copy.board.title : v.text}
-              </h1>
-              {!loading && sorted.length === 0 ? <p className="mt-2 text-base text-fg-muted">{copy.board.noMcpHint}</p> : null}
+            <div data-anim="rise" className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+              <div aria-live="polite" className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <h1
+                    id="board-verdict"
+                    className={cn(
+                      "flex items-center gap-3 text-display font-bold",
+                      loading ? "text-fg-muted" : v.state ? STATE_TEXT[v.state] : "text-fg",
+                    )}
+                  >
+                    {loading ? null : <VerdictIcon aria-hidden="true" className="size-[0.8em] shrink-0" />}
+                    {loading ? copy.board.title : v.text}
+                  </h1>
+                  {loading ? null : <InfoTip label={copy.help.stateLabel} content={copy.help.stateLegend} side="bottom" align="start" />}
+                </div>
+                {!loading && sorted.length === 0 ? <p className="mt-2 text-base text-fg-muted">{copy.board.noMcpHint}</p> : null}
+              </div>
+              {/* outside the live region: its "n초 전" changes every second */}
+              {loading ? null : <LiveStatus status={board.status} lastCheckAt={latestCheck(sorted)} className="mb-1.5" />}
             </div>
+
+            {loading ? null : <BoardOverview items={board.items} />}
 
             {loading ? (
               <>
@@ -152,6 +165,8 @@ export function BoardPage({ store, stream }: { store: BoardStore; stream: BoardS
               </div>
             ) : null}
           </section>
+
+          {loading ? null : <SystemPanel system={board.system} />}
         </main>
       </MotionConfig>
     </LazyMotion>

@@ -1,11 +1,13 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import type { Control, FieldPath } from "react-hook-form";
+import { InfoTip, type HelpContent } from "@/components/app/InfoTip";
 import { FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { copy } from "@/copy/ko";
 import type { McpConfig } from "@/lib/api-types";
+import { McpIconPicker, type IconImageProps } from "./McpIconPicker";
 import { RANGES, type McpFormValues } from "./mcp-schema";
 
 type NumberKey = keyof typeof RANGES;
@@ -14,7 +16,7 @@ type SwitchKey = "auto_recovery" | "autostart_on_boot" | "maintenance";
 const PROBES = ["mcp_ping", "tcp", "icmp"] as const;
 
 /**
- * Every McpConfig field in three fieldsets (connection and checks / auto recovery / operation),
+ * Every McpConfig field in four fieldsets (connection and checks / icon / auto recovery / operation),
  * shared by the settings tab and the registration page. The form, its schema and its submit
  * belong to the caller.
  */
@@ -22,26 +24,31 @@ export function McpConfigFields({
   control,
   readOnly,
   nameError,
+  iconImage,
 }: {
   control: Control<McpFormValues, unknown, McpConfig>;
   readOnly: boolean;
   /** The name field shows its error instead of the naming rule. */
   nameError: boolean;
+  /** The uploaded logo (not a form field: its owner saves it). */
+  iconImage?: IconImageProps;
 }) {
   return (
     <>
       <Group legend={copy.mcp.groups.connection}>
         <TextField control={control} name="name" label={copy.mcp.fields.name} readOnly={readOnly}
           hint={nameError ? undefined : copy.mcp.nameRule} />
-        <TextField control={control} name="host" label={copy.mcp.fields.host} readOnly={readOnly} mono />
+        <TextField control={control} name="host" label={copy.mcp.fields.host} readOnly={readOnly} mono tip={copy.help.mcp.fields.host} />
         <NumberField control={control} name="port" readOnly={readOnly} />
-        <TextField control={control} name="path" label={copy.mcp.fields.path} readOnly={readOnly} mono />
+        <TextField control={control} name="path" label={copy.mcp.fields.path} readOnly={readOnly} mono tip={copy.help.mcp.fields.path} />
         <FormField
           control={control}
           name="probe"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>{copy.mcp.fields.probe}</FormLabel>
+              <LabelRow tip={<InfoTip label={copy.mcp.fields.probe} content={copy.help.mcp.fields.probe} />}>
+                <FormLabel>{copy.mcp.fields.probe}</FormLabel>
+              </LabelRow>
               <Select value={field.value} onValueChange={field.onChange} disabled={readOnly}>
                 <FormControl>
                   <SelectTrigger className="w-full" onBlur={field.onBlur}>
@@ -61,10 +68,14 @@ export function McpConfigFields({
           )}
         />
         <TextField control={control} name="expected_process_name" label={copy.mcp.fields.expected_process_name}
-          readOnly={readOnly} mono hint={copy.mcp.processNameHint} />
+          readOnly={readOnly} mono hint={copy.mcp.processNameHint} tip={copy.help.mcp.fields.expected_process_name} />
       </Group>
 
-      <Group legend={copy.mcp.groups.recovery}>
+      <Group legend={copy.mcp.icon.legend} tip={copy.help.mcp.icon}>
+        <McpIconPicker control={control} readOnly={readOnly} image={iconImage} />
+      </Group>
+
+      <Group legend={copy.mcp.groups.recovery} tip={copy.help.mcp.recoveryGroup} tipLabel={copy.help.mcp.recoveryGroupLabel}>
         <SwitchField control={control} name="auto_recovery" readOnly={readOnly} className="@lg:col-span-2" />
         <NumberField control={control} name="action_delay_sec" readOnly={readOnly} />
         <NumberField control={control} name="startup_grace_sec" readOnly={readOnly} />
@@ -81,10 +92,21 @@ export function McpConfigFields({
   );
 }
 
-function Group({ legend, children }: { legend: string; children: ReactNode }) {
+function Group({ legend, tip, tipLabel = legend, children }: { legend: string; tip?: HelpContent; tipLabel?: string; children: ReactNode }) {
+  const id = useId();
   return (
-    <fieldset className="@container flex flex-col gap-3 border-t border-border pt-4">
-      <legend className="pr-2 text-sm font-semibold text-fg">{legend}</legend>
+    // with a tip, the group is named by the legend's words alone (not by the tip button inside it)
+    <fieldset aria-labelledby={tip ? id : undefined} className="@container flex flex-col gap-3 border-t border-border pt-4">
+      <legend className="pr-2 text-sm font-semibold text-fg">
+        {tip ? (
+          <span className="inline-flex items-center gap-1">
+            <span id={id}>{legend}</span>
+            <InfoTip label={tipLabel} content={tip} align="start" />
+          </span>
+        ) : (
+          legend
+        )}
+      </legend>
       <div className="grid gap-4 @lg:grid-cols-2">{children}</div>
     </fieldset>
   );
@@ -96,9 +118,24 @@ interface FieldProps<K extends FieldPath<McpFormValues>> {
   readOnly: boolean;
   hint?: string;
   className?: string;
+  /** Help behind an “i” beside the label (outside the <label>, so the field's name stays the label). */
+  tip?: HelpContent;
 }
 
-function TextField({ control, name, label, readOnly, hint, mono }: FieldProps<"name" | "host" | "path" | "expected_process_name"> & {
+/** A label with its tip button beside it. */
+function LabelRow({ tip, children }: { tip?: ReactNode; children: ReactNode }) {
+  if (!tip) return children;
+  return (
+    <div className="flex items-center gap-1">
+      {children}
+      {tip}
+    </div>
+  );
+}
+
+const tipFor = (label: string, tip?: HelpContent) => (tip ? <InfoTip label={label} content={tip} /> : undefined);
+
+function TextField({ control, name, label, readOnly, hint, mono, tip }: FieldProps<"name" | "host" | "path" | "expected_process_name"> & {
   label: string;
   mono?: boolean;
 }) {
@@ -108,7 +145,9 @@ function TextField({ control, name, label, readOnly, hint, mono }: FieldProps<"n
       name={name}
       render={({ field }) => (
         <FormItem>
-          <FormLabel>{label}</FormLabel>
+          <LabelRow tip={tipFor(label, tip)}>
+            <FormLabel>{label}</FormLabel>
+          </LabelRow>
           <FormControl>
             <Input
               {...field}
@@ -136,7 +175,9 @@ function NumberField({ control, name, readOnly, hint }: FieldProps<NumberKey>) {
       name={name}
       render={({ field }) => (
         <FormItem>
-          <FormLabel>{copy.mcp.fields[name]}</FormLabel>
+          <LabelRow tip={tipFor(copy.mcp.fields[name], copy.help.mcp.fields[name as keyof typeof copy.help.mcp.fields] as HelpContent | undefined)}>
+            <FormLabel>{copy.mcp.fields[name]}</FormLabel>
+          </LabelRow>
           <FormControl>
             <Input
               type="number"
@@ -181,6 +222,7 @@ function SwitchField({ control, name, readOnly, className }: FieldProps<SwitchKe
               />
             </FormControl>
             <FormLabel>{copy.mcp.fields[name]}</FormLabel>
+            <InfoTip label={copy.mcp.fields[name]} content={copy.help.mcp.fields[name]} className="-ms-2" />
           </div>
           {name in copy.mcp.hints ? <FormDescription>{copy.mcp.hints[name as keyof typeof copy.mcp.hints]}</FormDescription> : null}
         </FormItem>

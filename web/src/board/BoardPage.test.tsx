@@ -7,7 +7,7 @@ import { BoardStore } from "@/lib/board-store";
 import type { BoardStreamClient } from "@/lib/board-stream";
 import { session } from "@/lib/session";
 import type { SseEvent } from "@/lib/sse";
-import { boardEvent, item, meFixture, rdpSession } from "../../tests/msw/fixtures";
+import { boardEvent, item, meFixture, rdpSession, systemFixture } from "../../tests/msw/fixtures";
 import { server, trackRequests } from "../../tests/msw/server";
 import { BoardPage } from "./BoardPage";
 
@@ -57,6 +57,82 @@ it("orders problem MCPs first and updates a card from an mcp event", async () =>
   expect(await within(card(1)).findByText("점검 중")).toBeInTheDocument();
   act(() => store.apply({ event: "mcp", data: JSON.stringify(item(1, "FAILED", "a")) }));
   expect(screen.getAllByTestId("mcp-card").map((c) => c.dataset.id)).toEqual(["1", "2"]);
+});
+
+it("sums the board up in the overview tiles", () => {
+  renderBoard(boardEvent({ mcps: [item(1, "HEALTHY", "a"), item(2, "FAILED", "b"), item(3, "MAINTENANCE", "c")] }));
+  const overview = screen.getByRole("region", { name: copy.board.overview.title });
+  // the ring names every state count; the legend repeats them as text
+  expect(within(overview).getByRole("img", { name: copy.board.overview.donutLabel("실패 1개, 점검 중 1개, 정상 1개") })).toBeInTheDocument();
+  expect(within(overview).getByText(copy.board.overview.healthyOf(1, 3))).toBeInTheDocument();
+  // maintenance is left out of the numbers: one healthy and one failed MCP are judged
+  expect(within(overview).getByText(copy.board.overview.checkSummary(7, 10))).toBeInTheDocument();
+  expect(within(overview).getByText("96.2 %")).toHaveClass("sr-only"); // (1 + 0.925) / 2
+  expect(within(overview).getByRole("meter", { name: copy.board.overview.uptimeLabel(96.2) })).toHaveAttribute("aria-valuenow", "96.2");
+  expect(within(overview).getByText(copy.board.overview.excludesMaintenance)).toBeInTheDocument();
+  // the stream is open: the live pill says so, outside the verdict's live region (it ticks every second)
+  expect(screen.getByText(copy.board.overview.live).closest("[aria-live]")).toBeNull();
+});
+
+it("shows no overview without MCPs", () => {
+  renderBoard(boardEvent({ mcps: [] }));
+  expect(screen.queryByRole("region", { name: copy.board.overview.title })).toBeNull();
+});
+
+it("shows the PC's resources and follows system events", () => {
+  const store = renderBoard(boardEvent({ mcps: [], system: systemFixture() }));
+  const panel = screen.getByRole("region", { name: copy.board.system.title });
+  expect(within(panel).getByRole("img", { name: copy.board.system.gaugeLabel("CPU", 43) })).toBeInTheDocument();
+  expect(within(panel).getByText(copy.board.system.cores(8))).toBeInTheDocument();
+  expect(within(panel).getByText(copy.board.system.memoryUsed("14.0GB", "16.0GB"))).toBeInTheDocument();
+  // the disk bar carries its value for assistive tech; 94 % is over the second threshold
+  const disk = within(panel).getByRole("meter", { name: "C:" });
+  expect(disk).toHaveAttribute("aria-valuenow", "94");
+  expect(disk).toHaveAttribute("data-state", "FAILED");
+  expect(within(panel).getByText("1.5MB/s")).toBeInTheDocument();
+  // each tile names its own metric hue; the state stays a separate attribute (data-tone)
+  const tileOf = (name: string) => within(panel).getByRole("heading", { name }).closest("li")!;
+  const t = copy.board.system;
+  expect([t.cpu, t.memory, t.disk, t.network].map((n) => tileOf(n).dataset.accent)).toEqual(["cpu", "memory", "disk", "network"]);
+  expect(tileOf(t.disk)).toHaveAttribute("data-tone", "FAILED");
+  act(() => store.apply({ event: "system", data: JSON.stringify(systemFixture({ cpu: { percent: 5, cores: 8 } })) }));
+  expect(within(panel).getByRole("img", { name: copy.board.system.gaugeLabel("CPU", 5) })).toBeInTheDocument();
+});
+
+it("shows no GPU tile on a PC without GPU counters", () => {
+  renderBoard(boardEvent({ mcps: [], system: systemFixture({ gpu: null }) }));
+  const panel = screen.getByRole("region", { name: copy.board.system.title });
+  expect(within(panel).queryByRole("heading", { name: copy.board.system.gpu })).toBeNull();
+  expect(within(panel).getAllByRole("listitem").filter((li) => li.parentElement === panel.querySelector(".sys-grid"))).toHaveLength(4);
+});
+
+it("shows the GPU as a ring with its trend, its memory as a bar and a tip, in the CPU's load hues", async () => {
+  const gpu = { percent: 91.2, memory: { used: 1536 * 2 ** 20, total: 2 * 2 ** 30, percent: 75 } };
+  const store = renderBoard(boardEvent({ mcps: [], system: systemFixture({ gpu, history: { cpu: [10, 42.5], memory: [87, 87.5], gpu: [60, 91.2] } }) }));
+  const panel = screen.getByRole("region", { name: copy.board.system.title });
+  const tile = within(panel).getByRole("heading", { name: copy.board.system.gpu }).closest("li")!;
+  expect(tile).toHaveAttribute("data-tone", "FAILED"); // over 90 %, like the CPU
+  expect(tile).toHaveAttribute("data-accent", "gpu");
+  expect(within(tile).getByRole("img", { name: copy.board.system.gaugeLabel("GPU", 91) })).toBeInTheDocument();
+  expect(within(tile).getByRole("img", { name: (n) => n.startsWith(copy.board.system.trendLabel("GPU")) })).toBeInTheDocument();
+  const meter = within(tile).getByRole("meter", { name: copy.board.system.gpuMemory });
+  expect(meter).toHaveAttribute("aria-valuenow", "75");
+  expect(meter).toHaveAttribute("data-state", "HEALTHY"); // memory thresholds: 80 / 90
+  expect(within(tile).getByText(copy.board.system.gpuMemoryUsed("1.5GB", "2.0GB"))).toBeInTheDocument();
+  await userEvent.click(within(tile).getByRole("button", { name: copy.help.label(copy.board.system.gpu) }));
+  expect(await screen.findByRole("tooltip")).toHaveTextContent(copy.help.gpu);
+  // a size the server does not know: what is in use, no bar
+  act(() =>
+    store.apply({ event: "system", data: JSON.stringify(systemFixture({ gpu: { percent: 72, memory: { used: 2 ** 30, total: null, percent: null } } })) }),
+  );
+  expect(tile).toHaveAttribute("data-tone", "SUSPECT");
+  expect(within(tile).queryByRole("meter")).toBeNull();
+  expect(within(tile).getByText(copy.board.system.gpuMemoryOnly("1.0GB"))).toBeInTheDocument();
+});
+
+it("says the resources have not arrived yet", () => {
+  renderBoard(boardEvent({ mcps: [] }));
+  expect(within(screen.getByRole("region", { name: copy.board.system.title })).getByText(copy.board.system.waiting)).toBeInTheDocument();
 });
 
 it("never renders host, port or owner", () => {
@@ -131,6 +207,24 @@ it("anonymous visitors get the channel badge and a login link back to the board"
   renderBoard(boardEvent({ mcps: [] }), meFixture(null, "external"));
   expect(screen.getByText(copy.channel.external)).toBeInTheDocument();
   expect(screen.getByRole("link", { name: copy.common.login })).toHaveAttribute("href", "/admin/login?redirect=/");
+});
+
+it("the Local board (the app window's home) leads to the admin screen in one click", () => {
+  renderBoard(boardEvent({ mcps: [] }), meFixture(null, "local"));
+  const banner = screen.getByRole("banner");
+  // signed out: through the login page, which comes back to the admin screen
+  expect(within(banner).getByRole("link", { name: copy.common.adminHome })).toHaveAttribute("href", "/admin/login?redirect=/admin");
+  expect(within(banner).getByRole("link", { name: copy.common.login })).toHaveAttribute("href", "/admin/login?redirect=/");
+});
+
+it("signed in on the Local board, the admin button goes straight to the admin screen", () => {
+  renderBoard(boardEvent({ mcps: [] }), meFixture("developer", "local", 4));
+  expect(within(screen.getByRole("banner")).getByRole("link", { name: copy.common.adminHome })).toHaveAttribute("href", "/admin");
+});
+
+it.each([null, "admin"] as const)("the External board has no admin button (role %s: login link, then the account menu)", (role) => {
+  renderBoard(boardEvent({ mcps: [] }), meFixture(role, "external"));
+  expect(screen.queryByRole("link", { name: copy.common.adminHome })).toBeNull();
 });
 
 it("the account menu shows who is logged in and links to the admin", async () => {

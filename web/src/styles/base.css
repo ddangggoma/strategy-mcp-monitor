@@ -25,6 +25,9 @@
   :root[data-theme="dark"] {
     color-scheme: dark;
   }
+  :root[data-theme="system"] {
+    color-scheme: light dark;
+  }
 
   html {
     font-family: var(--font-sans);
@@ -170,6 +173,86 @@
   @keyframes topbar-shadow {
     to {
       opacity: 1;
+    }
+  }
+}
+
+/* ── Entrances: shown once when an element first appears (transform/opacity/clip only).
+      `backwards` fill, never `both`: after the entrance nothing is left holding a transform,
+      so Motion's layout glide on the board cards keeps working. ── */
+@layer components {
+  /* panels rise into place one after another; --rise-i is the panel's place in the sequence */
+  [data-anim="rise"] {
+    animation: rise-in 520ms var(--ease-out) backwards;
+    animation-delay: calc(var(--rise-i, 0) * 70ms);
+  }
+
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      translate: 0 0.75rem;
+      scale: 0.985;
+    }
+  }
+
+  /* RollingNumber: a digit column that first appears rolls up from 0 to its own digit (a keyframe
+     with no end runs to the inline transform) */
+  .digit-roll {
+    animation: digit-roll 900ms var(--ease-out) backwards;
+  }
+
+  @keyframes digit-roll {
+    from {
+      transform: translateY(0);
+    }
+  }
+
+  /* Skeleton: a soft band of light sweeps across a placeholder while it loads (translate of a
+     pseudo-element, so compositing only). The placeholder's own fill stays for reduced motion. */
+  .skeleton {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: linear-gradient(
+      100deg,
+      transparent 20%,
+      color-mix(in oklch, var(--color-fg) 7%, transparent) 50%,
+      transparent 80%
+    );
+    translate: -100% 0;
+    animation: skeleton-sweep 1.6s var(--ease-in-out) infinite;
+  }
+
+  @keyframes skeleton-sweep {
+    to {
+      translate: 100% 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton::after {
+      animation: none;
+      opacity: 0;
+    }
+  }
+
+  /* sparklines draw in from the left */
+  .spark-draw {
+    animation: spark-draw 900ms var(--ease-out) backwards;
+    animation-delay: 120ms;
+  }
+
+  @keyframes spark-draw {
+    from {
+      clip-path: inset(0 100% 0 0);
+    }
+    to {
+      clip-path: inset(0 0 0 0);
     }
   }
 }

@@ -1,5 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
-import { DEV_OTP_CODE, MCP_NAME, UI_USERS, copy, expect, tabTo, test } from "./fixtures";
+import { DEV_OTP_CODE, MCP_NAME, THEMES, UI_USERS, copy, expect, expectTheme, settled, tabTo, test, useTheme } from "./fixtures";
 
 const PAGES = [
   "/",
@@ -25,14 +25,20 @@ const PAGES = [
 // layouts (icon rail, wrapped filters, sideways table scroll) get the same checks
 const WINDOWS = [null, { width: 640, height: 600 }] as const;
 
-for (const [size, path] of WINDOWS.flatMap((w) => PAGES.map((p) => [w, p] as const))) {
-  test(`axe ${path}${size ? ` at ${size.width}x${size.height}` : ""}`, async ({ page, state, loginAs }) => {
+// and both themes: light (the default) and dark (the saved choice), each with its own contrast
+const CASES = THEMES.flatMap((theme) => WINDOWS.flatMap((w) => PAGES.map((p) => [theme, w, p] as const)));
+
+for (const [theme, size, path] of CASES) {
+  test(`axe ${path}${size ? ` at ${size.width}x${size.height}` : ""} (${theme})`, async ({ page, state, loginAs }) => {
+    await useTheme(page, theme);
     if (size) await page.setViewportSize(size);
     if (path !== "/" && path !== "/admin/login") await loginAs(page, "admin", "local");
     await page.goto(`${state.localUrl}${path.replace("{id}", String(state.mcpId))}`);
     // analyse the loaded page, not its skeleton
     await expect(page.locator("[role='status'] .sr-only", { hasText: copy.common.loading })).toHaveCount(0);
     await expect(page.locator("h1, [role='dialog'] h2").first()).toBeVisible();
+    await expectTheme(page, theme);
+    await settled(page); // the board's panels rise in: contrast is read once they are opaque
     const r = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
     expect(r.violations.map((v) => `${v.id}: ${v.nodes.length} (${v.nodes.map((n) => n.target.join(" ")).join(", ")})`)).toEqual([]);
   });
@@ -100,3 +106,17 @@ test("an unknown admin address keeps the shell and says how to get back", async 
   await main.getByRole("link", { name: copy.common.adminHome }).click();
   await expect(page).toHaveURL(`${state.localUrl}/admin`);
 });
+
+for (const theme of THEMES) {
+  test(`axe: the notice editor's full-screen preview, open (${theme})`, async ({ page, state, loginAs }) => {
+    await useTheme(page, theme);
+    await loginAs(page, "admin", "local");
+    await page.goto(`${state.localUrl}/admin/notice`);
+    await page.getByRole("button", { name: copy.notice.fullPreview }).click();
+    await expect(page.getByRole("dialog", { name: copy.notice.fullPreview }).getByRole("heading", { level: 2 })).toBeVisible();
+    await expectTheme(page, theme);
+    await settled(page);
+    const r = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
+    expect(r.violations.map((v) => `${v.id}: ${v.nodes.length} (${v.nodes.map((n) => n.target.join(" ")).join(", ")})`)).toEqual([]);
+  });
+}

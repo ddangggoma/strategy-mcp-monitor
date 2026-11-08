@@ -1,7 +1,7 @@
 // Board state fed by SSE events. Immutable updates (new Maps per change) so useSyncExternalStore
 // re-renders only when something changed; anything unparseable leaves the snapshot as it was.
 import { useSyncExternalStore } from "react";
-import type { ActionEvent, BoardItem, McpState, RdpSession, TamperEvent } from "./api-types";
+import type { ActionEvent, BoardItem, McpState, RdpSession, SystemStatus, TamperEvent } from "./api-types";
 import type { StreamStatus } from "./board-stream";
 import type { SseEvent } from "./sse";
 
@@ -9,6 +9,8 @@ export interface BoardState {
   now: string | null;
   items: ReadonlyMap<number, BoardItem>;
   sessions: RdpSession[] | undefined;
+  /** This PC's resources; undefined until the first reading arrives. */
+  system: SystemStatus | undefined;
   status: StreamStatus;
   receivedAt: ReadonlyMap<number, number> /* performance.now() at item receipt */;
 }
@@ -48,11 +50,16 @@ function isItem(v: unknown): v is BoardItem {
   return isObject(v) && typeof v.id === "number";
 }
 
+function isSystem(v: unknown): v is SystemStatus {
+  return isObject(v) && isObject(v.cpu) && isObject(v.memory) && Array.isArray(v.disks) && isObject(v.history);
+}
+
 export class BoardStore {
   private state: BoardState = {
     now: null,
     items: new Map(),
     sessions: undefined,
+    system: undefined,
     status: "connecting",
     receivedAt: new Map(),
   };
@@ -120,7 +127,13 @@ export class BoardStore {
           receivedAt.set(it.id, at);
         }
         const sessions = Array.isArray(data.sessions) ? (data.sessions as RdpSession[]) : this.state.sessions;
-        this.set({ ...this.state, now: typeof data.now === "string" ? data.now : this.state.now, items, sessions, receivedAt });
+        const system = isSystem(data.system) ? data.system : this.state.system;
+        this.set({ ...this.state, now: typeof data.now === "string" ? data.now : this.state.now, items, sessions, system, receivedAt });
+        return;
+      }
+      case "system": {
+        if (!isSystem(data)) return;
+        this.set({ ...this.state, system: data });
         return;
       }
       case "mcp": {

@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import errno
 import logging
+import os
 import signal
 import socket
 import sys
@@ -24,6 +25,26 @@ if TYPE_CHECKING:
     from app.winsvc.start_type import ServiceConfigurator
 
 
+def ensure_std_streams() -> None:
+    """Point a missing sys.stdout/sys.stderr at the null device.
+
+    A Windows service (and a windowed frozen exe) has no console, so both are None; uvicorn's
+    logging and any print() would then fail. Existing streams are left alone.
+    """
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115 - lives for the process
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115 - lives for the process
+
+
+def _stdout_is_tty() -> bool:
+    stream = sys.stdout
+    try:
+        return stream is not None and stream.isatty()
+    except (AttributeError, ValueError, OSError):
+        return False
+
+
 def server_configs(
     local_app: FastAPI,
     external_app: FastAPI,
@@ -33,7 +54,14 @@ def server_configs(
 ) -> list[uvicorn.Config]:
     # proxy_headers=False: no reverse proxy by design, so X-Forwarded-For must never
     # override request.client.host (audit ip, OTP per-IP limit).
-    common: dict[str, Any] = {"log_level": "info", "proxy_headers": False, "timeout_graceful_shutdown": 10}
+    # use_colors is decided here: uvicorn would otherwise call sys.stdout.isatty(), which
+    # raises when there is no console (Windows service).
+    common: dict[str, Any] = {
+        "log_level": "info",
+        "proxy_headers": False,
+        "timeout_graceful_shutdown": 10,
+        "use_colors": _stdout_is_tty(),
+    }
     return [
         uvicorn.Config(local_app, host="127.0.0.1", port=local_port, **common),
         uvicorn.Config(external_app, host=external_host, port=external_port, **common),
@@ -345,6 +373,7 @@ async def _serve_started(
     collectors, servers."""
     await services.monitor.start()
     try:
+        await services.system.start()
         await services.collectors.start()
         shutdown: ShutdownSequence | None = None
         try:
@@ -389,5 +418,6 @@ async def _serve_started(
             finally:
                 await services.collectors.stop()  # a no-op after the sequence stopped them
     finally:
+        await services.system.stop()
         await services.monitor.stop(kill_abandoned=kill_scripts_on_stop)
         await services.log.flush()  # monitor.stop{killed} before the retention and index stops

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test as base, expect, type APIRequestContext, type APIResponse, type Locator, type Page } from "@playwright/test";
 import { copy } from "../src/copy/ko";
+import { THEME_STORAGE_KEY } from "../src/lib/theme";
 import {
   AUTH_DIR,
   DEV_OTP_CODE,
@@ -99,10 +100,58 @@ export async function tabTo(page: Page, target: Locator, { max = 60, back = fals
   throw new Error(`could not reach ${String(target)} with Tab`);
 }
 
+/** The two themes a page can show: light is the default (nothing saved), dark is the saved choice. */
+export const THEMES = ["light", "dark"] as const;
+export type Theme = (typeof THEMES)[number];
+
+/**
+ * Opens every later page of `page` in `theme`: dark is saved in the theme menu's storage before the
+ * app runs (what picking "다크" does), light is the default and needs nothing. Call before goto.
+ */
+export async function useTheme(page: Page, theme: Theme): Promise<void> {
+  if (theme === "light") return;
+  await page.addInitScript(
+    ({ key, value }) => {
+      try {
+        localStorage.setItem(key, value);
+      } catch {
+        // about:blank has no storage; the app's pages do
+      }
+    },
+    { key: THEME_STORAGE_KEY, value: theme },
+  );
+}
+
+/** The page shows `theme` (a check that the theme was not silently left at the default). */
+export async function expectTheme(page: Page, theme: Theme): Promise<void> {
+  await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+}
+
+/**
+ * Waits until no finite animation is running (panels rising in, digits rolling, bars filling):
+ * axe blends a fading element's opacity into its contrast, so it must read the page at rest.
+ * Endless ones (the live pulse) and scroll-driven ones (the top bar's shadow, which never "finishes"
+ * on the time axis) are left alone; a round that starts new ones (a late SSE reading) is waited out too.
+ */
+export async function settled(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    for (let round = 0; round < 10; round += 1) {
+      const running = document
+        .getAnimations()
+        .filter(
+          (a) => a.timeline === document.timeline && a.playState === "running" && a.effect?.getComputedTiming().endTime !== Infinity,
+        );
+      if (running.length === 0) return;
+      await Promise.all(running.map((a) => a.finished.catch(() => undefined)));
+    }
+  });
+}
+
 export interface AdminApi {
   get(path: string): Promise<APIResponse>;
   post(path: string, data?: unknown): Promise<APIResponse>;
   put(path: string, data: unknown): Promise<APIResponse>;
+  delete(path: string): Promise<APIResponse>;
 }
 
 /** Calls the Local API as `who` with the session and CSRF token globalSetup saved (no login). */
@@ -113,5 +162,6 @@ export async function adminApi(request: APIRequestContext, s: BackendState, who:
     get: (path) => request.get(`${s.localUrl}${path}`, { headers }),
     post: (path, data) => request.post(`${s.localUrl}${path}`, { headers, data }),
     put: (path, data) => request.put(`${s.localUrl}${path}`, { headers, data }),
+    delete: (path) => request.delete(`${s.localUrl}${path}`, { headers }),
   };
 }

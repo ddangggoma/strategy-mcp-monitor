@@ -64,7 +64,38 @@ pub fn create_shortcut(
         let file: IPersistFile = link.cast().map_err(fail)?;
         file.Save(&HSTRING::from(lnk), true).map_err(fail)?;
     }
+    refresh_shell_icons(&[lnk, target]);
     Ok(())
+}
+
+/// Tells the shell that `paths` changed and that cached icons are stale, so the start menu and
+/// taskbar draw the new exe's icon instead of the one cached for that path by an older build.
+fn refresh_shell_icons(paths: &[&Path]) {
+    use windows::Win32::UI::Shell::{
+        SHCNE_ASSOCCHANGED, SHCNE_UPDATEITEM, SHCNF_FLUSHNOWAIT, SHCNF_IDLIST, SHCNF_PATHW,
+        SHChangeNotify,
+    };
+    for path in paths {
+        let wide = HSTRING::from(*path);
+        // SAFETY: a NUL-terminated path that outlives the call.
+        unsafe {
+            SHChangeNotify(
+                SHCNE_UPDATEITEM,
+                SHCNF_PATHW | SHCNF_FLUSHNOWAIT,
+                Some(wide.as_ptr().cast()),
+                None,
+            )
+        };
+    }
+    // SAFETY: no item pointers.
+    unsafe {
+        SHChangeNotify(
+            SHCNE_ASSOCCHANGED,
+            SHCNF_IDLIST | SHCNF_FLUSHNOWAIT,
+            None,
+            None,
+        )
+    };
 }
 
 /// The target and description of `lnk` (tests and diagnosis).

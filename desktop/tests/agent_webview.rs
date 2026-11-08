@@ -118,11 +118,17 @@ fn webview_notice_is_topmost_ignores_wm_close_and_closes_on_command() {
     let hwnd = wait_for(30, || notice_window(agent.id()));
     let ex = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32;
     assert!(ex & WS_EX_TOPMOST.0 != 0, "not top-most");
-    let state = unsafe { GetMenuState(GetSystemMenu(hwnd, false), SC_CLOSE, MF_BYCOMMAND) };
-    assert!(
-        state & (MF_GRAYED.0 | MF_DISABLED.0) != 0,
-        "close is enabled"
-    );
+    // The window can be found before the agent greys its close item (that runs on the main
+    // thread right after creation, and again on every top-most tick), so give it a few ticks.
+    let close_greyed = || {
+        let state = unsafe { GetMenuState(GetSystemMenu(hwnd, false), SC_CLOSE, MF_BYCOMMAND) };
+        state & (MF_GRAYED.0 | MF_DISABLED.0) != 0
+    };
+    let until = Instant::now() + Duration::from_secs(5);
+    while !close_greyed() && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(close_greyed(), "close is enabled");
     // Review item 12: the window the builder made, not the spec constant. A title bar (it can be
     // moved), no minimise or maximise button, no sizing border; 640×600 logical px inside.
     let style = unsafe { GetWindowLongPtrW(hwnd, GWL_STYLE) } as u32;

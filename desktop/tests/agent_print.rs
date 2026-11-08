@@ -63,7 +63,7 @@ fn the_print_agent_shows_closes_and_exits_ignoring_proxy_settings() {
         .unwrap();
     assert_eq!(
         (hello.body["pid"].as_u64(), hello.body["version"].as_str()),
-        (Some(pid as u64), Some("1.1.0"))
+        (Some(pid as u64), Some("1.0.0"))
     );
     // Beyond the plan: every request carried the token, and nothing was printed with it.
     assert!(srv.requests().iter().all(|r| r.token == "tok"));

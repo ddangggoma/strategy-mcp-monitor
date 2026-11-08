@@ -1,1 +1,29 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="#1f2937"/><path d="M6 17h5l3-8 4 14 3-6h5" fill="none" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bgE" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#11665a"/><stop offset=".5" stop-color="#0c3b3c"/><stop offset="1" stop-color="#07191f"/>
+    </linearGradient>
+    <radialGradient id="glowE" cx=".5" cy=".28" r=".5">
+      <stop offset="0" stop-color="#ffd166" stop-opacity=".22"/><stop offset="1" stop-color="#ffd166" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="head" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#cfdfe6"/>
+    </linearGradient>
+    <linearGradient id="visor" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0d2a30"/><stop offset="1" stop-color="#04100f"/>
+    </linearGradient>
+    <linearGradient id="pin" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe08a"/><stop offset="1" stop-color="#d99a1e"/>
+    </linearGradient>
+    <linearGradient id="spark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fff2c2"/><stop offset=".5" stop-color="#ffcc4d"/><stop offset="1" stop-color="#f59f0b"/>
+    </linearGradient>
+  </defs>
+  <path d="M252 128L252 153.4L251.9 162.4L251.8 169L251.7 174.5L251.5 179.2L251.3 183.4L251.1 187.2L250.8 190.6L250.5 193.9L250.1 196.9L249.8 199.7L249.3 202.4L248.9 205L248.3 207.4L247.8 209.7L247.2 211.9L246.6 214L245.9 216L245.2 217.9L244.5 219.7L243.7 221.5L242.9 223.2L242 224.8L241.1 226.4L240.1 227.9L239.1 229.4L238.1 230.8L237 232.1L235.8 233.4L234.7 234.7L233.4 235.8L232.1 237L230.8 238.1L229.4 239.1L227.9 240.1L226.4 241.1L224.8 242L223.2 242.9L221.5 243.7L219.7 244.5L217.9 245.2L216 245.9L214 246.6L211.9 247.2L209.7 247.8L207.4 248.3L205 248.9L202.4 249.3L199.7 249.8L196.9 250.1L193.9 250.5L190.6 250.8L187.2 251.1L183.4 251.3L179.2 251.5L174.5 251.7L169 251.8L162.4 251.9L153.4 252L128 252L102.6 252L93.6 251.9L87 251.8L81.5 251.7L76.8 251.5L72.6 251.3L68.8 251.1L65.4 250.8L62.1 250.5L59.1 250.1L56.3 249.8L53.6 249.3L51 248.9L48.6 248.3L46.3 247.8L44.1 247.2L42 246.6L40 245.9L38.1 245.2L36.3 244.5L34.5 243.7L32.8 242.9L31.2 242L29.6 241.1L28.1 240.1L26.6 239.1L25.2 238.1L23.9 237L22.6 235.8L21.3 234.7L20.2 233.4L19 232.1L17.9 230.8L16.9 229.4L15.9 227.9L14.9 226.4L14 224.8L13.1 223.2L12.3 221.5L11.5 219.7L10.8 217.9L10.1 216L9.4 214L8.8 211.9L8.2 209.7L7.7 207.4L7.1 205L6.7 202.4L6.2 199.7L5.9 196.9L5.5 193.9L5.2 190.6L4.9 187.2L4.7 183.4L4.5 179.2L4.3 174.5L4.2 169L4.1 162.4L4 153.4L4 128L4 102.6L4.1 93.6L4.2 87L4.3 81.5L4.5 76.8L4.7 72.6L4.9 68.8L5.2 65.4L5.5 62.1L5.9 59.1L6.2 56.3L6.7 53.6L7.1 51L7.7 48.6L8.2 46.3L8.8 44.1L9.4 42L10.1 40L10.8 38.1L11.5 36.3L12.3 34.5L13.1 32.8L14 31.2L14.9 29.6L15.9 28.1L16.9 26.6L17.9 25.2L19 23.9L20.2 22.6L21.3 21.3L22.6 20.2L23.9 19L25.2 17.9L26.6 16.9L28.1 15.9L29.6 14.9L31.2 14L32.8 13.1L34.5 12.3L36.3 11.5L38.1 10.8L40 10.1L42 9.4L44.1 8.8L46.3 8.2L48.6 7.7L51 7.1L53.6 6.7L56.3 6.2L59.1 5.9L62.1 5.5L65.4 5.2L68.8 4.9L72.6 4.7L76.8 4.5L81.5 4.3L87 4.2L93.6 4.1L102.6 4L128 4L153.4 4L162.4 4.1L169 4.2L174.5 4.3L179.2 4.5L183.4 4.7L187.2 4.9L190.6 5.2L193.9 5.5L196.9 5.9L199.7 6.2L202.4 6.7L205 7.1L207.4 7.7L209.7 8.2L211.9 8.8L214 9.4L216 10.1L217.9 10.8L219.7 11.5L221.5 12.3L223.2 13.1L224.8 14L226.4 14.9L227.9 15.9L229.4 16.9L230.8 17.9L232.1 19L233.4 20.2L234.7 21.3L235.8 22.6L237 23.9L238.1 25.2L239.1 26.6L240.1 28.1L241.1 29.6L242 31.2L242.9 32.8L243.7 34.5L244.5 36.3L245.2 38.1L245.9 40L246.6 42L247.2 44.1L247.8 46.3L248.3 48.6L248.9 51L249.3 53.6L249.8 56.3L250.1 59.1L250.5 62.1L250.8 65.4L251.1 68.8L251.3 72.6L251.5 76.8L251.7 81.5L251.8 87L251.9 93.6L252 102.6Z" fill="url(#bgE)" stroke="#2f8f80" stroke-width="8"/>
+  <!-- Concept E small: white bot head, dark visor with green pulse, amber sparkle. -->
+  <title>MCP Monitor</title>
+  <path d="M128 8C131.8 33.2 138.8 40.2 164 44C138.8 47.8 131.8 54.8 128 80C124.2 54.8 117.2 47.8 92 44C117.2 40.2 124.2 33.2 128 8Z" fill="#ffcc4d"/>
+  <rect x="34" y="86" width="188" height="140" rx="50" fill="#fff"/>
+  <rect x="56" y="112" width="144" height="84" rx="36" fill="#05130f"/>
+  <path d="M76 160L102 160L124 128L148 170L164 150L182 150" fill="none" stroke="#5bcc80" stroke-width="18" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

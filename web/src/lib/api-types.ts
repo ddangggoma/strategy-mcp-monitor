@@ -28,6 +28,10 @@ export interface Me {
 export interface BoardItem {
   id: number;
   name: string;
+  /** One emoji (lib/mcp-emoji.ts); null = the default MCP icon. */
+  icon: string | null;
+  /** The uploaded logo: a relative URL with its version (`/api/mcps/{id}/icon-image?v=…`); drawn instead of `icon` when set. */
+  icon_image: string | null;
   state: McpState;
   issue: Issue | null;
   latency_ms: number | null;
@@ -67,9 +71,40 @@ export interface RdpSession {
   first_seen_ip: boolean;
   first_seen_device: boolean;
 }
+/** This PC's resources (server app/monitor/system.py): board snapshot `system`, SSE `system` event. */
+export interface SystemStatus {
+  at: string;
+  /** Seconds between readings (the history's step). */
+  interval_sec: number;
+  cpu: { percent: number; cores: number };
+  /** Bytes; `used` is total minus available (Task Manager's "사용 중"). */
+  memory: { total: number; used: number; percent: number };
+  /** Local fixed drives ("C:"), bytes. */
+  disks: { name: string; total: number; used: number; percent: number }[];
+  /** Bytes per second since the previous reading; null on the first one. */
+  network: { sent_bps: number; recv_bps: number } | null;
+  boot_at: string;
+  /**
+   * The GPU (server app/monitor/gpu.py): the busiest engine of the busiest hardware adapter, as Task
+   * Manager shows it, and the dedicated memory in use (`total`/`percent` only when the server knows
+   * the adapters' size). null or absent on a PC without GPU counters: the panel has no GPU tile.
+   */
+  gpu?: GpuStatus | null;
+  /** Percent per reading, oldest first (`gpu` empty or absent without a GPU). */
+  history: { cpu: number[]; memory: number[]; gpu?: number[] };
+}
+
+export interface GpuStatus {
+  percent: number;
+  /** Bytes of dedicated (on-board) memory; null without the memory counters. */
+  memory: { used: number; total: number | null; percent: number | null } | null;
+}
+
 export interface Board {
   now: string;
   mcps: BoardItem[];
+  /** Absent until the server has read the PC's resources once. */
+  system?: SystemStatus;
   sessions?: RdpSession[];
 }
 
@@ -174,10 +209,14 @@ export interface McpConfig {
   autostart_on_boot: boolean;
   maintenance: boolean;
   script_timeout_sec: number;
+  /** One emoji (lib/mcp-emoji.ts); null = the default MCP icon. */
+  icon: string | null;
 }
 export interface McpDetail extends McpConfig {
   id: number;
   config_error: boolean;
+  /** The uploaded logo URL, or null. Not a config field: PUT / DELETE /api/mcps/{id}/icon-image change it. */
+  icon_image: string | null;
   owner: UserSummary | null;
   created_at: string;
   live: BoardItem | null;

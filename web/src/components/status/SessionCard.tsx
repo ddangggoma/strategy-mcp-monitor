@@ -1,5 +1,6 @@
 import { GlobeIcon, MonitorIcon, TriangleAlertIcon, type LucideIcon } from "lucide-react";
 import { useId, type ReactNode } from "react";
+import { InfoTip, type HelpContent } from "@/components/app/InfoTip";
 import { copy } from "@/copy/ko";
 import type { RdpSession } from "@/lib/api-types";
 import { useClock } from "@/lib/clock";
@@ -9,10 +10,13 @@ import { cn } from "@/lib/utils";
 const DASH = "—";
 const f = copy.sessions.fields;
 
-function Field({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
+function Field({ label, tip, children, className }: { label: string; tip?: HelpContent; children: ReactNode; className?: string }) {
   return (
     <div className={cn("min-w-0", className)}>
-      <dt className="text-xs text-fg-muted">{label}</dt>
+      <dt className={cn("text-xs text-fg-muted", tip && "flex items-center gap-0.5")}>
+        {label}
+        {tip ? <InfoTip label={label} content={tip} /> : null}
+      </dt>
       <dd className="truncate">{children}</dd>
     </div>
   );
@@ -98,7 +102,7 @@ export function SessionCard({ session, className }: { session: RdpSession; class
         <Field label={f.clientIp}>
           <span className="font-mono">{or(session.client_ip)}</span>
         </Field>
-        <Field label={f.reverseDns}>
+        <Field label={f.reverseDns} tip={copy.help.session.reverseDns}>
           <span className={session.reverse_dns ? "font-mono" : undefined}>{or(session.reverse_dns)}</span>
         </Field>
         <Field label={f.connectedAt}>
@@ -109,8 +113,8 @@ export function SessionCard({ session, className }: { session: RdpSession; class
             {formatSeconds(elapsed)}
           </span>
         </Field>
-        <Field label={f.state}>{copy.sessions.state[session.state]}</Field>
-        <Field label={f.idle}>
+        <Field label={f.state} tip={copy.help.session.state}>{copy.sessions.state[session.state]}</Field>
+        <Field label={f.idle} tip={copy.help.session.idle}>
           <span data-testid="session-idle" data-volatile="" data-numeric="">
             {formatIdle(session.idle_sec)}
           </span>
@@ -118,7 +122,7 @@ export function SessionCard({ session, className }: { session: RdpSession; class
         <Field label={f.resolution}>
           <span data-testid="session-resolution">{formatResolution(session.resolution)}</span>
         </Field>
-        <Field label={f.notice}>
+        <Field label={f.notice} tip={copy.help.session.notice}>
           <Notice ack={session.notice_acknowledged} />
         </Field>
       </dl>

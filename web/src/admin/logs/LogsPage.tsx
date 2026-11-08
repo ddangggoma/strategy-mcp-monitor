@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { InfoTip } from "@/components/app/InfoTip";
 import { copy } from "@/copy/ko";
 import type { LogQuery } from "@/lib/api-types";
 import { denyReason } from "@/lib/permissions";
@@ -95,13 +96,16 @@ export function LogsPage() {
           <IndexBanner />
           <FilterBar search={search} query={query} onChange={go} onQuickRange={onQuickRange} />
           <HistogramPanel query={query} buckets={buckets} onSelect={(from, to) => go({ from, to, range: undefined })} />
-          <ToggleGroup label={copy.logs.viewLabel}>
-            {(["table", "timeline"] as const).map((v) => (
-              <Toggle key={v} ref={v === "table" ? tableToggle : undefined} pressed={view === v} onClick={() => go({ view: v })}>
-                {copy.logs.view[v]}
-              </Toggle>
-            ))}
-          </ToggleGroup>
+          <div className="flex items-center gap-1">
+            <ToggleGroup label={copy.logs.viewLabel}>
+              {(["table", "timeline"] as const).map((v) => (
+                <Toggle key={v} ref={v === "table" ? tableToggle : undefined} pressed={view === v} onClick={() => go({ view: v })}>
+                  {copy.logs.view[v]}
+                </Toggle>
+              ))}
+            </ToggleGroup>
+            <InfoTip label={copy.logs.viewLabel} content={copy.help.logs.view} align="start" />
+          </div>
           {view === "timeline" ? (
             <UserTimeline
               query={query}

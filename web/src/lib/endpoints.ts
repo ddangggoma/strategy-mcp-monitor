@@ -3,25 +3,13 @@
 import { api, apiUrl } from "./api";
 import type {
   ActionDetail, AdminUser, AuditQuery, Board, CollectorStatus, CurrentSession, LogHistogram, LogIndexStatus, LogPage, LogQuery,
-  LogUserCount, McpActivity, McpConfig, McpCreate, McpDetail, McpHistory, Me, Notice, NoticeContent, NoticeVersionSummary,
+  LogUserCount, McpActivity, McpConfig, McpCreate, McpDetail, McpHistory, Notice, NoticeContent, NoticeVersionSummary,
   RetentionPreview, ScriptContent, ScriptKind, ScriptListItem, ScriptSummary, ScriptUpload, ScriptVersion, ScriptVersionContent,
-  ServiceStatus, SessionsHistory, SessionUser, Settings, TamperEvent, UserCreate, UserPatch,
+  ServiceStatus, SessionsHistory, Settings, TamperEvent, UserCreate, UserPatch,
 } from "./api-types";
 
-// ---- auth (both channels) ------------------------------------------------------------
-
-export const me = () => api<Me>("/api/auth/me");
-export const otpRequest = (email: string) =>
-  api<Record<string, never>>("/api/auth/otp/request", { method: "POST", body: { email } });
-export const otpVerify = (email: string, code: string) =>
-  api<{ user: SessionUser; csrf_token: string }>("/api/auth/otp/verify", { method: "POST", body: { email, code } });
-export const logout = () => api<void>("/api/auth/logout", { method: "POST" });
-
-// ---- bootstrap (Local) ---------------------------------------------------------------
-
-export const bootstrapStatus = () => api<{ needed: boolean }>("/api/bootstrap");
-export const bootstrap = (b: { email: string; name: string }) =>
-  api<SessionUser>("/api/bootstrap", { method: "POST", body: b });
+// auth (both channels) and bootstrap (Local): their own module, so the board loads only those
+export { bootstrap, bootstrapStatus, logout, me, otpRequest, otpVerify } from "./endpoints-auth";
 
 // ---- board, MCPs (both channels) -----------------------------------------------------
 
@@ -35,6 +23,10 @@ export const mcpActivity = (limit: number) => api<McpActivity>("/api/mcp-activit
 /** Send only the changed fields (U27). */
 export const updateMcp = (id: number, patch: Partial<McpConfig>) =>
   api<McpDetail>(`/api/mcps/${id}`, { method: "PUT", body: patch });
+/** The MCP's logo: the file's bytes with its type (no multipart). Same permission as `updateMcp`. */
+export const putIconImage = (id: number, file: Blob) =>
+  api<McpDetail>(`/api/mcps/${id}/icon-image`, { method: "PUT", blob: file });
+export const deleteIconImage = (id: number) => api<McpDetail>(`/api/mcps/${id}/icon-image`, { method: "DELETE" });
 export const manualAction = (id: number, kind: ScriptKind) =>
   api<{ run_id: string }>(`/api/mcps/${id}/actions/${kind}`, { method: "POST" });
 

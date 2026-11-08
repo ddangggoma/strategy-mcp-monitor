@@ -1,3 +1,5 @@
+<img src="docs/assets/brand/icon.svg" width="96" alt="MCP Monitor 아이콘. 짙은 청록 유리 타일 위의 흰 에이전트 로봇 얼굴로, AI를 뜻하는 금색 반짝이 안테나와 MCP 커넥터 핀 귀가 있고, 화면에는 위로 솟는 초록 실시간 심박이 흐릅니다.">
+
 # 🛰️ MCP Monitor
 
 ![Python 3.15](https://img.shields.io/badge/Python-3.15.2-3776AB?logo=python&logoColor=white)
@@ -19,9 +21,9 @@
 - **누구를 위한 것인가:** MCP 서버를 여러 개 띄워 둔 공용 Windows PC를 운영하는 팀. 원격 데스크톱으로 그 PC에 들어가는 MCP 개발자와 관리자.
 - **왜 필요한가:** "MCP가 죽었는데 아무도 몰랐다", "새벽 3시에 누가 접속해서 뭘 했지?" 이 두 질문에 웹 화면 하나로 답합니다.
 - **무엇을 하나:** MCP 상태 감시·자동 복구 · RDP 세션 수집 · 행동 감사(프로세스·명령·창) · 연결마다 사전 고지 · 로그 조회·보존 · Windows 서비스로 부팅 시 자동 실행.
-- **어떻게 받나:** `mcp-monitor-1.1.0.exe` **파일 하나.** 더블클릭하면 설치되고, 그 뒤로는 시작 메뉴의 앱 창과 트레이 아이콘으로 씁니다. 안에 서버가 통째로 들어 있습니다(마트료시카 방식 🪆).
+- **어떻게 받나:** `mcp-monitor-1.0.0.exe` **파일 하나.** 더블클릭하면 설치되고, 그 뒤로는 시작 메뉴의 앱 창과 트레이 아이콘으로 씁니다. 안에 서버가 통째로 들어 있습니다(마트료시카 방식 🪆).
 
-> 현재 버전 **1.1.0**. 기준 스펙은 [`docs/PLAN.md`](docs/PLAN.md) v0.9, 운영 방법은 [`docs/ops/OPERATIONS.md`](docs/ops/OPERATIONS.md), 데스크톱 앱 설계는 [`docs/design/desktop-app-rust.md`](docs/design/desktop-app-rust.md)입니다.
+> 현재 버전 **1.0.0**. 기준 스펙은 [`docs/PLAN.md`](docs/PLAN.md) v0.9, 운영 방법은 [`docs/ops/OPERATIONS.md`](docs/ops/OPERATIONS.md), 데스크톱 앱 설계는 [`docs/design/desktop-app-rust.md`](docs/design/desktop-app-rust.md)입니다.
 
 ## 📑 목차
 
@@ -66,13 +68,13 @@ uv run python -m app --root "$env:TEMP\mcpmon-dev" --external-host 127.0.0.1 --d
 **TL;DR (운영 PC).** 개발 PC에서 실행 파일 하나를 만들고, 운영 PC에서 그 파일을 더블클릭합니다.
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File install\build-desktop.ps1   # → dist\mcp-monitor-1.1.0.exe (+ .sha256)
+powershell -NoProfile -ExecutionPolicy Bypass -File install\build-desktop.ps1   # → dist\mcp-monitor-1.0.0.exe (+ .sha256)
 ```
 
-1. `dist\mcp-monitor-1.1.0.exe`를 운영 PC로 옮겨 더블클릭 → "지금 설치할까요?" **예** → UAC.
-2. 설치가 끝나면 앱 창이 첫 Admin 만들기 화면(`/admin/setup`)을 엽니다. 서비스는 이미 돌고 있습니다.
+1. `dist\mcp-monitor-1.0.0.exe`를 운영 PC로 옮겨 더블클릭 → "지금 설치할까요?" **예** → UAC.
+2. 설치가 끝나면 앱 창이 상태 보드를 엽니다. 보드의 **초기 설정 시작** 링크(또는 위쪽 **관리 화면** 버튼)로 `/admin/setup`에 갑니다. 서비스는 이미 돌고 있습니다.
 
-명령줄을 좋아한다면 관리자 PowerShell에서 `& .\mcp-monitor-1.1.0.exe install --open-firewall | Write-Output`. 자세한 순서는 [📦 설치와 운영](#-설치와-운영)에 있습니다.
+명령줄을 좋아한다면 관리자 PowerShell에서 `& .\mcp-monitor-1.0.0.exe install --open-firewall | Write-Output`. 자세한 순서는 [📦 설치와 운영](#-설치와-운영)에 있습니다.
 
 ---
 
@@ -91,7 +93,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File install\build-desktop.ps1   
 
 ## ✨ 주요 기능
 
-- 📺 **상태 보드(익명):** 로그인 없이 MCP 상태 배지, 지연 스파크라인, 24시간 가동률, 조치까지 남은 시간, RDP 접속 여부와 접속자 정보(**IP 전체 표시**)를 봅니다. SSE로 변경분만 받습니다.
+- 📺 **상태 보드(익명):** 로그인 없이 MCP 상태 배지, 지연 스파크라인, 24시간 가동률, 조치까지 남은 시간, RDP 접속 여부와 접속자 정보(**IP 전체 표시**)를 봅니다. SSE로 변경분만 받습니다. 위쪽 요약 타일(상태 분포·평균 지연·점검 성공률·평균 가동률)과 **서버 PC 리소스 패널**(CPU·메모리·**GPU**·디스크·네트워크, 지표마다 다른 색)이 붙어 있고, 숫자는 굴러가며 바뀝니다(`prefers-reduced-motion`이면 멈춤).
+- 🏷️ **MCP 아이콘:** MCP마다 **이모지 하나** 또는 **실제 로고 이미지**(PNG·JPEG·WebP·GIF·ICO·SVG, 256 KiB, 16–1024 px)를 붙입니다. 이미지 → 이모지 → 기본 아이콘 순으로 보드·목록·상세·대시보드에 나옵니다. SVG는 스크립트·이벤트 속성·외부 참조를 거절하고, 이미지는 `nosniff` + 샌드박스 CSP로 내보냅니다.
+- 💡 **도움말 툴팁:** 뜻이 바로 안 보이는 라벨·필드·상태 옆에 ⓘ 툴팁(약 65곳, [목록](docs/design/help-tips.md)). 키보드 포커스로도 열립니다.
 - 🩺 **MCP 감시·자동 조치:** 프로브 `mcp_ping`/`tcp`/`icmp`와 포트 점유 프로세스 검사. `HEALTHY → SUSPECT → ACTION → RECOVERING`, 한도를 넘기면 `FAILED`, 수동 종료는 `MAINTENANCE`. 프로세스가 없으면 start, 응답이 없으면 restart.
 - 📜 **스크립트:** `start`·`stop`(필수)과 `restart`(선택), `.ps1`/`.bat`/`.cmd`. 항상 자식 프로세스로 돌리고 **120초 타임아웃**, 결과 `ok`/`failed`/`timeout`/`error`, 출력 각 1 MB, 동시 4개, 실행 직전 해시 검사. 편집기(CodeMirror)와 버전 이력·diff·되돌리기.
 - 🔑 **인증·권한:** 이메일 + 6자리 OTP(5분, 1회용). 역할은 **익명 / MCP 개발자 / Admin**. Local·External 두 채널로 기능을 나누고, 모든 판단은 `can(user, action, channel, owner_id)` 하나에서 합니다([권한 매트릭스](docs/PLAN.md#43-권한-매트릭스)).
@@ -100,7 +104,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File install\build-desktop.ps1   
 - 📢 **사전 고지:** RDP **연결될 때마다** 화면 가운데 맨 위에 '확인' 버튼 하나뿐인 WebView2 창. 닫기 단추도, 작업 표시줄 자리도, Alt+F4도 통하지 않습니다(그래도 다른 앱의 입력까지 막지는 않습니다 — Windows가 허락하지 않아서요). 표시·확인을 기록하고, 문구는 Local Admin이 미리보기와 버전 이력으로 편집합니다.
 - 🕵️ **우회 탐지:** 에이전트 종료, 감사 정책 변경, 이벤트 로그 삭제, 감사 레지스트리 변경, 스크립트·로그 파일 변경을 `tamper`로 남기고 대시보드와 실시간 알림에 띄웁니다. 막지는 못하고, 대신 **절대 모른 척하지 않습니다.**
 - 🔎 **로그 조회·감사·보존:** JSONL 원본 + SQLite FTS5 색인. 히스토그램 드래그 필터, 여러 사용자 선택, 키워드, 가상 스크롤 표·사용자 타임라인, CSV·JSONL 내보내기. 조회·내보내기도 감사로 남습니다. 보존 기본 180일, 매일 03:30 KST 정리.
-- 🚀 **배포·서비스:** Rust(Tauri 2)로 만든 `mcp-monitor.exe` 하나가 설치기·업그레이드·제거·앱 창·트레이·세션 에이전트를 모두 맡고, PyInstaller 서버 묶음을 해시째 품고 다닙니다. 앱 및 기능·시작 메뉴에 등록되고, 서비스 시작 유형은 웹 설정이 기준입니다.
+- 🚀 **배포·서비스:** Rust(Tauri 2)로 만든 `mcp-monitor.exe` 하나가 설치기·업그레이드·제거·앱 창·트레이·세션 에이전트를 모두 맡고, PyInstaller 서버 묶음을 해시째 품고 다닙니다. 앱 및 기능·시작 메뉴에 등록되고, 서비스 시작 유형은 웹 설정이 기준입니다. 앱 창은 **상태 보드로 열리고**, 위쪽 단추 하나로 관리 화면과 오갑니다.
+- 👥 **사용자·소유권 관리:** Admin이 사용자 추가·역할 변경·비활성화와 MCP 소유자 이전을 합니다. 활성 Admin이 한 명뿐이면 그 사람의 역할 변경·비활성화는 막고, 화면이 이유와 Admin 수를 알려 줍니다.
 
 ---
 
@@ -136,7 +141,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File install\build-desktop.ps1   
 | `/admin/users`, `/admin/settings`, `/admin/notice` | 사용자 관리, 설정(주기·보존·시작 유형), 고지 문구 | Local Admin |
 | `/notice` | 고지 창 | 세션 에이전트가 연 창만(토큰) |
 
-그 PC에서는 시작 메뉴의 **MCP Monitor**(앱 창)가 Local 채널의 `/admin`을 엽니다. 앱 창은 `127.0.0.1:<Local 포트>` 밖으로 나가지 않고, 다른 주소는 기본 브라우저로 넘깁니다. 창을 닫으면 트레이로 숨고, 서비스는 계속 돕니다.
+그 PC에서는 시작 메뉴의 **MCP Monitor**(앱 창)가 Local 채널의 상태 보드(`/`, 8701의 보드와 같은 화면)를 엽니다. 보드 위쪽의 **관리 화면** 버튼이 `/admin`(로그인 전이면 로그인 화면)으로, 관리 화면 위쪽의 **상태 보드** 버튼이 보드로 돌아갑니다. 앱 창은 `127.0.0.1:<Local 포트>` 밖으로 나가지 않고, 다른 주소는 기본 브라우저로 넘깁니다. 창을 닫으면 트레이로 숨고, 서비스는 계속 돕니다.
 
 권한이 없는 기능은 숨기지 않고 비활성으로 두며 이유를 함께 보여 줍니다. 화면별 명세는 [`docs/design/screens/`](docs/design/screens/)에 있습니다.
 
@@ -308,13 +313,13 @@ strategy-mcp-monitor/
 ├─ server/        # 서비스 백엔드 (FastAPI, 모니터 엔진, 수집기, 로그 저장소) — python -m app
 │  ├─ app/        #   auth, monitor, sessions, activity, collect, logstore, web, win, winsvc, ...
 │  └─ tests/      #   pytest (perf/ 는 100만 건 성능)
-├─ desktop/       # Rust(Tauri 2) mcp-monitor.exe — src/{cli,payload,install,agent,app}, tests/, ui/(연결 중 페이지), icons/
+├─ desktop/       # Rust(Tauri 2) mcp-monitor.exe — src/{cli,payload,install,agent,app}, tests/, ui/(연결 중 페이지), icons/(icon.ico — make-icon.py로 생성)
 ├─ agent/         # Python 세션 에이전트 (개발·테스트용) — python -m mcp_agent
 ├─ web/           # 프런트엔드: board.html · admin.html · notice.html, src/, e2e/, tests/
 ├─ dummy-mcps/    # 시험용 MCP 3종 (seoul_weather, calculator, seoul_clock) + examples/ 조치 스크립트
 ├─ install/       # build.ps1(서버 payload), build-desktop.ps1(릴리스 exe), pyinstaller/
 ├─ .github/       # workflows/desktop.yml — Rust 테스트·릴리스 빌드(Windows 러너)
-├─ docs/          # PLAN.md, ops/, verification/, design/, assets/(구성도 SVG), superpowers/plans/
+├─ docs/          # PLAN.md, ops/, verification/, design/, assets/(구성도 SVG, brand/ 에이전트 펄스 봇 아이콘 원본), superpowers/plans/
 ├─ build/         # (git 제외) PyInstaller 작업 폴더
 └─ dist/          # (git 제외) payload/, mcp-monitor-<버전>.exe, .exe.sha256
 ```
@@ -331,7 +336,7 @@ strategy-mcp-monitor/
 
 전체 절차와 표는 [`docs/ops/OPERATIONS.md`](docs/ops/OPERATIONS.md)가 기준입니다. 여기에는 순서만 적습니다.
 
-> 🪟 **`mcp-monitor.exe`는 창 프로그램(GUI 서브시스템)입니다.** PowerShell에서 결과를 기다리려면 꼭 파이프라인 안에서 부릅니다: `& .\mcp-monitor-1.1.0.exe install --dry-run | Write-Output`, 그다음 `$LASTEXITCODE`. 파이프 없이 부르면 PowerShell은 기다리지 않고 프롬프트를 돌려줍니다(출력도 종료 코드도 놓침).
+> 🪟 **`mcp-monitor.exe`는 창 프로그램(GUI 서브시스템)입니다.** PowerShell에서 결과를 기다리려면 꼭 파이프라인 안에서 부릅니다: `& .\mcp-monitor-1.0.0.exe install --dry-run | Write-Output`, 그다음 `$LASTEXITCODE`. 파이프 없이 부르면 PowerShell은 기다리지 않고 프롬프트를 돌려줍니다(출력도 종료 코드도 놓침).
 
 ### 1. 실행 파일 만들기 (개발 PC)
 
@@ -339,24 +344,24 @@ strategy-mcp-monitor/
 powershell -NoProfile -ExecutionPolicy Bypass -File install\build-desktop.ps1
 ```
 
-- 순서: `install\build.ps1`(`pip-audit`·`pnpm audit` 관문 → `pnpm build` → PyInstaller 서버 → `dist\payload\`) → `cargo audit` → `cargo build --release --locked`(payload를 zstd로 내장, `dev` 기능 없음) → 검사(`--version`, `DependentLoadFlags`가 정확히 `0x800`, VC++ 재배포 패키지 DLL(`vcruntime*`·`msvcp*`·`concrt*`·`vccorlib*`) import 없음(`+crt-static`; Windows 10/11에 들어 있는 유니버설 CRT `api-ms-win-crt-*.dll`은 허용하고 목록만 출력), `verify-payload`로 풀어 내장 서버의 `--version`) → `dist\mcp-monitor-1.1.0.exe` + `.sha256`.
+- 순서: `install\build.ps1`(`pip-audit`·`pnpm audit` 관문 → `pnpm build` → PyInstaller 서버 → `dist\payload\`) → `cargo audit` → `cargo build --release --locked`(payload를 zstd로 내장, `dev` 기능 없음) → 검사(`--version`, `DependentLoadFlags`가 정확히 `0x800`, VC++ 재배포 패키지 DLL(`vcruntime*`·`msvcp*`·`concrt*`·`vccorlib*`) import 없음(`+crt-static`; Windows 10/11에 들어 있는 유니버설 CRT `api-ms-win-crt-*.dll`은 허용하고 목록만 출력), `verify-payload`로 풀어 내장 서버의 `--version`) → `dist\mcp-monitor-1.0.0.exe` + `.sha256`.
 - `RUSTFLAGS`·`CARGO_ENCODED_RUSTFLAGS`·`CARGO_BUILD_RUSTFLAGS`·`CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS`가 설정돼 있으면 시작하지 않습니다(`desktop\.cargo\config.toml`의 `+crt-static`·`/DEPENDENTLOADFLAG:0x800`을 덮어쓰므로). payload 파일 이름에 Windows 장치 이름(`CON`, `NUL`, `AUX`, `COM1` …, 확장자가 붙어도)이 있으면 묶지 않습니다.
 - 매개변수: `-SkipAudit`(경고만 남기고 관문 생략), `-SkipPayload`(이미 만든 `-Payload` 폴더를 그대로), `-Payload <폴더>`, `-Out <폴더>`, `-SignThumbprint <SHA1> -TimestampUrl <url>`(인증서가 있을 때만 서명; 없으면 `NOTE: not signed`). `uv`가 PATH에 없으면 `UV_EXE`에 경로를 줍니다.
 - 🧱 **Smart App Control이 켜진 PC에서는** 새로 빌드한 서명 없는 exe가 그때그때 막힐 수 있습니다(SAC는 파일 해시마다 평판으로 판단). 그래서 Rust 테스트와 릴리스 빌드의 정본은 **GitHub Actions**(`.github/workflows/desktop.yml`)입니다:
-  - `fmt · clippy · test` 잡과 `release build · audit` 잡. 릴리스 잡은 `install\build-desktop.ps1`을 실제 payload로 끝까지 돌리고, 산출물 `mcp-monitor-release-<커밋>`(`mcp-monitor-1.1.0.exe` + `.sha256`, **서명 없음**)을 올립니다.
+  - `fmt · clippy · test` 잡과 `release build · audit` 잡. 릴리스 잡은 `install\build-desktop.ps1`을 실제 payload로 끝까지 돌리고, 산출물 `mcp-monitor-release-<커밋>`(`mcp-monitor-1.0.0.exe` + `.sha256`, **서명 없음**)을 올립니다.
   - 러너의 사용자는 관리자라 "관리자 없이는 아무것도 바꾸지 않음"을 증명하는 테스트가 그대로는 `SKIPPED`로 건너뛰어집니다. 그래서 테스트 잡은 그 테스트들을 **임시 표준 사용자**(Users 그룹만, 무작위 비밀번호는 로그에서 가림, 끝나면 삭제)로 다시 돌리고, 하나라도 실패하거나 `SKIPPED`를 찍으면 실패합니다(`.github/scripts/standard-user-tests.ps1`). 릴리스 잡도 같은 스크립트(`-ReleaseExe`)로 릴리스 exe의 "관리자 없이 install → 종료 코드 1, 폴더 안 만듦"을 임시 표준 사용자로 확인합니다.
   - 워크플로는 데스크톱 테스트와 릴리스 payload가 읽는 모든 입력이 바뀐 push·PR에서 돕니다: `desktop/`, `server/app/`, 서버의 데스크톱·에이전트 테스트와 그 픽스처, `agent/`, `web/`, `install/`, `docs/ops/OPERATIONS.md`, 워크플로와 `.github/scripts/`. 그 밖의 것(다른 문서, `dummy-mcps/`)만 바뀐 커밋을 릴리스할 때는, 그 커밋의 `desktop` 실행이 없으므로 Actions 탭에서 손으로 실행(`workflow_dispatch`)해 그 커밋의 payload로 다시 만듭니다. 릴리스 파일 이름의 버전은 `desktop/Cargo.toml`에서 읽습니다.
 
 ### 2. 설치 (운영 PC)
 
-1. 해시를 확인합니다: `Get-FileHash -Algorithm SHA256 .\mcp-monitor-1.1.0.exe`가 `.sha256`의 값과 같은지.
-2. 서명이 없으니 SAC 상태부터 봅니다: `(Get-MpComputerStatus).SmartAppControlState`. `On`이면 `& .\mcp-monitor-1.1.0.exe --version | Write-Output`이 막히지 않는지 먼저 확인합니다(막히면 OPERATIONS ② 준비 2).
-3. **더블클릭** → "지금 설치할까요?" **예** → UAC → "설치 완료" → 앱 창이 `/admin/setup`을 엽니다. 받은 exe는 지워도 됩니다.
+1. 해시를 확인합니다: `Get-FileHash -Algorithm SHA256 .\mcp-monitor-1.0.0.exe`가 `.sha256`의 값과 같은지.
+2. 서명이 없으니 SAC 상태부터 봅니다: `(Get-MpComputerStatus).SmartAppControlState`. `On`이면 `& .\mcp-monitor-1.0.0.exe --version | Write-Output`이 막히지 않는지 먼저 확인합니다(막히면 OPERATIONS ② 준비 2).
+3. **더블클릭** → "지금 설치할까요?" **예** → UAC → "설치 완료" → 앱 창이 상태 보드를 열고, 보드의 **초기 설정 시작** 링크로 `/admin/setup`에 갑니다. 받은 exe는 지워도 됩니다.
 4. 또는 관리자 PowerShell:
 
    ```powershell
-   & .\mcp-monitor-1.1.0.exe install --dry-run | Write-Output   # 25단계 JSON, 관리자 불필요, 아무것도 바꾸지 않음
-   & .\mcp-monitor-1.1.0.exe install --open-firewall | Write-Output; $LASTEXITCODE
+   & .\mcp-monitor-1.0.0.exe install --dry-run | Write-Output   # 25단계 JSON, 관리자 불필요, 아무것도 바꾸지 않음
+   & .\mcp-monitor-1.0.0.exe install --open-firewall | Write-Output; $LASTEXITCODE
    ```
 
    서비스 `mcp-monitor`(LocalSystem, `delayed-auto`, 실패 시 5/10/60초 뒤 재시작)를 등록·시작하고 `/api/channel`로 준비를 확인합니다. 종료 코드 0 성공, 1 실패(관리자가 아니면 아무것도 바꾸지 않음), 2 인자 오류.
@@ -376,7 +381,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File install\build-desktop.ps1
 | `autostart` | `on` \| `off` | 로그인할 때 트레이 시작(HKCU `Run`) |
 | `agent` | `--server`, `--dialog webview\|print`, `--url-file`, `--unreachable-exit-sec` | 세션 에이전트(서비스가 띄움) |
 | `verify-payload` | `<빈 폴더>` | 내장 서버 묶음을 검사하고 풀기 |
-| `--version` | — | `mcp-monitor 1.1.0 (payload <12 hex>, release)` |
+| `--version` | — | `mcp-monitor 1.0.0 (payload <12 hex>, release)` |
 
 `--interactive`는 관리자가 아니면 같은 exe를 UAC로 다시 실행하고(해석한 옵션만 넘기고, `--dry-run`은 넘기지 않음) 결과를 메시지 상자로 보여 줍니다. 경로 규칙(UNC·subst·정션 거부 등)과 단계표 전체는 OPERATIONS의 ② 설치 절에 있습니다.
 
@@ -396,7 +401,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File install\build-desktop.ps1
 & "C:\Program Files\MCP Monitor\mcp-monitor.exe" uninstall | Write-Output
 ```
 
-- **업그레이드:** 새 버전의 exe를 더블클릭(또는 `install`). 새 폴더를 `<I>.staging`에 풀어 둔 뒤 서비스를 멈추고, 모든 세션의 앱·에이전트를 끝내고, 폴더를 통째로 바꿔 끼웁니다. 데이터·포트·방화벽·첫 설치 때의 감사 정책 백업은 그대로입니다. **낮은 버전으로는 설치하지 않습니다**(같은 버전은 복구 설치). 1.0.0(PowerShell 설치)도 이 방식으로 올라옵니다. 새 버전이 마이그레이션한 `config.db`는 옛 버전이 열지 않으니(종료 코드 5) 먼저 백업합니다.
+- **업그레이드:** 새 버전의 exe를 더블클릭(또는 `install`). 새 폴더를 `<I>.staging`에 풀어 둔 뒤 서비스를 멈추고, 모든 세션의 앱·에이전트를 끝내고, 폴더를 통째로 바꿔 끼웁니다. 데이터·포트·방화벽·첫 설치 때의 감사 정책 백업은 그대로입니다. **낮은 버전으로는 설치하지 않습니다**(같은 버전은 복구 설치). 데스크톱 exe 이전의 PowerShell 설치도 이 방식으로 올라옵니다. 새 버전이 마이그레이션한 `config.db`는 옛 버전이 열지 않으니(종료 코드 5) 먼저 백업합니다.
 - **제거:** 앱 및 기능의 **MCP Monitor → 제거**, 또는 위 명령. 기본은 서비스, 방화벽 규칙, 앱 및 기능·시작 메뉴, 설치 폴더만 지우고 **데이터는 남깁니다.** `--remove-data`는 데이터 루트와 모든 사용자의 `%LOCALAPPDATA%\mcp-monitor`(WebView2 프로필)까지 지우며 **되살릴 수 없습니다.** `--restore-audit-policy`는 첫 설치 전의 감사 정책·레지스트리 값으로 되돌립니다. 실행 중인 자신은 다음 재부팅 때 지워지므로, 그 전에는 같은 폴더로 다시 설치할 수 없습니다.
 - **감사 정책만:** `mcp-monitor.exe audit-policy --enable`(켜기, 처음 한 번 백업) / `--restore <백업 csv>`(되돌리기), 공통으로 `--data-root`, `--dry-run`.
 
@@ -440,7 +445,7 @@ uv run python -m app --root "$env:TEMP\mcpmon-dev" --external-host 127.0.0.1 --d
 | `--agent-launcher` | `auto` | `auto`, `wts`, `local`(이 세션만), `none` |
 | `--agent-dialog` | 데스크톱 묶음은 `webview`, 체크아웃은 `edge` | `webview`(Rust 에이전트의 WebView2 창), `edge`(Python 에이전트의 Edge `--app` 창), `print`(고지 URL을 `<root>/run/agent-<session>.url`에 씀). 에이전트가 못 여는 조합은 종료 코드 2로 거부 |
 | `--agent-dir` | 묶음 루트, 아니면 `<repo>/agent` | 에이전트 작업 폴더 |
-| `--version` | — | `mcp-monitor 1.1.0` |
+| `--version` | — | `mcp-monitor 1.0.0` |
 
 </details>
 
@@ -478,6 +483,19 @@ uv run python -m seoul_weather --chaos
 - 공통 옵션: `--host`(기본 `127.0.0.1`), `--port`, `--pid-file`, `--chaos`(`/chaos/crash`, `/chaos/hang?sec=N`, `/chaos/slow?ms=N`로 일부러 넘어뜨리기 — 자동 복구 시연용).
 - `dummy-mcps/examples/{start,stop,restart}.ps1`은 모니터에 그대로 등록할 수 있는 조치 스크립트 예시입니다(`MCP_ID`, `MCP_NAME`, `MCP_HOST`, `MCP_PORT`, `DUMMY_MCPS_DIR`, 선택 `DUMMY_MCP_CHAOS`).
 
+### 데모 데이터 한 번에 넣기 🎬
+
+설치한 PC에서 시험·시연할 때(운영 PC 금지):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\seed-demo.ps1          # 넣기 (UAC 한 번)
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\seed-demo.ps1 -Revert  # 개발용 OTP 인자 되돌리기
+```
+
+- 사용자 `dev1@example.com`·`dev2@example.com`(Developer), `ops@example.com`(Admin)과 실제로 도는 더미 MCP 3개(☀️ `seoul-weather` · 🧮 `calculator` · ⏰ `seoul-clock`)를 만듭니다. 이미 있는 것은 건드리지 않습니다.
+- 서비스에 `--dev-otp-code 123456`을 붙여 **모든 계정의 OTP가 `123456`**이 됩니다(외부 채널도 `127.0.0.1`로만 엽니다). 끝나면 `-Revert`로 되돌리세요.
+- LocalSystem 서비스가 사용자 프로필 안의 Python(MSIX로 가상화된 `AppData`)을 못 보는 경우를 위해 `dummy-mcps\.python`에 인터프리터를 복사하고 venv를 다시 만듭니다. 자세한 내용은 [OPERATIONS](docs/ops/OPERATIONS.md)의 데모 데이터 항목.
+
 ---
 
 ## 🧪 테스트와 품질
@@ -501,7 +519,7 @@ uv run python -m seoul_weather --chaos
 | `winlive` | `-m winlive` | 이 PC의 실제 Windows API, 관리자 불필요(에이전트에도 있음) |
 | `perf` | `-m perf` | 로그 100만 건 조회·보존 정리 성능(`server/.cache/`에 캐시, 첫 실행은 수 분) |
 | `bundle` | 환경 변수 `MCPMON_BUNDLE=<repo>\dist\payload` + `-m bundle` | 빌드한 서버 payload 실행 |
-| `desktop` | 환경 변수 `MCPMON_DESKTOP_EXE=<repo>\dist\mcp-monitor-1.1.0.exe` + `-m desktop` | 릴리스 exe: `--version`, `verify-payload`로 푼 내장 서버, 관리자 없는 `install` |
+| `desktop` | 환경 변수 `MCPMON_DESKTOP_EXE=<repo>\dist\mcp-monitor-1.0.0.exe` + `-m desktop` | 릴리스 exe: `--version`, `verify-payload`로 푼 내장 서버, 관리자 없는 `install` |
 
 📈 **성능:** 목표는 "로그 100만 건 기준 필터 < 300 ms"이고, 시나리오 S1–S15가 모두 통과했습니다(함수 단위 중앙값). 흔한 낱말 키워드의 히스토그램·사용자 건수는 300 ms를 넘을 수 있고, 색인 읽기 하나는 5초에서 끊깁니다(`X-Error-Reason: query_timeout`). 수치는 [`docs/verification/perf-p6.md`](docs/verification/perf-p6.md), 나머지 목표는 [`docs/PLAN.md` §7](docs/PLAN.md#7-성능-설계).
 
@@ -530,21 +548,21 @@ uv run python -m seoul_weather --chaos
 <details>
 <summary>exe를 더블클릭했는데 아무 일도 없거나 "차단되었습니다"가 떠요.</summary>
 
-Smart App Control(SAC)일 가능성이 큽니다. 이 exe에는 **코드 서명이 없고**(인증서 없음), SAC는 파일마다 평판으로 판단합니다. `(Get-MpComputerStatus).SmartAppControlState`로 상태를, 이벤트 뷰어 `Microsoft → Windows → CodeIntegrity → Operational`의 3076/3077로 차단 기록을 봅니다. SAC를 끄는 것은 기기 소유자의 결정이고, 정해 둔 대안은 서명한 빌드(`build-desktop.ps1 -SignThumbprint`) 또는 1.0.0 PowerShell 설치 묶음입니다(OPERATIONS ②).
+Smart App Control(SAC)일 가능성이 큽니다. 이 exe에는 **코드 서명이 없고**(인증서 없음), SAC는 파일마다 평판으로 판단합니다. `(Get-MpComputerStatus).SmartAppControlState`로 상태를, 이벤트 뷰어 `Microsoft → Windows → CodeIntegrity → Operational`의 3076/3077로 차단 기록을 봅니다. SAC를 끄는 것은 기기 소유자의 결정이고, 정해 둔 대안은 서명한 빌드(`build-desktop.ps1 -SignThumbprint`) 또는 이전 PowerShell 설치 묶음(커밋 c9938d1)입니다(OPERATIONS ②).
 
 </details>
 
 <details>
 <summary>PowerShell에서 <code>mcp-monitor.exe install</code>을 쳤는데 아무 출력 없이 끝났어요.</summary>
 
-창 프로그램이라 PowerShell이 기다리지 않은 겁니다. `& .\mcp-monitor-1.1.0.exe install | Write-Output`처럼 파이프를 붙이면 끝날 때까지 기다리고 출력과 `$LASTEXITCODE`를 받습니다. `$out = & .\mcp-monitor-1.1.0.exe …`도 같은 이유로 비어 있습니다.
+창 프로그램이라 PowerShell이 기다리지 않은 겁니다. `& .\mcp-monitor-1.0.0.exe install | Write-Output`처럼 파이프를 붙이면 끝날 때까지 기다리고 출력과 `$LASTEXITCODE`를 받습니다. `$out = & .\mcp-monitor-1.0.0.exe …`도 같은 이유로 비어 있습니다.
 
 </details>
 
 <details>
 <summary>로그인 코드가 메일로 안 와요.</summary>
 
-1.1.0의 OTP도 Dummy 공급자라 메일을 보내지 않습니다. 코드는 `<데이터 루트>\data\dev\otp-outbox.log`에 `<시각> <이메일> <코드>` 줄로 쌓이고, 관리자만 읽을 수 있습니다. 등록되지 않은 이메일에는 코드를 보내지 않습니다. 다른 PC의 사용자에게는 관리자가 코드를 전달합니다.
+1.0.0의 OTP는 Dummy 공급자라 메일을 보내지 않습니다. 코드는 `<데이터 루트>\data\dev\otp-outbox.log`에 `<시각> <이메일> <코드>` 줄로 쌓이고, 관리자만 읽을 수 있습니다. 등록되지 않은 이메일에는 코드를 보내지 않습니다. 다른 PC의 사용자에게는 관리자가 코드를 전달합니다.
 
 </details>
 
@@ -609,7 +627,7 @@ Smart App Control(SAC)일 가능성이 큽니다. 이 exe에는 **코드 서명�
 
 ## 🚧 현재 상태와 한계
 
-- ✅ **구현 완료:** Plan 1–6, 곧 스펙의 P0–P8(기반, 인증·권한, Dummy MCP·모니터 엔진, 상태 보드·MCP 관리 UI, 세션 수집, 행동 로그·고지, 로그 조회·보존, 배포·하드닝, 데스크톱 앱). 버전 1.1.0.
+- ✅ **구현 완료:** Plan 1–6, 곧 스펙의 P0–P8(기반, 인증·권한, Dummy MCP·모니터 엔진, 상태 보드·MCP 관리 UI, 세션 수집, 행동 로그·고지, 로그 조회·보존, 배포·하드닝, 데스크톱 앱). 버전 1.0.0.
 - ⏳ **실기기 확인 대기:** 개발 PC가 Windows 11 Home(관리자 아님, SAC 켜짐)이라 실제 UAC, RDP, SYSTEM 서비스, ACL, 감사 정책, 방화벽, 다른 세션의 고지 창은 자동 테스트로 확인하지 못했습니다. 점검표의 결과 칸은 모두 `대기`입니다.
   - [`docs/verification/win11-pro-p8.md`](docs/verification/win11-pro-p8.md): 데스크톱 exe(설치·업그레이드·제거·앱 창·트레이·WebView2 고지·SAC)
   - [`docs/verification/win11-pro-p4-p5.md`](docs/verification/win11-pro-p4-p5.md): 세션 수집, 행동 로그, 고지
@@ -658,7 +676,7 @@ Smart App Control(SAC)일 가능성이 큽니다. 이 exe에는 **코드 서명�
 | 문서 | 내용 |
 |---|---|
 | [`docs/PLAN.md`](docs/PLAN.md) | 기준 스펙 v0.9: 요구사항, 아키텍처, 권한 매트릭스, 컴포넌트, 화면, 성능, API, 기술 스택, 변경 이력 |
-| [`docs/ops/OPERATIONS.md`](docs/ops/OPERATIONS.md) | 운영 문서 v1.1.0: 설치·업그레이드·제거(모든 CLI 옵션), 서비스 운영, 로그, 백업·복원, 보안, 문제 해결(설치 폴더에도 포함) |
+| [`docs/ops/OPERATIONS.md`](docs/ops/OPERATIONS.md) | 운영 문서 v1.0.0: 설치·업그레이드·제거(모든 CLI 옵션), 서비스 운영, 로그, 백업·복원, 보안, 문제 해결(설치 폴더에도 포함) |
 | [`docs/design/desktop-app-rust.md`](docs/design/desktop-app-rust.md) | 데스크톱 앱(Rust 단일 exe) 설계와 결정 D2–D5 |
 | [`docs/verification/perf-p6.md`](docs/verification/perf-p6.md) | 로그 조회·색인·보존 정리 성능 기록 |
 | [`docs/verification/win11-pro-p8.md`](docs/verification/win11-pro-p8.md) | 실기기 점검표: 데스크톱 exe, P4–P7 다시 수행 안내 |

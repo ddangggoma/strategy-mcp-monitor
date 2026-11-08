@@ -11,10 +11,10 @@ use windows::core::BOOL;
 
 #[test]
 #[ignore = "opens a real WebView2 window on this desktop"]
-fn the_app_window_opens_the_admin_page_of_its_server() {
+fn the_app_window_opens_the_status_board_of_its_server() {
     let srv = AgentServer::start(None);
     srv.serve_page("/api/channel", r#"{"channel":"local"}"#);
-    srv.serve_page("/admin", "<!doctype html><title>admin</title><p>admin</p>");
+    srv.serve_page("/", BOARD_PAGE);
     let cdp = std::net::TcpListener::bind("127.0.0.1:0")
         .unwrap()
         .local_addr()
@@ -22,14 +22,14 @@ fn the_app_window_opens_the_admin_page_of_its_server() {
         .port();
     let s = Scratch::new();
     let mut child = App::spawn(&srv, &s, cdp, &[]);
-    let want = format!("{}/admin", srv.url());
+    let want = home_of(&srv);
     let end = Instant::now() + Duration::from_secs(20);
     let found = loop {
         let pages = ureq::get(&format!("http://127.0.0.1:{cdp}/json/list"))
             .call()
             .ok()
             .and_then(|mut r| r.body_mut().read_to_string().ok());
-        if pages.as_deref().is_some_and(|p| p.contains(&want)) {
+        if pages.as_deref().is_some_and(|p| shows(p, &want)) {
             break true;
         }
         if Instant::now() > end {
@@ -49,12 +49,12 @@ fn the_app_window_opens_the_admin_page_of_its_server() {
 fn closing_hides_the_window_and_a_second_start_brings_it_back() {
     let srv = AgentServer::start(None);
     srv.serve_page("/api/channel", r#"{"channel":"local"}"#);
-    srv.serve_page("/admin", "<!doctype html><title>admin</title><p>admin</p>");
+    srv.serve_page("/", BOARD_PAGE);
     let cdp = free_port();
     let s = Scratch::new();
     let mut app = App::spawn(&srv, &s, cdp, &["--background"]);
-    let want = format!("{}/admin", srv.url());
-    wait_for(30, || cdp_pages(cdp).filter(|p| p.contains(&want)));
+    let want = home_of(&srv);
+    wait_for(30, || cdp_pages(cdp).filter(|p| shows(p, &want)));
     let hwnd = wait_for(10, || main_window(app.id()));
     assert!(!visible(hwnd), "--background shows no window");
 
@@ -84,9 +84,9 @@ fn closing_hides_the_window_and_a_second_start_brings_it_back() {
 
 #[test]
 #[ignore = "opens a real WebView2 window on this desktop; waits 30 s"]
-fn a_server_that_does_not_answer_shows_the_stopped_text_then_the_admin_page() {
+fn a_server_that_does_not_answer_shows_the_stopped_text_then_the_status_board() {
     let srv = AgentServer::start(None);
-    srv.serve_page("/admin", "<!doctype html><title>admin</title><p>admin</p>");
+    srv.serve_page("/", BOARD_PAGE);
     let cdp = free_port();
     let s = Scratch::new();
     let mut app = App::spawn(&srv, &s, cdp, &[]);
@@ -100,13 +100,29 @@ fn a_server_that_does_not_answer_shows_the_stopped_text_then_the_admin_page() {
         "#stopped after {:?}",
         start.elapsed()
     );
-    let want = format!("{}/admin", srv.url());
-    assert!(!cdp_pages(cdp).unwrap_or_default().contains(&want));
-    // the service comes back: the next try (every 5 s) opens the admin page
+    let want = home_of(&srv);
+    assert!(!shows(&cdp_pages(cdp).unwrap_or_default(), &want));
+    // the service comes back: the next try (every 5 s) opens the status board
     srv.serve_page("/api/channel", r#"{"channel":"local"}"#);
-    wait_for(15, || cdp_pages(cdp).filter(|p| p.contains(&want)));
+    wait_for(15, || cdp_pages(cdp).filter(|p| shows(p, &want)));
     app.stop();
     remove_profile(&s);
+}
+
+/// What the fake server answers at `/`: the window's home is the status board.
+const BOARD_PAGE: &str = "<!doctype html><title>board</title><p>board</p>";
+
+/// The status board of `srv`, exactly as the window's address shows it (`http://127.0.0.1:<port>/`).
+fn home_of(srv: &AgentServer) -> String {
+    format!("{}/", srv.url().trim_end_matches('/'))
+}
+
+/// True when one of the DevTools `pages` shows exactly `url` (not a page under it, like `/admin`).
+fn shows(pages: &str, url: &str) -> bool {
+    serde_json::from_str::<Vec<serde_json::Value>>(pages)
+        .unwrap_or_default()
+        .iter()
+        .any(|p| p["url"].as_str() == Some(url))
 }
 
 fn free_port() -> u16 {

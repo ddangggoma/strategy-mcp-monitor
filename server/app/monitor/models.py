@@ -9,6 +9,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.monitor.icons import check_icon
+
 
 class McpState(StrEnum):
     HEALTHY = "HEALTHY"
@@ -91,6 +93,9 @@ class McpConfig(BaseModel):
     autostart_on_boot: bool = False
     maintenance: bool = False
     script_timeout_sec: Annotated[int, Field(ge=10, le=120)] = 120
+    # Display only (board card, lists): exactly one emoji (app/monitor/icons.py); None = the
+    # default MCP icon. Never free-form markup, a URL or an upload.
+    icon: str | None = None
 
     @field_validator("name", mode="before")
     @classmethod
@@ -106,6 +111,11 @@ class McpConfig(BaseModel):
     @classmethod
     def _safe_process_name(cls, v: str | None) -> str | None:
         return _check_process_name(v)
+
+    @field_validator("icon")
+    @classmethod
+    def _emoji_icon(cls, v: str | None) -> str | None:
+        return check_icon(v)
 
     @field_validator("host", mode="before")
     @classmethod

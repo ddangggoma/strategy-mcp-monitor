@@ -13,6 +13,8 @@ test("each connection shows the notice and the acknowledgement is recorded", asy
   await notice.setViewportSize({ width: 640, height: 600 }); // the agent's Edge app window (C4)
   await notice.goto(await waitForNoticeUrl(state, before + 1));
   await expect(notice.getByRole("dialog")).toContainText(current.title);
+  // the agent's notice offers no way out (preview mode's way back to the editor is not here)
+  await expect(notice.getByRole("link", { name: copy.notice.backToAdmin })).toHaveCount(0);
   expect(new URL(notice.url()).hash).toBe("");
   expect(await notice.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
   await notice.getByRole("button", { name: current.button_text }).click();

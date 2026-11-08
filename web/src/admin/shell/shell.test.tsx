@@ -333,6 +333,13 @@ it("shows a planned feature as an empty state without data", () => {
   expect(card?.querySelector("canvas, table, [role=img], [data-testid=card-skeleton]")).toBeNull();
 });
 
+it.each(["local", "external"] as const)("the admin top bar leads back to the status board (%s)", async (channel) => {
+  await renderShell(meFixture("admin", channel), "/admin");
+  const banner = screen.getByRole("banner");
+  expect(await within(banner).findByRole("link", { name: copy.common.boardHome })).toHaveAttribute("href", "/");
+  expect(within(banner).queryByRole("link", { name: copy.common.adminHome })).toBeNull();
+});
+
 it("shows a not-found page for unknown admin paths inside the shell, with a heading", async () => {
   await renderShell(meFixture("admin", "local"), "/admin/nowhere/deeper");
   const main = screen.getByRole("main");

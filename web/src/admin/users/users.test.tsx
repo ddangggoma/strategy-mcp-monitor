@@ -114,6 +114,21 @@ it("does not guard an admin while another active admin exists (an inactive admin
   expect(within(userRow(3)).getByText(copy.users.inactive)).toBeInTheDocument();
 });
 
+it("the header counts the active admins and explains why one alone is locked", async () => {
+  const list = [adminUser({ id: 1 }), adminUser({ id: 2 }), adminUser({ id: 3, active: false }), adminUser({ id: 4, role: "developer" })];
+  const { unmount } = await renderUsers(list);
+  // an inactive admin and a developer do not count
+  expect(screen.getByTestId("active-admins")).toHaveTextContent(copy.users.activeAdmins(2));
+  await userEvent.click(screen.getByRole("button", { name: copy.help.label(copy.users.activeAdminsLabel) }));
+  expect(await screen.findByRole("tooltip")).toHaveTextContent(copy.help.users.activeAdmins);
+  unmount();
+  await renderUsers([adminUser({ id: 1 }), adminUser({ id: 2, role: "developer" })]);
+  expect(screen.getByTestId("active-admins")).toHaveTextContent(copy.users.activeAdmins(1));
+  // the locked row says who the only admin is (this row) and what to do first
+  expect(within(userRow(1)).getByText(copy.users.lastAdmin)).toHaveTextContent("이 사용자 1명뿐");
+  expect(copy.users.lastAdmin).toContain("다른 사용자를 먼저 Admin으로 지정");
+});
+
 it("shows the server last_admin error", async () => {
   server.use(http.patch("/api/users/2", () => HttpResponse.json({ error: "last_admin" }, { status: 409 })));
   await renderUsers([adminUser({ id: 1 }), adminUser({ id: 2 })]);

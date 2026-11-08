@@ -33,6 +33,7 @@ from app.monitor.engine import (
     Transition,
 )
 from app.monitor.history import ActionRecord, McpHistory, TransitionRecord
+from app.monitor.icon_images import IconImageStore
 from app.monitor.models import ActionKind, CheckResult, Mcp, McpState, ScriptStatus
 from app.monitor.probes import ProbeResult
 from app.monitor.runner import PIPE_DRAIN_SEC, ScriptResult, ScriptTarget
@@ -111,6 +112,7 @@ class Monitor:
         bus: BoardBus,
         clock: Clock,
         tamper: TamperMonitor,
+        icon_images: IconImageStore | None = None,
     ) -> None:
         self._mcps = mcps
         self._scripts_store = scripts
@@ -122,6 +124,7 @@ class Monitor:
         self._bus = bus
         self._clock = clock
         self._tamper = tamper
+        self._icon_images = icon_images
         self._config: dict[int, Mcp] = {}  # cached Mcp (refreshed on every config write path)
         self._engines: dict[int, McpEngine] = {}
         self._pids: dict[int, int | None] = {}
@@ -163,6 +166,11 @@ class Monitor:
             self._history.invalidate(mcp.id)  # maintenance time is not counted as uptime
             self._apply(mcp.id, engine.set_maintenance(mcp.config.maintenance))
         self._bus.mark_dirty(mcp.id)
+
+    def republish(self, mcp_id: int) -> None:
+        """Send the MCP's board item again (its icon image changed; the config did not)."""
+        if mcp_id in self._engines:
+            self._bus.mark_dirty(mcp_id)
 
     def remove(self, mcp_id: int) -> None:
         """Stop monitoring; a no-op for an unknown id. In-flight probe results are dropped."""
@@ -587,6 +595,8 @@ class Monitor:
         return {
             "id": mcp_id,
             "name": mcp.config.name,
+            "icon": mcp.config.icon,
+            "icon_image": self._icon_images.url(mcp_id) if self._icon_images is not None else None,
             "state": snap.state.value,
             "issue": snap.issue.value if snap.issue else None,
             "latency_ms": spark[-1] if spark else None,

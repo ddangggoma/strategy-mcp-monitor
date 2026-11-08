@@ -1,10 +1,13 @@
 import asyncio
+import io
+import logging
+import sys
 
 import httpx
 import pytest
 from fastapi import APIRouter
 
-from app.main import ShutdownSequence, request_exit, server_configs
+from app.main import ShutdownSequence, ensure_std_streams, request_exit, server_configs
 from app.services import build_services
 from app.settings.store import Settings
 from app.web.app_factory import create_app
@@ -96,6 +99,35 @@ def test_server_configs_ignore_proxy_headers_and_bound_shutdown(services):
     cfgs = server_configs(create_app("local", services), create_app("external", services))
     assert all(c.proxy_headers is False for c in cfgs)
     assert all(c.timeout_graceful_shutdown == 10 for c in cfgs)
+
+
+def test_server_configs_work_without_console_streams(services, monkeypatch):
+    # A Windows service (or a windowed frozen exe) has no console: sys.stdout/sys.stderr are None.
+    # uvicorn's default formatter called sys.stdout.isatty() there and the service died (exit 1067).
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+    cfgs = server_configs(create_app("local", services), create_app("external", services))
+    assert all(c.use_colors is False for c in cfgs)
+    logging.getLogger("uvicorn.error").info("no console")  # must not raise
+
+
+def test_ensure_std_streams_replaces_missing_streams(monkeypatch):
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+    ensure_std_streams()
+    assert sys.stdout is not None and sys.stderr is not None
+    print("written to the null device", file=sys.stdout)
+    print("written to the null device", file=sys.stderr)
+    sys.stdout.close()
+    sys.stderr.close()
+
+
+def test_ensure_std_streams_keeps_existing_streams(monkeypatch):
+    out, err = io.StringIO(), io.StringIO()
+    monkeypatch.setattr(sys, "stdout", out)
+    monkeypatch.setattr(sys, "stderr", err)
+    ensure_std_streams()
+    assert sys.stdout is out and sys.stderr is err
 
 
 async def test_framework_errors_use_error_code_bodies(local_client, external_client):

@@ -1,10 +1,10 @@
 """Where the deployment bundle is, and the defaults that follow from it (Plan 5 Task 9, Plan 6 Task 2).
 
 A bundle (the payload ``install/build.ps1`` builds) has a ``bundle.json`` at its root, e.g.
-``{"layout": "pyinstaller", "version": "1.1.0", "python": "3.15.2", ..., "agent": "desktop"}``:
+``{"layout": "pyinstaller", "version": "1.0.0", "python": "3.15.2", ..., "agent": "desktop"}``:
 
 * ``pyinstaller``: the server is ``bin\\monitor\\mcp-monitor-server.exe`` (Plan 6; ``mcp-monitor.exe``
-  in 1.0.0);
+  in the earlier PowerShell install);
 * ``runtime``: an embeddable Python in ``runtime\\`` whose ``._pth`` adds ``..\\server`` and
   ``..\\agent`` (the agent runs as ``runtime\\python.exe -m mcp_agent``).
 
@@ -12,8 +12,8 @@ A bundle (the payload ``install/build.ps1`` builds) has a ``bundle.json`` at its
 
 * ``desktop`` (Plan 6, the shipped form): the Rust ``mcp-monitor.exe`` at the bundle root, run as
   ``mcp-monitor.exe agent``; its notice window is a WebView2 window (``--dialog webview``);
-* ``python`` (the default when the key is missing, a 1.0.0 bundle): ``bin\\agent\\mcp-agent.exe``
-  or ``runtime\\python.exe -m mcp_agent``, whose notice window is an Edge app window.
+* ``python`` (the default when the key is missing, a bundle of the earlier PowerShell install):
+  ``bin\\agent\\mcp-agent.exe`` or ``runtime\\python.exe -m mcp_agent``, whose notice window is an Edge app window.
 
 The bundle sits under Program Files, so the agent's executable is readable by every user session
 (the ``WtsLauncher`` starts it as the session user). Without a bundle (development) the defaults

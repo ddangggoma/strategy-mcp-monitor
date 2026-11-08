@@ -15,6 +15,7 @@ import servicemanager
 import win32service
 import win32serviceutil
 
+from app.main import ensure_std_streams
 from app.winsvc import (
     DESCRIPTION,
     DISPLAY_NAME,
@@ -132,6 +133,7 @@ class McpMonitorService(win32serviceutil.ServiceFramework):
 def dispatch(argv: list[str]) -> int:
     """``python -m app service <server args>``: hand this process to the SCM."""
     McpMonitorService.host_argv = list(argv)
+    ensure_std_streams()  # the SCM gives the service no console: stdout/stderr are None
     try:
         servicemanager.Initialize()
         servicemanager.PrepareToHostSingle(McpMonitorService)
