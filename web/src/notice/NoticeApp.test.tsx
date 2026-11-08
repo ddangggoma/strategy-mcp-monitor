@@ -1,7 +1,7 @@
 // both read as text (Vite ?raw): the agent's window search and the page title must not drift apart
 import dialogPy from "../../../agent/mcp_agent/dialog.py?raw";
 import noticeHtml from "../../notice.html?raw";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { delay, http, HttpResponse } from "msw";
 import { copy } from "@/copy/ko";
@@ -77,6 +77,38 @@ describe("preview mode", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(copy.notice.loadFailed);
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.queryByRole("button")).toBeNull(); // a reload works here: the address is unchanged
+  });
+});
+
+describe("the way back to the editor", () => {
+  const back = () => screen.queryByRole("link", { name: copy.notice.backToAdmin });
+
+  it("preview mode offers it inside the notice and after the button", async () => {
+    render(<NoticeApp source={PREVIEW} />);
+    const dialog = await screen.findByRole("dialog", { name: copy.notice.builtIn.title });
+    const link = within(dialog).getByRole("link", { name: copy.notice.backToAdmin });
+    expect(link).toHaveAttribute("href", "/admin/notice");
+    expect(screen.getByRole("button", { name: copy.notice.builtIn.button_text })).toHaveFocus(); // the focus starts on the notice, as ever
+    await userEvent.click(screen.getByRole("button", { name: copy.notice.builtIn.button_text }));
+    expect(await screen.findByText(copy.notice.acknowledged)).toBeInTheDocument();
+    expect(back()).toHaveAttribute("href", "/admin/notice");
+  });
+
+  it("preview mode offers it when the notice cannot be loaded", async () => {
+    server.use(http.get("/api/auth/me", () => HttpResponse.error()));
+    render(<NoticeApp source={PREVIEW} />);
+    await screen.findByRole("alert");
+    expect(back()).toHaveAttribute("href", "/admin/notice");
+  });
+
+  it("display mode never offers it: the agent's notice cannot be left", async () => {
+    open(); server.use(http.post("/api/notice/display/ack", () => new HttpResponse(null, { status: 204 })));
+    render(<NoticeApp source={SRC} />);
+    await screen.findByRole("dialog");
+    expect(back()).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "확인했습니다" }));
+    expect(await screen.findByText(copy.notice.acknowledged)).toBeInTheDocument();
+    expect(back()).toBeNull();
   });
 });
 

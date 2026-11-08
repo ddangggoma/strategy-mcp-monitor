@@ -4,6 +4,7 @@
  * A formal notice read once per connection: reading size (text-base), a prose measure, left aligned,
  * one inverted-fill button. The only motion is the dialog's entrance (@starting-style, 360 ms
  * ease-out, scale + opacity; the backdrop fades with the same timing) — rare, so it may be felt.
+ * The editor's full-screen preview draws the same panel on the same backdrop, entering the same way.
  */
 @layer components {
   .notice-panel {
@@ -150,6 +151,42 @@
     }
   }
 
+  /* /notice in preview mode only: the way back to the editor sits above the panel, inside the dialog
+     (the page behind a modal dialog is inert). The display mode's dialog has no such child. */
+  .notice-dialog[open]:has(> .notice-leave) {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: calc(var(--spacing) * 2);
+  }
+
+  .notice-dialog:has(> .notice-leave) > .notice-panel {
+    min-height: 0;
+    max-height: none;
+  }
+
+  .notice-leave {
+    display: inline-flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 1.5);
+    min-height: var(--size-control-sm);
+    padding: 0 calc(var(--spacing) * 3);
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-md);
+    background-color: var(--color-surface-raised);
+    color: var(--color-fg);
+    font-size: var(--text-sm);
+    font-weight: var(--font-weight-medium);
+    text-decoration: none;
+    transition: background-color var(--motion-fast) var(--ease-hover);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .notice-leave:hover {
+      background-color: color-mix(in oklch, var(--color-fg) 7%, var(--color-surface-raised));
+    }
+  }
+
   /* ---- the /notice page behind the dialog, and its one line after the button ---- */
 
   /* the page never scrolls (the panel does): no reserved scrollbar strip beside the backdrop */
@@ -202,7 +239,55 @@
     transform: none;
   }
 
+  /* ---- the editor's full-screen preview: the panel on the backdrop over the page, as /notice ---- */
+
+  .notice-full {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-modal);
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    background-color: var(--color-bg);
+    color: var(--color-fg);
+    outline: none;
+    animation: notice-fade var(--motion-slow) var(--ease-out);
+  }
+
+  /* stands in for /notice: the dialog's backdrop over the page background, the panel centred and
+     sized exactly as the dialog sizes it (prose measure, a 4-step margin all round) */
+  .notice-full-stage {
+    display: grid;
+    place-items: center;
+    min-height: 0;
+    padding: calc(var(--spacing) * 4);
+    background-color: var(--color-scrim);
+  }
+
+  .notice-full-stage > .notice-panel {
+    max-height: 100%;
+    animation: notice-enter var(--motion-slow) var(--ease-out);
+  }
+
+  @keyframes notice-fade {
+    from {
+      opacity: 0;
+    }
+  }
+
+  @keyframes notice-enter {
+    from {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+  }
+
   @media (prefers-reduced-motion: reduce) {
+    .notice-full,
+    .notice-full-stage > .notice-panel {
+      animation: none;
+    }
+
+    .notice-leave,
     .notice-dialog,
     .notice-dialog::backdrop,
     .notice-button {

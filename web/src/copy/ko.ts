@@ -770,7 +770,12 @@ export const copy = {
     previewLabel: "고지 미리보기",
     previewNote: "입력하는 대로 바로 바뀌어요.",
     fullPreview: "전체 화면 미리보기",
-    fullPreviewNote: "저장된 내용으로 새 탭에서 열려요.",
+    fullPreviewNote: "저장된 내용을 실제 고지와 똑같이 이 화면 위에 띄워요.",
+    /** The full-screen preview's own line: what it shows and that its button records nothing. */
+    fullPreviewDescription: "저장된 내용이에요. 고지의 버튼을 눌러도 기록되지 않고 미리보기만 닫혀요.",
+    fullPreviewClose: "미리보기 닫기",
+    /** `/notice` opened directly (preview mode only): the way back to the editor. */
+    backToAdmin: "관리 화면으로 돌아가기",
     savedVersion: (v: number) => `저장했어요(버전 ${v}).`,
     loadError: "사전 고지를 불러오지 못했어요. 새로 고친 뒤 다시 시도하세요.",
     draftRestored: "저장하지 않은 초안을 되살렸어요.",

@@ -32,7 +32,9 @@ async function loadState(source: NoticeSource): Promise<State> {
  * In display mode (the notice window the session agent opens) the report goes to the server with
  * the display's token and can fail: then the page says so and offers a retry (a 404 means the
  * display is gone: the page says the notice is no longer open, with nothing to retry). In preview mode there
- * is nothing to record, so the button always ends in the acknowledged message.
+ * is nothing to record, so the button always ends in the acknowledged message, and the page offers
+ * a way back to the editor (in the dialog and after it) — never in display mode, whose notice must
+ * stay unclosable.
  * React, react-dom and the notice files only — no Motion, Radix or Query (bundle < 100 KB).
  */
 export function NoticeApp({ source }: { source: NoticeSource }) {
@@ -83,6 +85,13 @@ export function NoticeApp({ source }: { source: NoticeSource }) {
   else if (state.t === "loadFailed") problem = state.retry ? copy.notice.loadFailedRetry : copy.notice.loadFailed;
   const canRetry = state.t === "ackFailed" || (state.t === "loadFailed" && state.retry);
   const retryBusy = state.t === "ackFailed" && state.sending;
+  const back =
+    source.mode === "preview" ? (
+      <a className="notice-leave" href="/admin/notice">
+        <span aria-hidden="true">←</span>
+        {copy.notice.backToAdmin}
+      </a>
+    ) : null;
 
   return (
     <main className="notice-page">
@@ -92,6 +101,7 @@ export function NoticeApp({ source }: { source: NoticeSource }) {
           mode="standalone"
           busy={state.sending}
           onAcknowledge={() => void acknowledge(state.notice, "ready")}
+          aside={back}
         />
       ) : null}
       <div className="notice-page-content">
@@ -116,6 +126,8 @@ export function NoticeApp({ source }: { source: NoticeSource }) {
             {copy.notice.retry}
           </button>
         ) : null}
+        {/* the dialog carries its own while it is open; the page shows nothing while loading */}
+        {state.t === "ready" || state.t === "loading" ? null : back}
       </div>
     </main>
   );

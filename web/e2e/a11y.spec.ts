@@ -100,3 +100,12 @@ test("an unknown admin address keeps the shell and says how to get back", async 
   await main.getByRole("link", { name: copy.common.adminHome }).click();
   await expect(page).toHaveURL(`${state.localUrl}/admin`);
 });
+
+test("axe: the notice editor's full-screen preview, open", async ({ page, state, loginAs }) => {
+  await loginAs(page, "admin", "local");
+  await page.goto(`${state.localUrl}/admin/notice`);
+  await page.getByRole("button", { name: copy.notice.fullPreview }).click();
+  await expect(page.getByRole("dialog", { name: copy.notice.fullPreview }).getByRole("heading", { level: 2 })).toBeVisible();
+  const r = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
+  expect(r.violations.map((v) => `${v.id}: ${v.nodes.length} (${v.nodes.map((n) => n.target.join(" ")).join(", ")})`)).toEqual([]);
+});

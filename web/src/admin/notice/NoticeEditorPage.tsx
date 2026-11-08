@@ -1,5 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { BoldIcon, ExternalLinkIcon, HistoryIcon, ListIcon } from "lucide-react";
+import { BoldIcon, HistoryIcon, ListIcon, Maximize2Icon } from "lucide-react";
+import { Dialog as DialogPrimitive } from "radix-ui";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode, type Ref } from "react";
 import { toast } from "sonner";
 import { TextDiff } from "@/components/app/TextDiff";
@@ -8,7 +9,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
   AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -21,6 +22,7 @@ import { putNotice, revertNotice } from "@/lib/endpoints";
 import { formatKst } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { NoticeDialog } from "@/notice/NoticeDialog";
+import { NoticeFullPreview } from "./NoticeFullPreview";
 import { useNotice, useNoticeVersion, useNoticeVersions } from "../queries";
 import { qk } from "../query-keys";
 import { LeaveGuard } from "../shell/LeaveGuard";
@@ -53,6 +55,7 @@ export function NoticeEditorPage() {
 function NoticeEditor() {
   const notice = useNotice();
   const [dirty, setDirty] = useState(false);
+  const [fullPreview, setFullPreview] = useState(false);
   const noteId = useId();
 
   return (
@@ -63,16 +66,16 @@ function NoticeEditor() {
           <p className="text-sm text-fg-muted">{copy.notice.lead}</p>
         </div>
         <div className="flex flex-col items-start gap-1">
-          <a
-            href="/notice"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-describedby={noteId}
-            className={buttonVariants({ variant: "outline" })}
-          >
-            <ExternalLinkIcon aria-hidden="true" />
-            {copy.notice.fullPreview}
-          </a>
+          {/* in place, not /notice in a new tab: closing it must lead back here (the desktop app has one window) */}
+          <DialogPrimitive.Root open={fullPreview} onOpenChange={setFullPreview}>
+            <DialogPrimitive.Trigger asChild>
+              <Button variant="outline" aria-describedby={noteId} disabled={!notice.data}>
+                <Maximize2Icon aria-hidden="true" />
+                {copy.notice.fullPreview}
+              </Button>
+            </DialogPrimitive.Trigger>
+            {notice.data ? <NoticeFullPreview content={notice.data} onClose={() => setFullPreview(false)} /> : null}
+          </DialogPrimitive.Root>
           <p id={noteId} className="text-xs text-fg-muted">
             {copy.notice.fullPreviewNote}
           </p>
