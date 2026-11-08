@@ -1,6 +1,4 @@
-import { CircleHelpIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { InfoTip } from "@/components/app/InfoTip";
 import { copy } from "@/copy/ko";
 import type { LogCategory } from "@/lib/api-types";
 import { CATEGORY_GROUP, GROUP_COLOR_VAR, LOG_CATEGORIES, LOG_GROUPS } from "./categories";
@@ -41,16 +39,5 @@ export function CategoryChips({ selected, onToggle }: { selected: readonly LogCa
 
 /** What the command log does not see (spec §2 #7), next to the chips that filter it. */
 function CommandLogHelp() {
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button variant="ghost" size="icon-sm" aria-label={copy.common.help}>
-          <CircleHelpIcon aria-hidden="true" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-[min(24rem,calc(100vw-2rem))] text-sm">
-        <p>{copy.logs.cmdLimitHelp}</p>
-      </PopoverContent>
-    </Popover>
-  );
+  return <InfoTip label={copy.logs.cats["activity.command"]} content={copy.logs.cmdLimitHelp} align="start" />;
 }

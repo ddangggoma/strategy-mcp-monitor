@@ -9,6 +9,7 @@ import {
   FormMessage,
   useFormField,
 } from "@/components/ui/form";
+import { InfoTip } from "@/components/app/InfoTip";
 import { Input } from "@/components/ui/input";
 import { copy } from "@/copy/ko";
 import { SETTINGS_RANGES, type SettingsFormValues, type SettingsValues } from "./settings-schema";
@@ -47,7 +48,11 @@ export function NumberField({
       name={name}
       render={({ field }) => (
         <FormItem>
-          <FormLabel>{copy.settings.fields[name]}</FormLabel>
+          {/* the tip sits beside the label, never inside it: the input's name stays the label */}
+          <div className="flex items-center gap-1">
+            <FormLabel>{copy.settings.fields[name]}</FormLabel>
+            <InfoTip label={copy.settings.fields[name]} content={copy.help.settings[name]} />
+          </div>
           <FieldBody hint={hint ?? copy.mcp.rangeHint(min, max)} shared={shared}>
             <Input
               type="number"

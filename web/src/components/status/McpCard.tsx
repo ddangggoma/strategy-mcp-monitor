@@ -1,6 +1,7 @@
 import { CirclePauseIcon, PlayIcon } from "lucide-react";
 import { m } from "motion/react";
 import { useId } from "react";
+import { InfoTip } from "@/components/app/InfoTip";
 import { copy } from "@/copy/ko";
 import type { BoardItem } from "@/lib/api-types";
 import { useClock } from "@/lib/clock";
@@ -53,17 +54,30 @@ export function McpCard({ item, receivedAt }: { item: BoardItem; receivedAt: num
         <StatusBadge state={item.state} />
       </header>
 
-      <p className="text-sm font-medium text-fg">{item.issue ? copy.issues[item.issue] : null}</p>
+      <p className="flex items-center gap-0.5 text-sm font-medium text-fg">
+        {item.issue ? (
+          <>
+            {copy.issues[item.issue]}
+            <InfoTip label={copy.issues[item.issue]} content={copy.help.issues[item.issue]} />
+          </>
+        ) : null}
+      </p>
 
       <dl className="mcp-card-metrics">
         <div>
-          <dt className="text-xs text-fg-muted">{copy.board.latency}</dt>
+          <dt className="flex items-center gap-0.5 text-xs text-fg-muted">
+            {copy.board.latency}
+            <InfoTip label={copy.board.latency} content={copy.help.latency} />
+          </dt>
           <dd className="mcp-card-metric">
             <RollingNumber value={item.latency_ms} unit="ms" />
           </dd>
         </div>
         <div>
-          <dt className="text-xs text-fg-muted">{copy.board.uptime24h}</dt>
+          <dt className="flex items-center gap-0.5 text-xs text-fg-muted">
+            {copy.board.uptime24h}
+            <InfoTip label={copy.board.uptime24h} content={copy.help.uptime} />
+          </dt>
           <dd className="mcp-card-metric">
             <UptimeMeter value={item.uptime_24h} />
           </dd>
@@ -73,7 +87,10 @@ export function McpCard({ item, receivedAt }: { item: BoardItem; receivedAt: num
       <div className="flex flex-col gap-2 self-end">
         <Sparkline points={item.sparkline} label={copy.board.sparklineLabel(item.name)} className="mcp-card-spark" />
         {item.action_in_sec !== null ? (
-          <CountdownBar inSec={item.action_in_sec} totalSec={item.action_delay_sec} receivedAt={receivedAt} />
+          <div className="flex items-center gap-1">
+            <CountdownBar inSec={item.action_in_sec} totalSec={item.action_delay_sec} receivedAt={receivedAt} className="min-w-0 flex-1" />
+            <InfoTip label={copy.board.autoAction} content={copy.help.countdown} />
+          </div>
         ) : null}
       </div>
 

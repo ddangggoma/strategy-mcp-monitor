@@ -1,5 +1,6 @@
 import { XIcon } from "lucide-react";
 import { useEffect, useId, useMemo, useState } from "react";
+import { InfoTip, type HelpContent } from "@/components/app/InfoTip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { copy } from "@/copy/ko";
@@ -25,7 +26,7 @@ const toggle = <T,>(list: readonly T[] | undefined, v: T): T[] => {
  * changes from elsewhere (clear, "filter by this session"), except for the value this field sent.
  */
 export function TypedFilter({
-  label, value, normalize, onCommit, hint, invalid, inputMode, className,
+  label, value, normalize, onCommit, hint, tip, invalid, inputMode, className,
 }: {
   label: string;
   value: string;
@@ -33,6 +34,8 @@ export function TypedFilter({
   normalize(text: string): string | null;
   onCommit(v: string): void;
   hint?: string;
+  /** Help behind an “i” beside the label; defaults to the hint (which the input is described by). */
+  tip?: HelpContent;
   /** Shown under the field while the text is not a valid value. */
   invalid?: string;
   inputMode?: "numeric" | "text";
@@ -58,16 +61,19 @@ export function TypedFilter({
   }, [text, value, normalize, onCommit]);
 
   const bad = normalize(text) === null;
+  const help = tip ?? hint;
   return (
     <div className={className}>
-      <label htmlFor={id} className="mb-1 block text-xs text-fg-muted">
-        {label}
-      </label>
+      <div className="mb-1 flex items-center gap-0.5">
+        <label htmlFor={id} className="block text-xs text-fg-muted">
+          {label}
+        </label>
+        {help ? <InfoTip label={label} content={help} align="start" /> : null}
+      </div>
       <Input
         id={id}
         value={text}
         inputMode={inputMode}
-        title={hint}
         aria-describedby={[hint ? `${id}-hint` : "", bad && invalid ? `${id}-error` : ""].filter(Boolean).join(" ") || undefined}
         aria-invalid={bad || undefined}
         onChange={(e) => setText(e.target.value)}
@@ -133,6 +139,7 @@ export function FilterBar({
           normalize={sessionText}
           onCommit={commit.session}
           invalid={copy.logs.sessionInvalid}
+          tip={copy.help.logs.session}
           inputMode="numeric"
           className="w-[min(100%,7rem)]"
         />

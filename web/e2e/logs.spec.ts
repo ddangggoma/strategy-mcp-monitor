@@ -18,7 +18,7 @@ test("finds the bootstrap audit line by category on the external channel", async
 test("keyword search narrows rows", async ({ page, state, loginAs }) => {
   await loginAs(page, "admin", "local");
   await page.goto(`${state.localUrl}/admin/logs?range=today`);
-  await page.getByLabel(copy.logs.keyword).fill(MCP_NAME);
+  await page.getByLabel(copy.logs.keyword, { exact: true }).fill(MCP_NAME);
   await expect(page).toHaveURL(/q=/);
   const table = page.getByRole("table", { name: copy.logs.title });
   const rows = table.getByRole("row").filter({ hasText: MCP_NAME });

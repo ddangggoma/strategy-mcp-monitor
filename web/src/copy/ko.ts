@@ -34,6 +34,46 @@ const START_TYPES: Readonly<Record<StartType, string>> = { auto: "자동", "dela
 /** What the SCM can report besides the settings' choices (Windows' own name for it). */
 const SERVICE_START_TYPES: Readonly<Record<StartType | "disabled", string>> = { ...START_TYPES, disabled: "사용 안 함" };
 
+const STATE_NAMES = {
+  HEALTHY: "정상",
+  SUSPECT: "이상 감지",
+  ACTION: "조치 중",
+  RECOVERING: "복구 중",
+  FAILED: "실패",
+  MAINTENANCE: "점검 중",
+} as const;
+
+const ISSUE_NAMES = {
+  PROCESS_DOWN: "프로세스 중지",
+  UNRESPONSIVE: "응답 없음",
+  NETWORK_DOWN: "네트워크 연결 안 됨",
+  WRONG_PROCESS: "다른 프로세스가 포트 사용",
+} as const;
+
+/** What each MCP state means (server/app/monitor/engine.py), for the state legends and the detail header. */
+const STATE_HELP = {
+  HEALTHY: "마지막 점검에서 문제가 없었어요.",
+  SUSPECT: "점검에서 문제가 보여 재확인 주기마다 다시 확인하는 중이에요. 조치 대기 시간이 지나도 이어지면 자동 조치를 해요.",
+  ACTION: "시작·다시 시작 스크립트를 실행하고 있거나, 실행이 끝나 시작 유예 시간을 기다리고 있어요.",
+  RECOVERING: "조치를 마치고 다시 확인하는 중이에요. 다음 점검이 정상이면 정상으로 돌아가요.",
+  FAILED: "자동 조치를 최대 횟수만큼 해도 문제가 남아 종료 스크립트를 실행하고 자동 조치를 멈췄어요. 시작·다시 시작을 직접 누르거나 점검 모드를 켰다 끄면 다시 감시해요.",
+  MAINTENANCE: "점검 모드라 상태를 판단하지 않고 자동 복구도 하지 않아요. 이 시간은 가동률에서 빠져요.",
+} as const;
+
+/** What each issue means (server/app/monitor/probes.py classify). */
+const ISSUE_HELP = {
+  PROCESS_DOWN: "이 PC에서 포트를 여는 프로세스가 없고 점검도 실패했어요. 자동 복구는 시작 스크립트를 실행해요.",
+  UNRESPONSIVE: "점검 요청에 응답하지 않아요. 자동 복구는 다시 시작 스크립트를 실행해요.",
+  NETWORK_DOWN: "다른 PC의 MCP가 응답하지 않고 ICMP ping도 닿지 않아요. 스크립트로 고칠 수 없어 알리기만 해요.",
+  WRONG_PROCESS: "포트를 연 프로세스의 이름이 예상 프로세스 이름과 달라요. 알리기만 하고 스크립트는 실행하지 않아요.",
+} as const;
+
+type Pairs = readonly (readonly [string, string])[];
+const pairs = <K extends string>(names: Readonly<Record<K, string>>, help: Readonly<Record<K, string>>): Pairs =>
+  (Object.keys(names) as K[]).map((k) => [names[k], help[k]] as const);
+
+const ENV_VARS = "스크립트에는 MCP_ID, MCP_NAME, MCP_HOST, MCP_PORT, MCP_PID, MCP_REASON, MCP_TRIGGER, MCP_ACTOR 환경 변수가 전달돼요.";
+
 /** Log screens: thousands with separators ("1,234건"). */
 const count = (n: number | string) => (typeof n === "number" ? n.toLocaleString("ko-KR") : n);
 
@@ -114,8 +154,8 @@ export const copy = {
     label: "접속 채널",
     local: "로컬 관리 모드",
     external: "원격 모드",
-    localHint: "이 PC에서 접속했어요. 모든 관리 기능을 쓸 수 있어요.",
-    externalHint: `다른 PC에서 접속했어요. 사용자·설정·고지 관리와 MCP 등록·삭제는 이 PC의 ${LOCAL_ADDRESS}에서 할 수 있어요.`,
+    localHint: `이 PC(${LOCAL_ADDRESS})로 접속했어요. 권한에 맞는 모든 관리 기능을 쓸 수 있어요.`,
+    externalHint: `다른 PC에서 접속했어요. 사용자·설정·고지 관리, MCP 등록·삭제, 스크립트 보기·편집은 이 PC의 ${LOCAL_ADDRESS}에서만 할 수 있어요.`,
   },
 
   roles: {
@@ -123,21 +163,9 @@ export const copy = {
     admin: "Admin",
   },
 
-  states: {
-    HEALTHY: "정상",
-    SUSPECT: "이상 감지",
-    ACTION: "조치 중",
-    RECOVERING: "복구 중",
-    FAILED: "실패",
-    MAINTENANCE: "점검 중",
-  },
+  states: STATE_NAMES,
 
-  issues: {
-    PROCESS_DOWN: "프로세스 중지",
-    UNRESPONSIVE: "응답 없음",
-    NETWORK_DOWN: "네트워크 연결 안 됨",
-    WRONG_PROCESS: "다른 프로세스가 포트 사용",
-  },
+  issues: ISSUE_NAMES,
 
   nav: {
     label: "관리 메뉴",
@@ -169,6 +197,7 @@ export const copy = {
     noRecord: "기록 없음",
     actionIn: (sec: number | string) => `${sec}초 뒤 자동 조치`,
     autoActionOff: "자동 조치 꺼짐",
+    autoAction: "자동 조치",
     sparklineLabel: (name: string) => `${name} 최근 지연 추이`,
     sparklineSummary: (label: string, avg: number | string, max: number | string) => `${label}: 평균 ${avg}ms, 최대 ${max}ms`,
     running: (kind: ActionKind) => `스크립트 실행 중: ${actionKind[kind]}`,
@@ -831,6 +860,192 @@ export const copy = {
         "\n" +
         "이 안내는 연결할 때마다 표시됩니다. 확인을 누르면 작업을 계속할 수 있습니다.",
       button_text: "확인",
+    },
+  },
+
+  /**
+   * Contextual help behind the “i” buttons (InfoTip; docs/design/help-tips.md lists where each one
+   * is shown). One or two sentences, defaults where they help; the allowed ranges are already on
+   * screen under the fields. Never the same string as a visible one: tests find texts by content.
+   */
+  help: {
+    /** The button's name: starts with the visible label (WCAG 2.5.3 Label in Name). */
+    label: (label: string) => `${label} 설명`,
+    states: STATE_HELP,
+    issues: ISSUE_HELP,
+    stateLegend: { lead: "MCP는 감시 결과에 따라 아래 여섯 상태 중 하나예요.", items: pairs(STATE_NAMES, STATE_HELP) },
+    issueLegend: { lead: "상태 옆에 이슈가 붙으면 무엇이 문제인지 알려 줘요.", items: pairs(ISSUE_NAMES, ISSUE_HELP) },
+    stateLabel: "MCP 상태",
+    latency:
+      "마지막 점검에서 응답이 오기까지 걸린 시간이에요. ping 주기마다 새로 재고, 점검 방식에 따라 MCP ping·TCP 연결·ICMP 응답 시간이에요.",
+    uptime: "최근 24시간 동안 성공한 점검의 비율이에요. 점검 모드였던 시간은 빼고 계산해요.",
+    countdown: "조치 대기 시간이 끝나면 자동 조치를 해요. 그 전에 점검이 정상으로 돌아오면 조치하지 않아요.",
+    devOtp:
+      "실제 메일·문자를 보내지 않는 개발용 공급자(Dummy)예요. 인증 코드는 서버 PC의 data\\dev\\otp-outbox.log에 쌓여요. 다른 PC에서 로그인하는 사람에게는 관리자가 코드를 전해 줘야 해요.",
+    setupAdmin:
+      "Admin은 사용자·전역 설정·사전 고지 관리와 MCP 소유권 이전까지 모든 기능을 써요. 다른 Admin은 나중에 사용자 화면에서 더 만들 수 있어요.",
+    session: {
+      state: {
+        lead: "Windows가 알려 주는 원격 데스크톱 세션 상태예요.",
+        items: [
+          ["사용 중", "로그온해 화면을 쓰고 있어요."],
+          ["잠김", "로그온은 유지한 채 화면을 잠갔어요."],
+          ["연결 끊김", "로그온은 남아 있지만 원격 연결이 끊겼어요."],
+          ["로그온 전", "연결은 됐지만 아직 로그인 화면이에요."],
+        ],
+      },
+      idle: "이 세션에서 마지막으로 키보드나 마우스를 쓴 뒤 지난 시간이에요. 1분 단위로 바뀌어요.",
+      reverseDns: "클라이언트 IP 주소를 DNS에 거꾸로 물어 얻은 컴퓨터 이름이에요. 2초 안에 답이 없거나 이름이 없으면 비워 둬요.",
+      notice: "이번 연결에서 사전 고지 창의 확인 버튼을 눌렀는지 보여 줘요. 확인 전이면 고지 창이 아직 떠 있어요.",
+    },
+    dashboard: {
+      recent: "정상이 아닌 상태로 바뀐 기록과 스크립트 실행 기록 중 최근 10건이에요. 자동은 자동 복구, 수동은 사람이 누른 조치, 부팅 시는 부팅 자동 시작이에요.",
+      loginFailures: "최근 24시간 동안 시간대별 로그인 실패 건수예요. 웹 로그인은 관리 화면의 인증 코드 실패, 원격 데스크톱은 Windows 로그온 실패(이벤트 4625)예요.",
+      tamper:
+        "감시를 피하거나 기록을 지우려는 시도로 보이는 일이에요. 세션 에이전트 종료, 스크립트·로그 파일 변경이나 삭제, Windows 이벤트 로그 지움, 감사 정책 변경 같은 일을 잡아요.",
+    },
+    mcp: {
+      actions: {
+        lead: "스크립트는 이 PC에서 서비스 권한(SYSTEM)으로 실행되고, 한 MCP에는 한 번에 하나만 실행돼요. 결과는 이력 탭에 남아요.",
+        items: [
+          ["시작", "시작 스크립트를 실행해요. 점검 모드였다면 풀려요."],
+          ["다시 시작", "다시 시작 스크립트를 실행해요. 없으면 종료 스크립트 뒤에 시작 스크립트를 실행해요. 점검 모드였다면 풀려요."],
+          ["종료", "종료 스크립트를 실행하고 점검 모드로 바꿔 자동 복구를 멈춰요."],
+        ],
+      },
+      owner:
+        "소유자만 이 MCP의 스크립트를 편집할 수 있고, MCP 개발자는 자기가 소유한 MCP만 삭제할 수 있어요. 설정 변경과 직접 조치는 로그인한 사용자 누구나 할 수 있고, 소유권은 Admin이 이전해요.",
+      recoveryGroupLabel: "자동 복구 동작",
+      recoveryGroup:
+        "이상이 조치 대기 시간보다 오래 이어지면 스크립트를 실행하고, 시작 유예 시간이 지나면 다시 확인해요. 집계 구간 안에서 최대 횟수를 넘기면 종료 스크립트를 실행하고 실패 상태로 멈춰요.",
+      fields: {
+        host: "이 PC의 주소(localhost, 127.0.0.1, 이 PC의 IP나 이름)면 포트를 연 프로세스까지 확인해 프로세스 중지를 가려내요. 다른 PC면 응답만 보고, 실패하면 ICMP ping으로 네트워크를 확인해요.",
+        path: "MCP ping 점검이 요청을 보내는 HTTP 경로예요. 기본값은 /mcp이고, TCP 연결과 ICMP ping은 경로를 쓰지 않아요.",
+        probe: {
+          lead: "응답을 확인하는 방법이에요. 한 번의 점검은 3초 안에 답이 와야 성공이에요.",
+          items: [
+            ["MCP ping", "MCP 프로토콜의 ping을 HTTP로 보내요. MCP가 실제로 요청을 처리하는지까지 봐서 가장 정확해요(기본값)."],
+            ["TCP 연결", "포트에 연결만 해 봐요. MCP ping을 지원하지 않는 서버에 써요."],
+            ["ICMP ping", "PC가 ping에 답하는지만 봐요. 포트와 경로는 확인하지 않아요."],
+          ],
+        },
+        expected_process_name:
+          "이 PC의 MCP일 때 포트를 연 프로세스 이름(예: python.exe)과 비교해요. 다르면 다른 프로세스가 포트 사용으로 알려요. 대소문자는 가리지 않아요.",
+        action_delay_sec:
+          "이상을 처음 감지한 뒤 자동 조치까지 기다리는 시간이에요. 그 사이 정상으로 돌아오면 조치하지 않고, 보드의 카운트다운이 이 시간이에요. 기본 30초.",
+        startup_grace_sec:
+          "시작·다시 시작 스크립트가 성공한 뒤 MCP가 뜰 때까지 기다렸다가 다시 점검해요. 0이면 바로 확인해요. 기본 30초.",
+        max_auto_actions:
+          "집계 구간 안에서 자동 조치를 할 수 있는 횟수예요. 다 쓰고도 문제가 남으면 종료 스크립트를 실행하고 실패 상태가 돼요. 직접 조치와 부팅 시 시작은 세지 않아요. 기본 3회.",
+        window_sec: "최대 자동 조치 횟수를 세는 기간이에요. 지금부터 이 시간 전까지의 자동 조치만 세요. 기본 600초(10분).",
+        script_timeout_sec:
+          "스크립트가 이 시간 안에 끝나지 않으면 프로세스 트리째 강제로 끝내고 시간 초과로 기록해요. 스크립트가 띄운 MCP 프로세스는 기다리지 않아요. 기본 120초.",
+        auto_recovery:
+          "켜면 이상이 조치 대기 시간보다 오래 이어질 때 프로세스 중지는 시작 스크립트, 응답 없음은 다시 시작 스크립트를 자동으로 실행해요. 네트워크 문제와 다른 프로세스 이슈는 켜져 있어도 알리기만 해요.",
+        maintenance:
+          "켜 두는 동안 상태 판단과 자동 복구를 멈추고 그 시간을 가동률에서 빼요. 끄면 정상 상태에서 다시 감시해요. 종료 버튼도 점검 모드를 켜고, 시작·다시 시작은 풀어요.",
+        autostart_on_boot:
+          "서비스가 시작한 뒤 첫 점검에서 프로세스 중지면 시작 스크립트를 한 번 실행해요. 자동 조치 횟수에는 세지 않고, 점검 모드면 실행하지 않아요.",
+      },
+      chart: {
+        lead: "고른 기간의 점검 기록을 시간대별로 묶었어요.",
+        items: [
+          ["평균·최대 지연", "성공한 점검의 응답 시간 평균과 가장 긴 값이에요."],
+          ["가동률", "성공한 점검의 비율이에요. 점검 모드였던 시간은 빼요."],
+          ["상태 전이", "세로선은 상태가 바뀐 시각이에요."],
+        ],
+      },
+      actionLog: {
+        lead: "시간을 누르면 스크립트의 출력을 볼 수 있어요.",
+        items: [
+          ["계기", "자동은 자동 복구, 수동은 사람이 누른 조치, 부팅 시는 부팅 자동 시작이에요."],
+          ["결과", "실패는 종료 코드가 0이 아님, 시간 초과는 제한 시간을 넘겨 강제 종료, 실행 오류는 스크립트를 실행하지 못한 경우예요."],
+          ["종료 코드", "스크립트가 끝나며 돌려준 값이에요. 0이면 성공이에요."],
+        ],
+      },
+    },
+    scripts: {
+      kinds: {
+        start: `시작 버튼, 프로세스 중지 자동 복구, 부팅 시 자동 시작이 이 스크립트를 실행해요. ${ENV_VARS}`,
+        stop: `종료 버튼, 그리고 자동 조치를 다 쓰고도 실패했을 때 실행해요. MCP를 삭제할 때는 실행하지 않아요. ${ENV_VARS}`,
+        restart: `다시 시작 버튼과 응답 없음 자동 복구가 실행해요. 없으면 종료 스크립트 뒤에 시작 스크립트를 실행해요. ${ENV_VARS}`,
+      },
+      ext: ".ps1은 PowerShell로, .bat와 .cmd는 cmd로 실행해요. 종료 코드 0을 성공으로 봐요.",
+      versions: "저장할 때마다 버전이 하나씩 쌓여요. 되돌리기는 고른 버전의 내용을 새 버전으로 저장하므로 지금 내용도 그대로 남아요.",
+    },
+    sessions: {
+      kind: {
+        lead: "연결이 어떻게 시작됐는지예요.",
+        items: [
+          ["새 로그온", "새로 로그인해 세션을 열었어요."],
+          ["다시 연결", "연결이 끊긴 채 남아 있던 세션에 다시 연결했어요."],
+          ["서비스 시작 때 접속 중", "MCP Monitor 서비스가 시작할 때 이미 접속해 있던 세션이에요."],
+        ],
+      },
+      notice: "고지 창이 마지막으로 뜬 뒤 확인 버튼을 누르기까지 걸린 시간이에요. 확인 안 함은 누르지 않고 연결이 끝났거나 창이 아직 떠 있는 경우예요.",
+      logonType: "Windows 로그온 실패 이벤트(4625)의 로그온 유형이에요. 원격 데스크톱은 보통 원격 대화형(10)이나 네트워크(3)로 남아요.",
+      status: "Windows가 알려 준 실패 원인 코드예요. 예: 0xC000006D 이름이나 암호 오류, 0xC000006A 잘못된 암호, 0xC0000234 계정 잠김.",
+      collectors:
+        "로그와 세션 정보를 모으는 서비스 안의 수집기예요. eventlog는 Windows 이벤트 로그를, wts는 원격 데스크톱 세션 목록을 읽어요. 수집 중단이면 그동안의 기록이 빠질 수 있어요.",
+    },
+    logs: {
+      session: "Windows가 원격 데스크톱 세션마다 붙이는 번호예요. 표의 세션 열과 같은 값이고, 세션이 끝나면 같은 번호를 다른 접속이 다시 쓸 수 있어요.",
+      view: {
+        items: [
+          ["표", "기록을 시간순으로 한 줄씩 보여 줘요."],
+          ["타임라인", "사용자마다 시간대별 기록 수를 칸으로 보여 줘요. 칸을 누르면 그 사용자와 시간의 표를 열어요."],
+        ],
+      },
+    },
+    audit: {
+      kinds: {
+        items: [
+          ["관리 작업", "관리 화면에서 한 변경과 권한이 없어 거부된 요청이에요."],
+          ["로그인", "관리 화면의 인증 코드 요청과 로그인 시도예요."],
+          ["전체", "두 가지를 함께 보여 줘요."],
+        ],
+      },
+      channel: `요청이 들어온 길이에요. 로컬은 이 PC의 ${LOCAL_ADDRESS}, 원격은 다른 PC에서 8701 포트로 들어온 요청이에요.`,
+      result: {
+        items: [
+          ["성공", "요청대로 처리했어요."],
+          ["실패", "로그인 코드가 틀렸거나 로그인이 잠겼어요."],
+          ["거부", "권한이 없거나 보안 확인이 맞지 않아 서버가 막았어요."],
+          ["오류", "처리하는 중에 서버에서 오류가 났어요."],
+        ],
+      },
+    },
+    users: {
+      role: {
+        items: [
+          ["Admin", "사용자·전역 설정·사전 고지 관리와 MCP 소유권 이전을 포함해 모든 기능을 써요."],
+          ["MCP 개발자", "MCP 등록·설정·조치와 로그 조회를 하고, 자기가 소유한 MCP의 스크립트를 편집하고 삭제해요."],
+        ],
+      },
+      active: "끄면 그 사용자는 로그인할 수 없고 지금 로그인한 세션도 바로 끝나요. 남긴 기록은 지워지지 않아요.",
+      ownedMcps: "이 사용자가 소유자인 MCP 수예요. 소유자만 그 MCP의 스크립트를 편집할 수 있어요.",
+    },
+    settings: {
+      ping_interval_sec: "지연과 가동률을 재려고 모든 MCP에 점검 요청을 보내는 주기예요. 이 점검으로는 상태를 바꾸지 않아요. 기본 5초.",
+      issue_check_interval_sec: "정상인 MCP에 문제가 생겼는지 점검하는 주기예요. 짧을수록 이상을 빨리 알아채요. 기본 10초.",
+      confirm_interval_sec: "이상 감지나 복구 중인 MCP를 다시 확인하는 주기예요. 조치 대기와 복구 확인이 이 간격으로 진행돼요. 기본 1초.",
+      log_retention_days:
+        "이 기간이 지난 날짜의 로그 파일과 색인, 세션·조치 이력을 매일 03:30에 지워요. 줄여서 저장하면 지울 양을 먼저 보여 주고 몇 초 안에 정리해요. 기본 180일.",
+      log_compress_after_days:
+        "이 일수가 지난 로그 파일을 gzip으로 압축해 디스크를 아껴요. 압축한 로그도 그대로 조회돼요. 어제와 오늘 파일은 압축하지 않아요. 기본 30일.",
+      service_start_type: {
+        lead: "Windows가 켜질 때 MCP Monitor 서비스를 시작하는 방법이에요. 바꾸면 서비스에 바로 적용해요.",
+        items: [
+          ["자동", "부팅하자마자 시작해요."],
+          ["자동(지연된 시작)", "다른 자동 서비스가 뜬 뒤 잠시 있다가 시작해요. 기본값이에요."],
+          ["수동", "누군가 서비스를 직접 시작할 때만 돌아요. 그동안은 감시하지 않아요."],
+        ],
+      },
+      otp_provider: "로그인 인증 코드를 보내는 방법이에요. 지금은 Dummy(개발용)뿐이라 코드가 서버 PC의 data\\dev\\otp-outbox.log에 남아요.",
+    },
+    notice: {
+      what: "원격 데스크톱으로 연결할 때마다 그 세션 화면 가운데에 항상 위에 뜨는 창으로 보여 줘요. 표시와 확인은 로그의 사전 고지 카테고리와 세션 화면에 남아요.",
+      button: "고지 창의 하나뿐인 버튼에 쓰여요. 이 버튼을 눌러야 창이 닫히고, 누른 사실과 걸린 시간이 기록돼요.",
     },
   },
 

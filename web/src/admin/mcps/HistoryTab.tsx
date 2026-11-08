@@ -1,4 +1,5 @@
 import { lazy, memo, Suspense, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { InfoTip, type HelpContent } from "@/components/app/InfoTip";
 import { StatusBadge } from "@/components/status/StatusBadge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -94,7 +95,7 @@ export const HistoryTab = memo(function HistoryTab({ mcpId }: { mcpId: number })
         </div>
       ) : (
         <div aria-busy={stale || undefined} className={cn("flex min-w-0 flex-col gap-6", stale && "opacity-60")}>
-          <Section title={copy.mcp.chartTitle}>
+          <Section title={copy.mcp.chartTitle} tip={copy.help.mcp.chart}>
             {data.buckets.length === 0 ? (
               <p className="text-sm text-fg-muted">{copy.mcp.noChartData}</p>
             ) : (
@@ -138,14 +139,17 @@ export const HistoryTab = memo(function HistoryTab({ mcpId }: { mcpId: number })
   );
 });
 
-function Section({ title, children, id: given }: { title: string; children: ReactNode; id?: string }) {
+function Section({ title, tip, children, id: given }: { title: string; tip?: HelpContent; children: ReactNode; id?: string }) {
   const own = useId();
   const id = given ?? own;
   return (
     <section aria-labelledby={id} className="flex min-w-0 flex-col gap-3">
-      <h2 id={id} className="text-base font-semibold text-fg">
-        {title}
-      </h2>
+      <div className="flex items-center gap-1">
+        <h2 id={id} className="text-base font-semibold text-fg">
+          {title}
+        </h2>
+        {tip ? <InfoTip label={title} content={tip} align="start" /> : null}
+      </div>
       {children}
     </section>
   );
@@ -216,7 +220,7 @@ function ActionsTable({
   const id = useId();
   const c = copy.mcp.historyColumns;
   return (
-    <Section title={copy.mcp.actionsTitle} id={id}>
+    <Section title={copy.mcp.actionsTitle} tip={copy.help.mcp.actionLog} id={id}>
       <Table aria-labelledby={id}>
         <TableHeader>
           <TableRow>

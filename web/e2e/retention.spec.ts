@@ -18,8 +18,8 @@ test("lowering retention previews and then purges", async ({ page, state, loginA
   await expect.poll(() => oldestDay(page, state), { timeout: 20_000 }).toBe(older);
 
   await page.goto(`${state.localUrl}/admin/settings`);
-  await page.getByLabel(copy.settings.fields.log_compress_after_days).fill("30");
-  await page.getByLabel(copy.settings.fields.log_retention_days).fill("60");
+  await page.getByLabel(copy.settings.fields.log_compress_after_days, { exact: true }).fill("30");
+  await page.getByLabel(copy.settings.fields.log_retention_days, { exact: true }).fill("60");
   await page.getByRole("button", { name: copy.common.save }).click();
   const dialog = page.getByRole("alertdialog");
   await expect(dialog).toContainText(older);
@@ -31,7 +31,7 @@ test("lowering retention previews and then purges", async ({ page, state, loginA
   await expect.poll(() => oldestDay(page, state), { timeout: 20_000 }).toBe(newer);
 
   // restore the default for later specs (a longer retention deletes nothing: no confirm)
-  await page.getByLabel(copy.settings.fields.log_retention_days).fill("180");
+  await page.getByLabel(copy.settings.fields.log_retention_days, { exact: true }).fill("180");
   await page.getByRole("button", { name: copy.common.save }).click();
   await expect(page.getByText(copy.common.saved)).toBeVisible();
   await expect(page.getByRole("alertdialog")).toHaveCount(0);

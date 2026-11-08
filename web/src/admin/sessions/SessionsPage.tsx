@@ -4,6 +4,7 @@ import {
   CircleCheckIcon, GlobeIcon, InfoIcon, LockIcon, LogInIcon, MonitorIcon, UnplugIcon, type LucideIcon,
 } from "lucide-react";
 import { useId, useMemo, useRef, useSyncExternalStore, type ReactNode, type Ref } from "react";
+import { InfoTip, type HelpContent } from "@/components/app/InfoTip";
 import { Caution, FactBadge, SessionCard } from "@/components/status/SessionCard";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -45,12 +46,15 @@ function Time({ iso }: { iso: string }) {
   );
 }
 
-function Section({ title, id, children, busy }: { title: string; id: string; children: ReactNode; busy?: boolean }) {
+function Section({ title, tip, id, children, busy }: { title: string; tip?: HelpContent; id: string; children: ReactNode; busy?: boolean }) {
   return (
     <section aria-labelledby={id} aria-busy={busy || undefined} className={cn("flex min-w-0 flex-col gap-3", busy && "opacity-60")}>
-      <h2 id={id} className="text-base font-semibold text-fg">
-        {title}
-      </h2>
+      <div className="flex items-center gap-1">
+        <h2 id={id} className="text-base font-semibold text-fg">
+          {title}
+        </h2>
+        {tip ? <InfoTip label={title} content={tip} align="start" /> : null}
+      </div>
       {children}
     </section>
   );
@@ -207,6 +211,24 @@ function PeriodPicker({ days, onChange }: { days: SessionDays; onChange(d: Sessi
   );
 }
 
+/** A column header with an “i” beside it; the header is still named by its words alone. */
+function TipHead({ label, tip }: { label: string; tip: HelpContent }) {
+  return (
+    <TableHead scope="col" aria-label={label}>
+      <span className="inline-flex items-center gap-0.5">
+        {label}
+        <InfoTip label={label} content={tip} />
+      </span>
+    </TableHead>
+  );
+}
+
+/** Connection-history columns whose meaning is not obvious. */
+const HISTORY_TIPS: Partial<Record<string, HelpContent>> = {
+  kind: copy.help.sessions.kind,
+  notice: copy.help.sessions.notice,
+};
+
 // ---- connection history ------------------------------------------------------------------
 
 function NoticeCell({ notice }: { notice: ConnectionNotice | null }) {
@@ -287,11 +309,17 @@ function ConnectionsTable({ data, labelledBy, frameRef }: { data: SessionConnect
         <TableHeader>
           {table.getHeaderGroups().map((group) => (
             <TableRow key={group.id} className="hover:bg-transparent">
-              {group.headers.map((header) => (
-                <TableHead key={header.id} scope="col">
-                  <table.FlexRender header={header} />
-                </TableHead>
-              ))}
+              {group.headers.map((header) => {
+                const tip = HISTORY_TIPS[header.column.id];
+                const label = header.column.columnDef.header;
+                return tip && typeof label === "string" ? (
+                  <TipHead key={header.id} label={label} tip={tip} />
+                ) : (
+                  <TableHead key={header.id} scope="col">
+                    <table.FlexRender header={header} />
+                  </TableHead>
+                );
+              })}
             </TableRow>
           ))}
         </TableHeader>
@@ -328,8 +356,8 @@ function FailuresTable({ failures, labelledBy }: { failures: LogonFailure[]; lab
             <TableHead scope="col">{f.user}</TableHead>
             <TableHead scope="col">{f.clientIp}</TableHead>
             <TableHead scope="col">{c.workstation}</TableHead>
-            <TableHead scope="col">{c.logonType}</TableHead>
-            <TableHead scope="col">{c.status}</TableHead>
+            <TipHead label={c.logonType} tip={copy.help.sessions.logonType} />
+            <TipHead label={c.status} tip={copy.help.sessions.status} />
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -504,7 +532,7 @@ export function SessionsPage() {
             onChange={(d) => void navigate({ search: { days: d === DEFAULT_DAYS ? undefined : d } })}
           />
           <Records days={days} />
-          <Section title={copy.sessions.collectors} id={collectorsId}>
+          <Section title={copy.sessions.collectors} tip={copy.help.sessions.collectors} id={collectorsId}>
             <Collectors labelledBy={collectorsId} />
           </Section>
         </>

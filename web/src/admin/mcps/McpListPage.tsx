@@ -9,6 +9,7 @@ import {
 import { Link, getRouteApi } from "@tanstack/react-router";
 import { ArrowDownIcon, ArrowUpIcon, ChevronsUpDownIcon, PlusIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { InfoTip, type HelpContent } from "@/components/app/InfoTip";
 import { WithReason } from "@/components/app/WithReason";
 import { STATE_ICONS, StatusBadge } from "@/components/status/StatusBadge";
 import { UptimeMeter } from "@/components/status/UptimeMeter";
@@ -101,6 +102,13 @@ const columns = helper.columns([
 ]);
 
 const SORTABLE = new Set(["state", "name", "latency", "uptime"]);
+/** Headers whose meaning is not obvious get an “i” beside them (the header's name stays the label). */
+const HEADER_TIPS: Partial<Record<string, readonly [label: string, content: HelpContent]>> = {
+  state: [copy.mcp.columns.state, copy.help.stateLegend],
+  latency: [copy.mcp.columns.latency, copy.help.latency],
+  uptime: [copy.mcp.columns.uptime, copy.help.uptime],
+  actions: [copy.mcp.columns.actions, copy.help.mcp.actions],
+};
 const NUMERIC = new Set(["latency", "uptime"]);
 /** The actions stay in view while a narrow window scrolls the table sideways. */
 const STICKY = "sticky right-0 bg-surface shadow-[inset_1px_0_0_var(--color-border)]";
@@ -218,11 +226,13 @@ function McpTable({ data }: { data: McpDetail[] }) {
               {group.headers.map((header) => {
                 const sortable = SORTABLE.has(header.column.id);
                 const dir = header.column.getIsSorted();
+                const tip = HEADER_TIPS[header.column.id];
                 return (
                   <TableHead
                     key={header.id}
                     scope="col"
                     aria-sort={sortable ? (dir ? ARIA_SORT[dir] : "none") : undefined}
+                    aria-label={tip?.[0]}
                     className={cn(NUMERIC.has(header.column.id) && "text-right", header.column.id === "actions" && STICKY)}
                   >
                     {sortable ? (
@@ -240,6 +250,7 @@ function McpTable({ data }: { data: McpDetail[] }) {
                     ) : (
                       <table.FlexRender header={header} />
                     )}
+                    {tip ? <InfoTip label={tip[0]} content={tip[1]} className="ms-0.5" /> : null}
                   </TableHead>
                 );
               })}

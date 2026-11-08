@@ -3,6 +3,7 @@ import { getRouteApi } from "@tanstack/react-router";
 import { LockIcon, Trash2Icon } from "lucide-react";
 import { lazy, Suspense, useId, useState } from "react";
 import { toast } from "sonner";
+import { InfoTip } from "@/components/app/InfoTip";
 import { WithReason } from "@/components/app/WithReason";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
@@ -143,9 +144,12 @@ function KindPane({ mcpId, kind, item, editReason, onDirtyChange }: KindPaneProp
     <section aria-labelledby={headingId} className="flex min-w-0 flex-col gap-4">
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
         <div className="flex min-w-0 flex-col gap-0.5">
-          <h2 id={headingId} className="text-base font-semibold text-fg">
-            {copy.scripts.kinds[kind]}
-          </h2>
+          <div className="flex items-center gap-1">
+            <h2 id={headingId} className="text-base font-semibold text-fg">
+              {copy.scripts.kinds[kind]}
+            </h2>
+            <InfoTip label={copy.scripts.kinds[kind]} content={copy.help.scripts.kinds[kind]} align="start" />
+          </div>
           {item ? (
             <p className="flex flex-wrap gap-x-3 text-xs text-fg-muted">
               <span className="font-mono">{item.ext}</span>

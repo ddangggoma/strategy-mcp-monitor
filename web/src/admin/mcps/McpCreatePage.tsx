@@ -5,6 +5,7 @@ import { HistoryIcon, LockIcon } from "lucide-react";
 import { lazy, Suspense, useEffect, useId, useRef, useState, type FormEvent, type RefObject } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
+import { InfoTip } from "@/components/app/InfoTip";
 import { Button } from "@/components/ui/button";
 import { Form } from "@/components/ui/form";
 import { Label } from "@/components/ui/label";
@@ -331,14 +332,16 @@ function ScriptBlock({
   editorRef: RefObject<CodeEditorHandle | null>;
   onChange(patch: Partial<ScriptUpload>): void;
 }) {
-  const ids = { ext: useId(), error: useId(), hint: useId() };
+  const ids = { ext: useId(), error: useId(), hint: useId(), legend: useId() };
   const required = kind !== "restart";
   const describedBy = [error ? ids.error : null, required ? null : ids.hint].filter(Boolean).join(" ") || undefined;
 
   return (
-    <fieldset data-testid={`script-field-${kind}`} className="flex min-w-0 flex-col gap-2">
-      <legend className="mb-2 text-sm font-medium text-fg">
-        {copy.scripts.kinds[kind]}
+    // named by the legend's words alone (aria-labelledby), not by the tip button inside the legend
+    <fieldset data-testid={`script-field-${kind}`} aria-labelledby={ids.legend} className="flex min-w-0 flex-col gap-2">
+      <legend className="mb-2 flex items-center text-sm font-medium text-fg">
+        <span id={ids.legend}>{copy.scripts.kinds[kind]}</span>
+        <InfoTip label={copy.scripts.kinds[kind]} content={copy.help.scripts.kinds[kind]} className="ms-0.5" />
         {/* the editor says "required" itself (aria-required): shown, not read twice */}
         <span aria-hidden="true" className="ml-2 text-xs font-normal text-fg-muted">
           {required ? copy.common.required : copy.common.optional}
@@ -353,6 +356,7 @@ function ScriptBlock({
         <Label htmlFor={ids.ext} className="text-sm text-fg-muted">
           {copy.scripts.ext}
         </Label>
+        <InfoTip label={copy.scripts.ext} content={copy.help.scripts.ext} className="-ms-1.5" />
         <Select value={value.ext} onValueChange={(v) => onChange({ ext: v as ScriptExt })}>
           <SelectTrigger id={ids.ext} size="sm" className="w-24 font-mono">
             <SelectValue />

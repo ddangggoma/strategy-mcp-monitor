@@ -15,6 +15,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { InfoTip } from "@/components/app/InfoTip";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -100,11 +101,24 @@ function UsersTable({ users }: { users: AdminUser[] }) {
           <TableRow className="hover:bg-transparent">
             <TableHead scope="col">{copy.users.name}</TableHead>
             <TableHead scope="col">{copy.users.email}</TableHead>
-            <TableHead scope="col">{copy.users.role}</TableHead>
-            <TableHead scope="col">{copy.users.active}</TableHead>
+            <TableHead scope="col" aria-label={copy.users.role}>
+              <span className="inline-flex items-center gap-0.5">
+                {copy.users.role}
+                <InfoTip label={copy.users.role} content={copy.help.users.role} />
+              </span>
+            </TableHead>
+            <TableHead scope="col" aria-label={copy.users.active}>
+              <span className="inline-flex items-center gap-0.5">
+                {copy.users.active}
+                <InfoTip label={copy.users.active} content={copy.help.users.active} />
+              </span>
+            </TableHead>
             <TableHead scope="col">{copy.users.lastLogin}</TableHead>
-            <TableHead scope="col" className="text-right">
-              {copy.users.ownedMcps}
+            <TableHead scope="col" aria-label={copy.users.ownedMcps} className="text-right">
+              <span className="inline-flex items-center gap-0.5">
+                {copy.users.ownedMcps}
+                <InfoTip label={copy.users.ownedMcps} content={copy.help.users.ownedMcps} />
+              </span>
             </TableHead>
             <TableHead scope="col">
               <span className="sr-only">{copy.users.actions}</span>

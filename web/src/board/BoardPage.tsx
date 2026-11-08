@@ -1,6 +1,7 @@
 import { CircleDashedIcon, SettingsIcon } from "lucide-react";
 import { LazyMotion, MotionConfig, domMax } from "motion/react";
 import { useCallback, useEffect, useState } from "react";
+import { InfoTip } from "@/components/app/InfoTip";
 import { TopBar } from "@/components/app/TopBar";
 import { ConnectionBanner } from "@/components/status/ConnectionBanner";
 import { McpCard } from "@/components/status/McpCard";
@@ -119,16 +120,19 @@ export function BoardPage({ store, stream }: { store: BoardStore; stream: BoardS
 
           <section aria-labelledby="board-verdict" className="flex flex-col gap-5">
             <div aria-live="polite">
-              <h1
-                id="board-verdict"
-                className={cn(
-                  "flex items-center gap-3 text-display font-bold",
-                  loading ? "text-fg-muted" : v.state ? STATE_TEXT[v.state] : "text-fg",
-                )}
-              >
-                {loading ? null : <VerdictIcon aria-hidden="true" className="size-[0.8em] shrink-0" />}
-                {loading ? copy.board.title : v.text}
-              </h1>
+              <div className="flex items-center gap-2">
+                <h1
+                  id="board-verdict"
+                  className={cn(
+                    "flex items-center gap-3 text-display font-bold",
+                    loading ? "text-fg-muted" : v.state ? STATE_TEXT[v.state] : "text-fg",
+                  )}
+                >
+                  {loading ? null : <VerdictIcon aria-hidden="true" className="size-[0.8em] shrink-0" />}
+                  {loading ? copy.board.title : v.text}
+                </h1>
+                {loading ? null : <InfoTip label={copy.help.stateLabel} content={copy.help.stateLegend} side="bottom" align="start" />}
+              </div>
               {!loading && sorted.length === 0 ? <p className="mt-2 text-base text-fg-muted">{copy.board.noMcpHint}</p> : null}
             </div>
 

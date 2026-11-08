@@ -1,12 +1,13 @@
 import { Link, getRouteApi } from "@tanstack/react-router";
 import { OctagonAlertIcon } from "lucide-react";
 import { useState } from "react";
+import { InfoTip, type HelpContent } from "@/components/app/InfoTip";
 import { StatusBadge } from "@/components/status/StatusBadge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { copy } from "@/copy/ko";
 import { ApiError } from "@/lib/api";
-import type { McpDetail } from "@/lib/api-types";
+import type { Issue, McpDetail, McpState } from "@/lib/api-types";
 import { useMcp } from "../queries";
 import type { McpTab } from "../router";
 import { ScriptsTab } from "../scripts/ScriptsTab";
@@ -56,6 +57,12 @@ export function McpDetailPage() {
   );
 }
 
+/** What the MCP's state (and its issue, if any) means right now. */
+function stateHelp(state: McpState, issue: Issue | null): HelpContent {
+  if (!issue) return copy.help.states[state];
+  return { lead: copy.help.states[state], items: [[copy.issues[issue], copy.help.issues[issue]]] };
+}
+
 function NotFound() {
   return (
     <div className="flex max-w-(--size-prose) flex-col items-start gap-3">
@@ -83,7 +90,10 @@ function Detail({ mcp }: { mcp: McpDetail }) {
             {mcp.config_error ? (
               <ConfigErrorBadge size="lg" />
             ) : mcp.live ? (
-              <StatusBadge state={mcp.live.state} issue={mcp.live.issue} size="lg" />
+              <span className="inline-flex items-center gap-1">
+                <StatusBadge state={mcp.live.state} issue={mcp.live.issue} size="lg" />
+                <InfoTip label={copy.help.stateLabel} content={stateHelp(mcp.live.state, mcp.live.issue)} side="bottom" align="start" />
+              </span>
             ) : (
               <span className="text-sm text-fg-muted">{copy.mcp.noLive}</span>
             )}
@@ -93,14 +103,18 @@ function Detail({ mcp }: { mcp: McpDetail }) {
               <dt className="text-fg-muted">{copy.mcp.hostPort}</dt>
               <dd className="font-mono break-all text-fg">{`${mcp.host}:${mcp.port}`}</dd>
             </div>
-            <div className="flex gap-2">
-              <dt className="text-fg-muted">{copy.mcp.owner}</dt>
+            <div className="flex items-center gap-2">
+              <dt className="flex items-center gap-0.5 text-fg-muted">
+                {copy.mcp.owner}
+                <InfoTip label={copy.mcp.owner} content={copy.help.mcp.owner} />
+              </dt>
               <dd className={mcp.owner ? "text-fg" : "text-fg-muted"}>{mcp.owner?.name ?? copy.mcp.noOwner}</dd>
             </div>
           </dl>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <McpActions mcp={mcp} />
+          <InfoTip label={copy.mcp.columns.actions} content={copy.help.mcp.actions} side="bottom" align="end" />
           <span aria-hidden="true" className="mx-1 hidden h-6 w-px bg-border sm:block" />
           <OwnerTransferDialog mcp={mcp} />
           <DeleteMcpDialog mcp={mcp} />

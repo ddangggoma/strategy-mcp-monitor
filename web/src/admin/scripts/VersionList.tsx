@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { toast } from "sonner";
 import { TextDiff } from "@/components/app/TextDiff";
+import { InfoTip } from "@/components/app/InfoTip";
 import { WithReason } from "@/components/app/WithReason";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
@@ -40,9 +41,12 @@ export function VersionList({ mcpId, kind, current, revertReason }: VersionListP
 
   return (
     <section aria-labelledby={headingId} className="@container flex min-w-0 flex-col gap-3 border-t border-border pt-4">
-      <h3 id={headingId} className="text-sm font-semibold text-fg">
-        {copy.scripts.versions}
-      </h3>
+      <div className="flex items-center gap-1">
+        <h3 id={headingId} className="text-sm font-semibold text-fg">
+          {copy.scripts.versions}
+        </h3>
+        <InfoTip label={copy.scripts.versions} content={copy.help.scripts.versions} align="start" />
+      </div>
       {versions.isPending ? (
         <div role="status" className="flex flex-col gap-2">
           <span className="sr-only">{copy.common.loading}</span>

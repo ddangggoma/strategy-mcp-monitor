@@ -3,6 +3,7 @@ import { BoldIcon, HistoryIcon, ListIcon, Maximize2Icon } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode, type Ref } from "react";
 import { toast } from "sonner";
+import { InfoTip } from "@/components/app/InfoTip";
 import { TextDiff } from "@/components/app/TextDiff";
 import { WithReason } from "@/components/app/WithReason";
 import {
@@ -62,7 +63,10 @@ function NoticeEditor() {
     <div className="flex min-w-0 flex-col gap-6">
       <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
         <div className="flex max-w-(--size-prose) flex-col gap-1">
-          <h1 className="text-xl font-semibold text-fg">{copy.notice.title}</h1>
+          <div className="flex items-center gap-1">
+            <h1 className="text-xl font-semibold text-fg">{copy.notice.title}</h1>
+            <InfoTip label={copy.notice.title} content={copy.help.notice.what} side="bottom" align="start" />
+          </div>
           <p className="text-sm text-fg-muted">{copy.notice.lead}</p>
         </div>
         <div className="flex flex-col items-start gap-1">
@@ -360,7 +364,10 @@ function TextField({ field, value, problem, onChange, helpId, inputRef, toolbar 
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
       <div className="flex flex-wrap items-end justify-between gap-2">
-        <Label htmlFor={ids.input}>{copy.notice.fields[field]}</Label>
+        <span className="flex items-center gap-1">
+          <Label htmlFor={ids.input}>{copy.notice.fields[field]}</Label>
+          {field === "button_text" ? <InfoTip label={copy.notice.fields.button_text} content={copy.help.notice.button} /> : null}
+        </span>
         {toolbar}
       </div>
       {field === "body" ? (

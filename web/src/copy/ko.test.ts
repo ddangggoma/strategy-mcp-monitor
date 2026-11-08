@@ -48,7 +48,7 @@ it("pins the fixed terms", () => {
 });
 
 it("has every top-level section the screens import", () => {
-  expect(Object.keys(copy).sort()).toEqual(["audit", "board", "channel", "common", "dashboard", "deny", "diff", "errors", "issues", "login",
+  expect(Object.keys(copy).sort()).toEqual(["audit", "board", "channel", "common", "dashboard", "deny", "diff", "errors", "help", "issues", "login",
     "logs", "mcp", "nav", "notice", "roles", "scripts", "sessions", "settings", "setup", "states", "stream", "tamper", "toasts", "users"].sort());
 });
 
