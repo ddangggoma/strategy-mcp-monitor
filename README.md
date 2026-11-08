@@ -70,7 +70,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File install\build-desktop.ps1   
 ```
 
 1. `dist\mcp-monitor-1.1.0.exe`를 운영 PC로 옮겨 더블클릭 → "지금 설치할까요?" **예** → UAC.
-2. 설치가 끝나면 앱 창이 첫 Admin 만들기 화면(`/admin/setup`)을 엽니다. 서비스는 이미 돌고 있습니다.
+2. 설치가 끝나면 앱 창이 상태 보드를 엽니다. 보드의 **초기 설정 시작** 링크(또는 위쪽 **관리 화면** 버튼)로 `/admin/setup`에 갑니다. 서비스는 이미 돌고 있습니다.
 
 명령줄을 좋아한다면 관리자 PowerShell에서 `& .\mcp-monitor-1.1.0.exe install --open-firewall | Write-Output`. 자세한 순서는 [📦 설치와 운영](#-설치와-운영)에 있습니다.
 
@@ -136,7 +136,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File install\build-desktop.ps1   
 | `/admin/users`, `/admin/settings`, `/admin/notice` | 사용자 관리, 설정(주기·보존·시작 유형), 고지 문구 | Local Admin |
 | `/notice` | 고지 창 | 세션 에이전트가 연 창만(토큰) |
 
-그 PC에서는 시작 메뉴의 **MCP Monitor**(앱 창)가 Local 채널의 `/admin`을 엽니다. 앱 창은 `127.0.0.1:<Local 포트>` 밖으로 나가지 않고, 다른 주소는 기본 브라우저로 넘깁니다. 창을 닫으면 트레이로 숨고, 서비스는 계속 돕니다.
+그 PC에서는 시작 메뉴의 **MCP Monitor**(앱 창)가 Local 채널의 상태 보드(`/`, 8701의 보드와 같은 화면)를 엽니다. 보드 위쪽의 **관리 화면** 버튼이 `/admin`(로그인 전이면 로그인 화면)으로, 관리 화면 위쪽의 **상태 보드** 버튼이 보드로 돌아갑니다. 앱 창은 `127.0.0.1:<Local 포트>` 밖으로 나가지 않고, 다른 주소는 기본 브라우저로 넘깁니다. 창을 닫으면 트레이로 숨고, 서비스는 계속 돕니다.
 
 권한이 없는 기능은 숨기지 않고 비활성으로 두며 이유를 함께 보여 줍니다. 화면별 명세는 [`docs/design/screens/`](docs/design/screens/)에 있습니다.
 
@@ -351,7 +351,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File install\build-desktop.ps1
 
 1. 해시를 확인합니다: `Get-FileHash -Algorithm SHA256 .\mcp-monitor-1.1.0.exe`가 `.sha256`의 값과 같은지.
 2. 서명이 없으니 SAC 상태부터 봅니다: `(Get-MpComputerStatus).SmartAppControlState`. `On`이면 `& .\mcp-monitor-1.1.0.exe --version | Write-Output`이 막히지 않는지 먼저 확인합니다(막히면 OPERATIONS ② 준비 2).
-3. **더블클릭** → "지금 설치할까요?" **예** → UAC → "설치 완료" → 앱 창이 `/admin/setup`을 엽니다. 받은 exe는 지워도 됩니다.
+3. **더블클릭** → "지금 설치할까요?" **예** → UAC → "설치 완료" → 앱 창이 상태 보드를 열고, 보드의 **초기 설정 시작** 링크로 `/admin/setup`에 갑니다. 받은 exe는 지워도 됩니다.
 4. 또는 관리자 PowerShell:
 
    ```powershell

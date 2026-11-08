@@ -173,6 +173,24 @@ it("anonymous visitors get the channel badge and a login link back to the board"
   expect(screen.getByRole("link", { name: copy.common.login })).toHaveAttribute("href", "/admin/login?redirect=/");
 });
 
+it("the Local board (the app window's home) leads to the admin screen in one click", () => {
+  renderBoard(boardEvent({ mcps: [] }), meFixture(null, "local"));
+  const banner = screen.getByRole("banner");
+  // signed out: through the login page, which comes back to the admin screen
+  expect(within(banner).getByRole("link", { name: copy.common.adminHome })).toHaveAttribute("href", "/admin/login?redirect=/admin");
+  expect(within(banner).getByRole("link", { name: copy.common.login })).toHaveAttribute("href", "/admin/login?redirect=/");
+});
+
+it("signed in on the Local board, the admin button goes straight to the admin screen", () => {
+  renderBoard(boardEvent({ mcps: [] }), meFixture("developer", "local", 4));
+  expect(within(screen.getByRole("banner")).getByRole("link", { name: copy.common.adminHome })).toHaveAttribute("href", "/admin");
+});
+
+it.each([null, "admin"] as const)("the External board has no admin button (role %s: login link, then the account menu)", (role) => {
+  renderBoard(boardEvent({ mcps: [] }), meFixture(role, "external"));
+  expect(screen.queryByRole("link", { name: copy.common.adminHome })).toBeNull();
+});
+
 it("the account menu shows who is logged in and links to the admin", async () => {
   renderBoard(boardEvent({ mcps: [] }), meFixture("developer", "local", 4));
   expect(screen.queryByRole("link", { name: copy.common.login })).toBeNull();

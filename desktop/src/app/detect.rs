@@ -56,9 +56,10 @@ pub fn decide(installed: Option<Version>, service_exists: bool, own: Version) ->
     }
 }
 
-/// The admin screen on the local channel.
+/// The window's home: the status board on the local channel (the same board the external
+/// channel serves; its top bar there leads to the admin screen in one click).
 pub fn app_url(info: &InstallInfo) -> String {
-    format!("http://127.0.0.1:{}/admin", info.local_port)
+    format!("http://127.0.0.1:{}/", info.local_port)
 }
 
 /// The app window's WebView2 profile (kept between runs: the admin login stays): under the folder
@@ -140,7 +141,7 @@ mod tests {
         let info = read_install_info(d.path()).unwrap();
         assert_eq!(
             (app_url(&info), info.external_port),
-            ("http://127.0.0.1:9700/admin".to_string(), 9701)
+            ("http://127.0.0.1:9700/".to_string(), 9701)
         );
         assert_eq!(info.data_root, Path::new(r"D:\MCP"));
         fs::write(d.path().join("install.json"), "{").unwrap();

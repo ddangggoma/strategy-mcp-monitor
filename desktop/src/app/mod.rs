@@ -2,7 +2,8 @@
 //! opening the window (Y12); `app` is the single-instance WebView2 window on the local channel
 //! with a tray icon (Y11); `autostart on|off` is the user's sign-in start.
 //!
-//! The window only shows `http://127.0.0.1:<local port>` and its own "connecting" page; every
+//! The window opens on the status board (`http://127.0.0.1:<local port>/`, whose top bar leads to
+//! the admin screen) and only shows that origin and its own "connecting" page; every
 //! other web address goes to the default browser and anything else is refused ([`nav`]). New
 //! windows are never made. Devtools are off. Closing the window hides it (the tray stays and the
 //! service keeps running); `트레이 종료` ends the app. A second start brings the first window
@@ -290,7 +291,7 @@ pub fn run_app_command(sys: &dyn crate::System, args: &AppArgs) -> i32 {
     }
 }
 
-/// One step of the "connecting" page: the server answered → the admin screen; no answer for
+/// One step of the "connecting" page: the server answered → the status board; no answer for
 /// [`STOPPED_AFTER`] → the `#stopped` text (once), then ask every [`STOPPED_EVERY`]; before that
 /// every [`CONNECT_EVERY`].
 #[derive(Debug, PartialEq)]
@@ -325,8 +326,8 @@ fn channel_answers(agent: &ureq::Agent, port: u16) -> Result<(), String> {
 }
 
 /// The thread behind the "connecting" page: asks the server until it answers, then shows the
-/// admin screen (and ends).
-fn start_connecting(window: WebviewWindow, port: u16, admin: Url) {
+/// status board, the window's home (and ends).
+fn start_connecting(window: WebviewWindow, port: u16, home: Url) {
     let _ = std::thread::Builder::new()
         .name("app-connect".into())
         .spawn(move || {
@@ -350,8 +351,8 @@ fn start_connecting(window: WebviewWindow, port: u16, admin: Url) {
                 }
                 match connect_step(answer.is_ok(), start.elapsed(), stopped_shown) {
                     Connect::Open => {
-                        let opened = window.navigate(admin);
-                        eprintln!("app window: the server answered; admin page ({opened:?})");
+                        let opened = window.navigate(home);
+                        eprintln!("app window: the server answered; status board ({opened:?})");
                         return;
                     }
                     Connect::ShowStopped => {
@@ -480,7 +481,7 @@ pub fn run_window(target: AppTarget, background: bool) -> i32 {
         crate::agent::config::strip_webview2_env(&mut crate::agent::config::ProcessEnv);
     }
     let port = target.info.local_port;
-    let admin = Url::parse(&app_url(&target.info)).expect("a valid address");
+    let home = Url::parse(&app_url(&target.info)).expect("a valid address");
     let data_dir =
         app_data_dir(&crate::agent::webview::local_app_data().unwrap_or_else(std::env::temp_dir));
     let install_dir = target.install_dir;
@@ -499,7 +500,7 @@ pub fn run_window(target: AppTarget, background: bool) -> i32 {
                         // Without a tray a hidden window could never be opened.
                         let _ = window.show();
                     }
-                    start_connecting(window, port, admin);
+                    start_connecting(window, port, home);
                 }
                 Err(e) => {
                     eprintln!("app window: not created: {e}");
@@ -649,7 +650,7 @@ mod tests {
         );
         let dev = app_target(Some("http://127.0.0.1:5555"), None).unwrap();
         assert_eq!((dev.info.local_port, dev.install_dir), (5555, None));
-        assert_eq!(app_url(&dev.info), "http://127.0.0.1:5555/admin");
+        assert_eq!(app_url(&dev.info), "http://127.0.0.1:5555/");
         assert_eq!(app_target(Some("http://localhost:5555"), None), None);
     }
 
