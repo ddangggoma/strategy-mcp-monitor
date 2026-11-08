@@ -18,7 +18,7 @@ from tests.live import live_app
 from tests.mcp_helpers import login_as, make_user, seed_mcp
 from tests.test_auth_api import audit_events
 
-KEYS = {"id", "name", "icon", "state", "issue", "latency_ms", "sparkline", "uptime_24h", "last_check_at", "action_due_at", "action_in_sec", "action_delay_sec", "maintenance", "running"}
+KEYS = {"id", "name", "icon", "icon_image", "state", "issue", "latency_ms", "sparkline", "uptime_24h", "last_check_at", "action_due_at", "action_in_sec", "action_delay_sec", "maintenance", "running"}
 
 
 def parse(chunk: str):

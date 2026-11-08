@@ -4,16 +4,18 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import sqlite3
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from datetime import timedelta
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Path, Query, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import ValidationError
 
 from app.auth.policy import Action, can
 from app.clock import to_kst_iso
+from app.monitor import icon_images
 from app.monitor.bus import BoardBus, IpStreamLimitError, StreamLimitError, Subscription
 from app.monitor.engine import ActionInProgressError
 from app.monitor.history import ActionRecord
@@ -24,6 +26,7 @@ from app.services import Services
 from app.users.store import User
 from app.web.channels import Channel
 from app.web.deps import ApiError, client_ip, get_channel, get_services, require, user_summary
+from app.web.static import IMMUTABLE
 
 router = APIRouter()
 
@@ -53,6 +56,7 @@ def mcp_detail(services: Services, mcp: Mcp) -> dict[str, Any]:
         **mcp.config.model_dump(warnings=False),  # an invalid stored config may mismatch the types
         "id": mcp.id,
         "config_error": mcp.config_error is not None,
+        "icon_image": services.icon_images.url(mcp.id),
         "owner": {"id": owner.id, "email": owner.email, "name": owner.name} if owner else None,
         "created_at": to_kst_iso(mcp.created_at),
         "live": services.monitor.board_item(mcp.id),
@@ -368,6 +372,108 @@ async def update_mcp(
             target={"mcp_id": mcp_id, "changes": changes}, result="ok",
         )
     return mcp_detail(services, after)
+
+
+# ---- icon image (app/monitor/icon_images.py) ---------------------------------------
+
+ICON_IMAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+
+
+def _icon_audit(
+    services: Services, actor: User | None, action: str, channel: Channel, ip: str | None,
+    target: dict[str, Any], result: Literal["ok", "error"],
+) -> None:
+    services.audit.admin(actor=actor, action=action, channel=channel, ip=ip, target=target, result=result)
+
+
+@router.put("/api/mcps/{mcp_id}/icon-image")
+async def put_icon_image(
+    mcp_id: McpId,
+    request: Request,
+    actor: User | None = Depends(require(Action.EDIT_MCP_SETTINGS)),
+    services: Services = Depends(get_services),
+    channel: Channel = Depends(get_channel),
+) -> dict[str, Any]:
+    """Body = the image bytes, Content-Type = their type (no multipart). Same permission as PUT
+    /api/mcps/{id}. 413 body_too_large over MAX_BYTES, 422 validation for anything else refused."""
+    ip = client_ip(request)
+
+    def fail(status: int, code: str, **extra: Any) -> ApiError:
+        _icon_audit(services, actor, "mcp_icon_image_set", channel, ip,
+                    {"mcp_id": mcp_id, **extra, "error": code}, "error")
+        return ApiError(status, code)
+
+    declared = request.headers.get("content-length", "")
+    if declared.isascii() and declared.isdigit() and int(declared) > icon_images.MAX_BYTES:
+        raise fail(413, "body_too_large", bytes=int(declared))  # refused before reading the body
+    if services.mcps.get(mcp_id) is None:
+        raise fail(404, "not_found")
+    data = await request.body()
+    try:
+        mime = icon_images.check_image(request.headers.get("content-type"), data)
+    except icon_images.IconImageError as exc:
+        raise fail(exc.status, exc.code, bytes=len(data),
+                   mime=icon_images.media_type(request.headers.get("content-type"))[:100]) from None
+    try:
+        sha = services.icon_images.set(mcp_id, mime, data)
+    except sqlite3.IntegrityError:  # the MCP was deleted while the body arrived
+        raise fail(404, "not_found") from None
+    mcp = _get_mcp(services, mcp_id)
+    services.monitor.republish(mcp_id)
+    _icon_audit(services, actor, "mcp_icon_image_set", channel, ip,
+                {"mcp_id": mcp_id, "mime": mime, "bytes": len(data), "sha256": sha[:icon_images.VERSION_HEX]}, "ok")
+    return mcp_detail(services, mcp)
+
+
+@router.delete("/api/mcps/{mcp_id}/icon-image")
+async def delete_icon_image(
+    mcp_id: McpId,
+    request: Request,
+    actor: User | None = Depends(require(Action.EDIT_MCP_SETTINGS)),
+    services: Services = Depends(get_services),
+    channel: Channel = Depends(get_channel),
+) -> dict[str, Any]:
+    """Back to the emoji (or the default icon). Idempotent: removing nothing is a 200 too, unaudited
+    like a settings PUT that changes nothing."""
+    ip = client_ip(request)
+    mcp = services.mcps.get(mcp_id)
+    if mcp is None:
+        _icon_audit(services, actor, "mcp_icon_image_remove", channel, ip,
+                    {"mcp_id": mcp_id, "error": "not_found"}, "error")
+        raise ApiError(404, "not_found")
+    old = services.icon_images.remove(mcp_id)
+    if old is not None:
+        services.monitor.republish(mcp_id)
+        _icon_audit(services, actor, "mcp_icon_image_remove", channel, ip,
+                    {"mcp_id": mcp_id, "mime": old.mime, "bytes": len(old.data), "sha256": old.version}, "ok")
+    return mcp_detail(services, mcp)
+
+
+@router.get("/api/mcps/{mcp_id}/icon-image")
+async def get_icon_image(
+    mcp_id: McpId,
+    request: Request,
+    v: Annotated[str | None, Query(max_length=64)] = None,
+    _user: User | None = Depends(require(Action.VIEW_BOARD)),
+    services: Services = Depends(get_services),
+) -> Response:
+    """The image as uploaded, for everyone who may see the board. Cached for good under the URL the
+    payloads carry (``?v=`` = the current version); any other URL revalidates (ETag)."""
+    image = services.icon_images.get(mcp_id)
+    if image is None:
+        raise ApiError(404, "not_found")
+    etag = f'"{image.sha256}"'
+    headers = {
+        "ETag": etag,
+        "Cache-Control": IMMUTABLE if v == image.version else "no-cache",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": ICON_IMAGE_CSP,
+        "Referrer-Policy": "no-referrer",
+    }
+    match = request.headers.get("if-none-match", "")
+    if etag in (t.strip().removeprefix("W/") for t in match.split(",")) or match.strip() == "*":
+        return Response(status_code=304, headers=headers)
+    return Response(content=image.data, media_type=image.mime, headers=headers)
 
 
 @router.post("/api/mcps/{mcp_id}/actions/{kind}", status_code=202)

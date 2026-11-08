@@ -227,6 +227,16 @@ MIGRATIONS: list[str] = [
     ALTER TABLE rdp_logon_failures_v8 RENAME TO rdp_logon_failures;
     CREATE INDEX idx_rdp_logon_failures_at ON rdp_logon_failures(at);
     """,
+    # 9 — the per-MCP icon image (app/monitor/icon_images.py): the uploaded logo, removed with its MCP.
+    """
+    CREATE TABLE mcp_icons (
+        mcp_id INTEGER PRIMARY KEY REFERENCES mcps(id) ON DELETE CASCADE,
+        mime TEXT NOT NULL,                         -- canonical type sniffed from the bytes
+        sha256 TEXT NOT NULL,
+        data BLOB NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    """,
 ]
 
 

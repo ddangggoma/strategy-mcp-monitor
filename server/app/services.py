@@ -24,6 +24,7 @@ from app.logstore.retention import RetentionJob
 from app.logstore.writer import DailyJsonlWriter, LogWriter
 from app.monitor.bus import BoardBus
 from app.monitor.history import McpHistory
+from app.monitor.icon_images import IconImageStore
 from app.monitor.probes import Prober
 from app.monitor.runner import ScriptRunner
 from app.monitor.scripts import ScriptStore
@@ -58,6 +59,8 @@ class Services:
     audit: AuditLogger
     mcps: McpStore
     scripts: ScriptStore
+    icon_images: IconImageStore
+    """The uploaded per-MCP icon images (``mcp_icons``); the board, lists and detail carry their URL."""
     history: McpHistory
     bus: BoardBus
     tamper: TamperMonitor
@@ -163,6 +166,7 @@ def _wire(
     mcps = McpStore(db, clock, users)
     scripts = ScriptStore(db, paths, clock, mcps)
     history = McpHistory(db, clock)
+    icon_images = IconImageStore(db, clock)
     bus = BoardBus()
     tamper = TamperMonitor(log, bus, clock)
     monitor = Monitor(
@@ -176,6 +180,7 @@ def _wire(
         bus=bus,
         clock=clock,
         tamper=tamper,
+        icon_images=icon_images,
     )
     config_collectors = collectors or CollectorConfig()
     rdp_history = SessionHistory(db, clock)
@@ -256,6 +261,7 @@ def _wire(
         audit=audit,
         mcps=mcps,
         scripts=scripts,
+        icon_images=icon_images,
         history=history,
         bus=bus,
         tamper=tamper,
