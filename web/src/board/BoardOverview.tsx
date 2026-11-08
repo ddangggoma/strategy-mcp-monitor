@@ -28,24 +28,29 @@ const rise = (i: number) => ({ "--rise-i": i }) as CSSProperties;
 /** The board state a tone stands for: tones borrow the state hues, never a new one. */
 const TONE_STATE: Record<Tone, McpState> = { good: "HEALTHY", warn: "SUSPECT", bad: "FAILED" };
 
+/** A tile's own hue (tokens.css --color-metric-*): its chip, edge, wash and line. Never a state. */
+export type Accent = "states" | "latency" | "checks" | "uptime" | "cpu" | "memory" | "gpu" | "disk" | "network";
+
 function Tile({
   title,
   icon: Icon,
   tone,
+  accent,
   index,
   children,
   className,
 }: {
   title: string;
   icon: LucideIcon;
-  /** The state hue of the icon chip; null keeps it neutral. */
+  /** The tile's verdict: a problem state takes over its band, edge and wash; null leaves it to its hue. */
   tone: McpState | null;
+  accent: Accent;
   index: number;
   children: ReactNode;
   className?: string;
 }) {
   return (
-    <li data-anim="rise" data-tone={tone ?? undefined} style={rise(index)} className={cn("ov-tile", className)}>
+    <li data-anim="rise" data-tone={tone ?? undefined} data-accent={accent} style={rise(index)} className={cn("ov-tile", className)}>
       <h2 className="flex items-center gap-2 text-sm font-medium text-fg-muted">
         <span aria-hidden="true" className="ov-chip">
           <Icon className="size-4" />
@@ -201,13 +206,13 @@ export function LiveStatus({ status, lastCheckAt, className }: { status: StreamS
  * Four tiles between the verdict and the MCP cards: how the MCPs split over the states, the mean
  * response time with its recent trend, how many recent checks were answered, and the mean 24 h
  * uptime. Numbers come from the live board only; MCPs in maintenance are left out of the last
- * three (they are not checked). Colors are the state hues, each with an icon and a number beside it.
+ * three (they are not checked). State colours carry the verdicts, each with an icon and a number
+ * beside it; each tile also has its own metric hue (chip, edge, line), which never means a state.
  */
 export function BoardOverview({ items }: { items: ReadonlyMap<number, BoardItem> }) {
   const o = useMemo(() => overview(items.values()), [items]);
   if (o.total === 0) return null;
 
-  const trendTone: McpState = o.worst ?? "HEALTHY";
   const checkTone = o.checkRate ? TONE_STATE[toneOf(o.checkRate.ratio, CHECK_TONE)] : null;
   const uptimeTone = o.uptime ? TONE_STATE[toneOf(o.uptime.avg, UPTIME_TONE)] : null;
   const checkPct = o.checkRate ? percent(o.checkRate.ratio) : null;
@@ -216,21 +221,21 @@ export function BoardOverview({ items }: { items: ReadonlyMap<number, BoardItem>
   return (
     <section aria-label={copy.board.overview.title}>
       <ul className="ov-grid">
-        <Tile title={copy.board.overview.distribution} icon={ChartPieIcon} tone={o.worst} index={1} className="ov-tile-wide">
+        <Tile title={copy.board.overview.distribution} icon={ChartPieIcon} tone={o.worst} accent="states" index={1} className="ov-tile-wide">
           <Distribution o={o} />
         </Tile>
 
-        <Tile title={copy.board.overview.avgLatency} icon={ActivityIcon} tone={null} index={2}>
+        <Tile title={copy.board.overview.avgLatency} icon={ActivityIcon} tone={null} accent="latency" index={2}>
           <Metric>
             <RollingNumber value={o.latency ? o.latency.avg : null} unit="ms" />
           </Metric>
-          <div className="ov-trend" data-state={trendTone}>
+          <div className="ov-trend">
             <Sparkline points={o.latencyTrend} label={copy.board.overview.avgLatency} height={40} />
           </div>
           <Sub>{o.latency ? copy.board.overview.slowest(o.latency.maxName, Math.round(o.latency.max)) : copy.board.overview.noValue}</Sub>
         </Tile>
 
-        <Tile title={copy.board.overview.checkRate} icon={ListChecksIcon} tone={checkTone} index={3}>
+        <Tile title={copy.board.overview.checkRate} icon={ListChecksIcon} tone={checkTone} accent="checks" index={3}>
           <Metric>
             <RollingNumber value={checkPct} unit="%" decimals={checkPct === 100 ? 0 : 1} />
           </Metric>
@@ -238,7 +243,7 @@ export function BoardOverview({ items }: { items: ReadonlyMap<number, BoardItem>
           <Sub>{o.checkRate ? copy.board.overview.checkSummary(o.checkRate.ok, o.checkRate.total) : copy.board.overview.noValue}</Sub>
         </Tile>
 
-        <Tile title={copy.board.overview.avgUptime} icon={ShieldCheckIcon} tone={uptimeTone} index={4}>
+        <Tile title={copy.board.overview.avgUptime} icon={ShieldCheckIcon} tone={uptimeTone} accent="uptime" index={4}>
           <Metric>
             <RollingNumber value={uptimePct} unit="%" decimals={uptimePct === 100 ? 0 : 1} />
           </Metric>

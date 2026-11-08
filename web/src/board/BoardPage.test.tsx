@@ -90,6 +90,11 @@ it("shows the PC's resources and follows system events", () => {
   expect(disk).toHaveAttribute("aria-valuenow", "94");
   expect(disk).toHaveAttribute("data-state", "FAILED");
   expect(within(panel).getByText("1.5MB/s")).toBeInTheDocument();
+  // each tile names its own metric hue; the state stays a separate attribute (data-tone)
+  const tileOf = (name: string) => within(panel).getByRole("heading", { name }).closest("li")!;
+  const t = copy.board.system;
+  expect([t.cpu, t.memory, t.disk, t.network].map((n) => tileOf(n).dataset.accent)).toEqual(["cpu", "memory", "disk", "network"]);
+  expect(tileOf(t.disk)).toHaveAttribute("data-tone", "FAILED");
   act(() => store.apply({ event: "system", data: JSON.stringify(systemFixture({ cpu: { percent: 5, cores: 8 } })) }));
   expect(within(panel).getByRole("img", { name: copy.board.system.gaugeLabel("CPU", 5) })).toBeInTheDocument();
 });
@@ -107,6 +112,7 @@ it("shows the GPU as a ring with its trend, its memory as a bar and a tip, in th
   const panel = screen.getByRole("region", { name: copy.board.system.title });
   const tile = within(panel).getByRole("heading", { name: copy.board.system.gpu }).closest("li")!;
   expect(tile).toHaveAttribute("data-tone", "FAILED"); // over 90 %, like the CPU
+  expect(tile).toHaveAttribute("data-accent", "gpu");
   expect(within(tile).getByRole("img", { name: copy.board.system.gaugeLabel("GPU", 91) })).toBeInTheDocument();
   expect(within(tile).getByRole("img", { name: (n) => n.startsWith(copy.board.system.trendLabel("GPU")) })).toBeInTheDocument();
   const meter = within(tile).getByRole("meter", { name: copy.board.system.gpuMemory });

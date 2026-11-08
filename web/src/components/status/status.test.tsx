@@ -404,6 +404,19 @@ describe("McpCard", () => {
     expect(screen.getByTestId("mcp-card")).toHaveAttribute("data-anim", "spin");
   });
 
+  it("glows on a new reading only, and draws a turned state's band without the entrance delay", () => {
+    const { container, rerender } = render(<McpCard item={item(1, "HEALTHY")} receivedAt={100} />);
+    expect(container.querySelector("[data-anim='flash']")).toBeNull(); // the first reading: the rise is enough
+    expect(container.querySelector("[data-anim='band']")).toHaveAttribute("data-entrance");
+    rerender(<McpCard item={item(1, "HEALTHY")} receivedAt={200} />);
+    const flash = container.querySelector("[data-anim='flash']");
+    expect(flash).toHaveAttribute("aria-hidden", "true");
+    rerender(<McpCard item={item(1, "HEALTHY")} receivedAt={300} />);
+    expect(container.querySelector("[data-anim='flash']")).not.toBe(flash); // remounted: the glow plays again
+    rerender(<McpCard item={item(1, "FAILED")} receivedAt={300} />);
+    expect(container.querySelector("[data-anim='band']")).not.toHaveAttribute("data-entrance");
+  });
+
   it("uses dashes when nothing was measured yet", () => {
     render(
       <McpCard

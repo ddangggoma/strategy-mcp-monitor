@@ -207,6 +207,40 @@
     }
   }
 
+  /* Skeleton: a soft band of light sweeps across a placeholder while it loads (translate of a
+     pseudo-element, so compositing only). The placeholder's own fill stays for reduced motion. */
+  .skeleton {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: linear-gradient(
+      100deg,
+      transparent 20%,
+      color-mix(in oklch, var(--color-fg) 7%, transparent) 50%,
+      transparent 80%
+    );
+    translate: -100% 0;
+    animation: skeleton-sweep 1.6s var(--ease-in-out) infinite;
+  }
+
+  @keyframes skeleton-sweep {
+    to {
+      translate: 100% 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton::after {
+      animation: none;
+      opacity: 0;
+    }
+  }
+
   /* sparklines draw in from the left */
   .spark-draw {
     animation: spark-draw 900ms var(--ease-out) backwards;

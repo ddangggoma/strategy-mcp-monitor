@@ -1,6 +1,6 @@
 import { CirclePauseIcon, PlayIcon } from "lucide-react";
 import { m } from "motion/react";
-import { useId } from "react";
+import { useId, useState } from "react";
 import { InfoTip } from "@/components/app/InfoTip";
 import { copy } from "@/copy/ko";
 import type { BoardItem } from "@/lib/api-types";
@@ -37,6 +37,16 @@ function LastCheck({ at }: { at: string | null }) {
 export function McpCard({ item, receivedAt }: { item: BoardItem; receivedAt: number }) {
   const nameId = useId();
   const recovering = item.state === "RECOVERING";
+  // the reading the card first showed: only a later one lights the card up (its entrance is the rise)
+  const [firstReading] = useState(receivedAt);
+  // whether the state has turned since the card appeared: the first band draws in with the card's
+  // entrance, a later one at once (state from the previous render, React's documented pattern)
+  const [shownState, setShownState] = useState(item.state);
+  const [stateTurned, setStateTurned] = useState(false);
+  if (item.state !== shownState) {
+    setShownState(item.state);
+    setStateTurned(true);
+  }
   return (
     <m.article
       layout="position"
@@ -48,6 +58,11 @@ export function McpCard({ item, receivedAt }: { item: BoardItem; receivedAt: num
       data-anim={recovering ? "spin" : undefined}
       className="mcp-card"
     >
+      {/* the state band along the top: remounted per state, so a card turning SUSPECT or FAILED
+          draws its band in from the left (McpCard.css) */}
+      <span key={item.state} aria-hidden="true" data-anim="band" data-entrance={stateTurned ? undefined : ""} className="mcp-card-band" />
+      {/* a new reading: a brief glow around the card, remounted per reading */}
+      {receivedAt !== firstReading ? <span key={receivedAt} aria-hidden="true" data-anim="flash" className="mcp-card-flash" /> : null}
       <header className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2.5">
           {/* the chosen icon, or the default MCP icon; decorative (the name is the label) */}

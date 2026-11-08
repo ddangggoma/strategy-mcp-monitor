@@ -2,8 +2,10 @@
  * Design tokens — the only file in web/src that may spell out a color value.
  *
  * Direction (docs/design/direction.md): a dark-first operations console in the
- * "high-performance HMI" tradition. Neutrals are a cool steel (hue 255); hue is
- * reserved for MCP state, so a colored thing on screen always means a state.
+ * "high-performance HMI" tradition. Neutrals are a cool steel (hue 255). The state
+ * hues (green, amber, orange, cyan, red, slate) always mean an MCP state; the board's
+ * metric hues (blue, violet, teal, indigo, rose) only name a resource or a tile, and
+ * sit away from the state hues so they never read as one.
  * Interactive emphasis uses luminance (inverse fills), not a brand hue.
  *
  * Layer 1: OKLCH primitives (never used by components directly).
@@ -77,6 +79,32 @@
     --magenta-600: oklch(0.45 0.16 355);
     --olive-500: oklch(0.6 0.135 115); /* one step serves both themes */
 
+    /* ── Primitives: board metric hues. Each names a resource (CPU, memory, GPU, disk, network)
+          or an overview tile, never a state: all sit in the cool/purple half of the wheel, away
+          from the amber/orange/red a load shifts to. -l = on the light theme, -d = on the dark.
+          Lightness alternates along the tile row (CPU, memory, GPU, disk, network) so neighbours
+          stay apart for colour-blind readers (dataviz validator: adjacent CVD ΔE ≥ 7.7, normal
+          ΔE ≥ 15 in both themes). Lagoon is the brand icon's teal. The -2 steps are the far end
+          of a ring or bar gradient: a neighbouring hue at the same lightness. */
+    --azure-l: oklch(0.6 0.13 242);
+    --azure-d: oklch(0.58 0.11 240);
+    --azure-2-l: oklch(0.6 0.13 262);
+    --azure-2-d: oklch(0.58 0.13 262);
+    --grape-l: oklch(0.46 0.18 305);
+    --grape-d: oklch(0.665 0.17 305);
+    --grape-2-l: oklch(0.46 0.18 325);
+    --grape-2-d: oklch(0.64 0.16 322);
+    --lagoon-l: oklch(0.58 0.102 182);
+    --lagoon-d: oklch(0.645 0.105 182);
+    --lagoon-2-l: oklch(0.6 0.1 205);
+    --lagoon-2-d: oklch(0.645 0.108 205);
+    --iris-l: oklch(0.5 0.14 278);
+    --iris-d: oklch(0.57 0.17 278);
+    --iris-2-l: oklch(0.5 0.15 300);
+    --iris-2-d: oklch(0.57 0.17 300);
+    --rose-l: oklch(0.44 0.18 342);
+    --rose-d: oklch(0.58 0.13 354);
+
     /* ── Roles: surfaces and text ─────────────────────────────────────── */
     --color-bg: light-dark(var(--steel-50), var(--steel-950));
     --color-surface: light-dark(var(--steel-0), var(--steel-900));
@@ -135,6 +163,26 @@
     --color-cat-mcp: light-dark(var(--teal-600), var(--teal-400));
     --color-cat-security: light-dark(var(--magenta-600), var(--magenta-400));
     --color-cat-system: var(--olive-500);
+
+    /* ── Roles: board metric accents (ring/bar gradients, sparklines, tile chips, the faint tile
+          wash and gradient edge; non-text, 3:1 on every surface). A load over its threshold
+          still turns its ring and bar amber or red: the state hue wins over the metric hue. */
+    --color-metric-cpu: light-dark(var(--azure-l), var(--azure-d));
+    --color-metric-cpu-2: light-dark(var(--azure-2-l), var(--azure-2-d));
+    --color-metric-memory: light-dark(var(--grape-l), var(--grape-d));
+    --color-metric-memory-2: light-dark(var(--grape-2-l), var(--grape-2-d));
+    --color-metric-gpu: light-dark(var(--lagoon-l), var(--lagoon-d));
+    --color-metric-gpu-2: light-dark(var(--lagoon-2-l), var(--lagoon-2-d));
+    --color-metric-disk: light-dark(var(--iris-l), var(--iris-d));
+    --color-metric-disk-2: light-dark(var(--iris-2-l), var(--iris-2-d));
+    --color-metric-network: light-dark(var(--rose-l), var(--rose-d));
+    /* the overview row (state split, mean latency, check rate, uptime); its own order, validated */
+    --color-metric-states: light-dark(var(--lagoon-l), var(--lagoon-d));
+    --color-metric-latency: light-dark(var(--iris-l), var(--iris-d));
+    --color-metric-checks: light-dark(var(--rose-l), var(--rose-d));
+    --color-metric-uptime: light-dark(var(--azure-l), var(--azure-d));
+    /* the brand teal (icon tile): the "a reading just arrived" glow on a quiet card */
+    --color-brand: light-dark(var(--lagoon-l), var(--lagoon-d));
 
     /* ── Type ─────────────────────────────────────────────────────────── */
     --font-sans: "Pretendard Variable", Pretendard, "Segoe UI Variable Text", "Segoe UI", "Malgun Gothic",
@@ -215,6 +263,7 @@
     --motion-fast: 120ms; /* hover/press feedback, badge crossfade */
     --motion-base: 200ms; /* menus, tooltips, toasts, route crossfade */
     --motion-slow: 360ms; /* dialogs, the notice, card reorder */
+    --motion-glide: 640ms; /* a live value moving to its next reading: rings, bars, rolling digits */
     --ease-out: cubic-bezier(0.23, 1, 0.32, 1); /* enter/exit */
     --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1); /* on-screen movement */
     --ease-hover: ease; /* color/opacity feedback */

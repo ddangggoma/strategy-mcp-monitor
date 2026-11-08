@@ -43,7 +43,7 @@ export function RollingNumber({ value, unit, decimals = 0, className }: RollingN
               <span
                 data-digit={ch}
                 // a new column rolls up from 0 to its digit (base.css digit-roll), later changes glide
-                className="digit-roll flex flex-col transition-transform duration-(--motion-slow) ease-out"
+                className="digit-roll flex flex-col transition-transform duration-(--motion-glide) ease-out"
                 style={{ transform: `translateY(-${d * 10}%)` }}
               >
                 {DIGITS.map((digit) => (
